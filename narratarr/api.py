@@ -942,7 +942,8 @@ async def apply_update(body: Update):
 
 # What listeners see of the settings: enough for the app to know what's set up, no addresses or keys.
 LISTENER_SETTINGS = (
-    "rd_configured", "ad_configured", "brave_configured", "prowlarr_configured", "usenet_configured", "torrent_configured",
+    "rd_configured", "ad_configured", "brave_configured", "prowlarr_configured", "torznab_configured",
+    "usenet_configured", "torrent_configured",
     "usenet_client", "torrent_client", "smart_search", "search_provider", "audible_region", "check_updates",
     "auto_search", "auto_search_hours",
 )

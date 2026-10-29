@@ -11,7 +11,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from narratarr import config, db
+from narratarr import api, config, db
 from narratarr.sources import torznab
 from narratarr.worker import Worker
 
@@ -184,3 +184,91 @@ async def test_pipeline_fetches_the_torrent_through_the_right_source(isolated_da
     assert "jackett_apikey=" in fake.fetched[0], fake.fetched[0]
     assert fake.added, "the torrent never reached the client"
     assert db.get(book["id"])["status"] == "completed", db.get(book["id"])["error"]
+
+
+# ---- the accounts model -------------------------------------------------------------------
+
+HOME = ("192.168.1.20", 50000)
+
+
+@pytest.fixture
+def accounts(monkeypatch):
+    """A real admin and a real listener, signed in through the actual middleware."""
+    from fastapi.testclient import TestClient
+    from narratarr import api, auth, users
+
+    auth._failures.clear()
+    monkeypatch.setattr(users, "_N", 2**10)  # fast hashing in tests
+    c = TestClient(api.app, client=HOME)
+    c.__enter__()
+    c.app.state.worker.poke = lambda: None
+    assert c.post("/api/auth/setup", json={"username": "admin", "password": "admin-pass"}).status_code == 200
+    made = c.post("/api/users", json={"username": "listener", "password": "listen-pass", "role": "listener"})
+    assert made.status_code == 200, made.text
+    yield c
+    c.__exit__(None, None, None)
+
+
+def as_role(client, username, password):
+    assert client.post("/api/auth/login", json={"username": username, "password": password}).status_code == 200
+    return client
+
+
+@pytest.mark.real_auth
+def test_settings_are_masked_for_an_admin_and_hidden_from_a_listener(accounts):
+    config.update({"torznab_url": BASE, "torznab_api_key": KEY, "torznab_categories": "3030"})
+
+    admin = as_role(accounts, "admin", "admin-pass").get("/api/settings").json()
+    assert admin["torznab_configured"] is True
+    assert KEY not in json.dumps(admin)
+    assert admin["torznab_api_key"].startswith("\u2022")  # masked, last four characters only
+
+    listener = as_role(accounts, "listener", "listen-pass").get("/api/settings").json()
+    assert KEY not in json.dumps(listener)
+    assert "torznab_url" not in listener and "torznab_api_key" not in listener
+    assert listener["torznab_configured"] is True  # so the request UI doesn't say to configure one
+
+
+@pytest.mark.real_auth
+def test_masked_key_round_trips_and_host_change_clears_it(accounts):
+    config.update({"torznab_url": BASE, "torznab_api_key": KEY})
+    masked = config.load().public()["torznab_api_key"]
+    config.update({"torznab_api_key": masked})  # what the browser posts back
+    assert config.load().torznab_api_key == KEY
+    config.update({"torznab_url": "http://elsewhere:9117/torznab/api"})
+    assert config.load().torznab_api_key == ""  # a key never follows the address to a new host
+
+
+@pytest.mark.real_auth
+def test_a_listener_cannot_reach_the_test_button_or_change_the_indexer(accounts):
+    as_role(accounts, "listener", "listen-pass")
+    assert accounts.post("/api/settings/test-torznab").status_code == 403
+    assert accounts.put("/api/settings", json={"torznab_url": "http://evil"}).status_code == 403
+
+
+@pytest.mark.real_auth
+def test_an_admin_can_reach_the_test_button(accounts, monkeypatch):
+    config.update({"torznab_url": BASE, "torznab_api_key": KEY})
+
+    class Stub:
+        def __init__(self, *a, **k):
+            pass
+
+        async def status(self):
+            return {"title": "Jackett", "book_search": True, "categories": 8}
+
+    monkeypatch.setattr(api, "Torznab", Stub)  # the gate is what is under test, not the network
+    as_role(accounts, "admin", "admin-pass")
+    got = accounts.post("/api/settings/test-torznab")
+    assert got.status_code == 200, got.text
+    assert got.json()["title"] == "Jackett"
+
+
+@pytest.mark.real_auth
+def test_sources_lists_torznab_without_leaking_its_address(accounts):
+    config.update({"torznab_url": BASE, "torznab_api_key": KEY})
+    as_role(accounts, "listener", "listen-pass")
+    listed = accounts.get("/api/sources").json()
+    assert "torznab" in [s["name"] for s in listed]
+    blob = json.dumps(listed)
+    assert KEY not in blob and "10.2.3.144:9117" not in blob
