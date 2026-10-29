@@ -2,6 +2,10 @@
 
 All notable changes to Narratarr. The app shows this under **Settings → Updates**.
 
+## Unreleased
+
+- **Torznab** as a search source: Jackett, Prowlarr's Torznab endpoint, or any indexer that speaks the protocol. Written against the protocol, not one vendor; the API key is stripped from every stored link whichever parameter name the indexer uses.
+
 ## 0.5.5 — 2026-10-29
 
 - **Accounts.** Everyone signs in now. Admins run settings, download clients, imports and users; listeners browse, request and listen. Each person keeps their own place in every book and their own Continue listening shelf. Add people under **Settings → Users**; everyone can change their own password from the account button in the sidebar.

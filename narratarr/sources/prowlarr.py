@@ -230,8 +230,13 @@ class Prowlarr:
         return {"version": info.get("version", ""), "indexers": len(enabled)}
 
 
-async def fetch(url: str, base: str, api_key: str, transport: httpx.AsyncBaseTransport | None = None):
-    """Download a release: ("magnet", uri) | ("torrent", bytes) | ("nzb", bytes)."""
+async def fetch(url: str, base: str, api_key: str, transport: httpx.AsyncBaseTransport | None = None,
+                who: str = "Prowlarr"):
+    """Download a release: ("magnet", uri) | ("torrent", bytes) | ("nzb", bytes).
+
+    `who` names the client in error messages, so a Torznab indexer failure doesn't tell the user
+    their Prowlarr is broken.
+    """
     if url.startswith("magnet:"):
         return "magnet", url
     target = with_key(url, base, api_key)
@@ -242,7 +247,7 @@ async def fetch(url: str, base: str, api_key: str, transport: httpx.AsyncBaseTra
             try:
                 resp = await client.get(target)
             except httpx.HTTPError:
-                raise ProwlarrError("Couldn't reach Prowlarr to fetch this release.")
+                raise ProwlarrError(f"Couldn't reach {who} to fetch this release.")
             if resp.is_redirect:
                 location = resp.headers.get("location", "")
                 if location.startswith("magnet:"):
@@ -250,7 +255,7 @@ async def fetch(url: str, base: str, api_key: str, transport: httpx.AsyncBaseTra
                 target = str(resp.url.join(location))
                 continue
             if resp.status_code == 401:
-                raise ProwlarrError("Prowlarr rejected the API key. Check it in Settings.")
+                raise ProwlarrError(f"{who.capitalize()} rejected the API key. Check it in Settings.")
             if resp.status_code >= 400:
                 raise ProwlarrError(f"The indexer wouldn't hand over this release ({resp.status_code}). Try another one.")
             body = resp.content

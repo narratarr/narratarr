@@ -4,8 +4,9 @@ from .audible import AudibleCatalog
 from .audiobookbay import AudiobookBay
 from .base import Category, Details, Listing, Page, Source
 from .prowlarr import Prowlarr, ProwlarrError
+from .torznab import Torznab, TorznabError
 
-ORDER = ("librivox", "oldtimeradio", "audiobookbay", "prowlarr", "audible")
+ORDER = ("librivox", "oldtimeradio", "audiobookbay", "prowlarr", "torznab", "audible")
 
 
 def all_sources() -> dict[str, Source]:
@@ -15,6 +16,7 @@ def all_sources() -> dict[str, Source]:
         "librivox": librivox(),
         "oldtimeradio": oldtimeradio(),
         "prowlarr": Prowlarr(s.prowlarr_url, s.prowlarr_api_key, s.prowlarr_categories),
+        "torznab": Torznab(s.torznab_url, s.torznab_api_key, s.torznab_categories),
         "audible": AudibleCatalog(),
     }
 
@@ -35,6 +37,6 @@ def source_for_url(url: str) -> Source | None:
 
 
 __all__ = [
-    "ArchiveSource", "AudibleCatalog", "AudiobookBay", "Category", "Details", "Listing", "Page", "Prowlarr", "ProwlarrError", "Source",
+    "ArchiveSource", "AudibleCatalog", "AudiobookBay", "Category", "Details", "Listing", "Page", "Prowlarr", "ProwlarrError", "Source", "Torznab", "TorznabError",
     "all_sources", "get_source", "source_for_url",
 ]

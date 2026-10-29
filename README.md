@@ -73,7 +73,7 @@ No other app needed. You get chapters (including the chapter markers inside `.m4
 - **Continue listening** shelf and finished-book tracking
 - Looks at home on a **phone**: add it to your home screen and listen anywhere on your Wi-Fi
 - **Light and dark** themes that follow your system
-- Plugs into your **\*arr stack**: **Prowlarr** for search; **SABnzbd** or **NZBGet** for Usenet; **qBittorrent**, **Transmission**, **Deluge** or Real-Debrid for torrents
+- Plugs into your **\*arr stack**: **Prowlarr** (or any **Torznab** indexer, such as **Jackett**) for search; **SABnzbd** or **NZBGet** for Usenet; **qBittorrent**, **Transmission**, **Deluge** or Real-Debrid for torrents
 - **Wanted list** that fills itself: follow **authors and series** and new releases are found and downloaded automatically
 - **Import** the audiobooks you already have, or point it at an existing Audiobookshelf library
 - **Audiobookshelf** in a click: Narratarr finds your server (on this machine, in Docker, across your network, or at a public address), you sign in once, and it rescans after every download
@@ -236,6 +236,7 @@ flowchart LR
 | **Old-Time Radio** | ~9,000 classic radio dramas and comedies, 1930s–60s | Free, direct from the Internet Archive. Some full series are several GB, and the size is shown before you download |
 | **AudiobookBay** *(optional)* | Torrent listings | Via Real-Debrid (paid account required) |
 | **Prowlarr** *(optional)* | Whatever indexers you've added to your own [Prowlarr](https://prowlarr.com) | Usenet via SABnzbd or NZBGet; torrents via Real-Debrid, qBittorrent, Transmission or Deluge |
+| **Torznab** *(optional)* | Any indexer that speaks Torznab: [Jackett](https://github.com/Jackett/Jackett), Prowlarr's Torznab endpoint, or a standalone indexer. Give it the address ending `/torznab/api` and the key | Same as Prowlarr |
 | **Audible catalog** *(with Prowlarr)* | Every audiobook in Audible's store, with covers, series and release dates | Nothing downloads from Audible: books go to **Wanted** and Narratarr finds them on your indexers (or free on LibriVox) |
 
 Narratarr deliberately sticks to the Internet Archive's **curated** LibriVox and Old-Time Radio collections. The Archive's general uploads include copyrighted audiobooks posted without permission, so those are left out.
@@ -359,7 +360,7 @@ Narratarr has no telemetry and phones nobody. These are the only outside service
 | **Apple's audiobook search** (itunes.apple.com) | What you type in the search box, and Prowlarr release names (to work out the real title) | Only while **Smart search** is on |
 | **Audible's catalog** and **Audnexus** (api.audnex.us) | Your searches on the Audible tab, and the authors and series you follow | Using the Audible tab; following |
 | **Brave Search** | Your searches, with your Brave key | Only if you turn it on |
-| **Real-Debrid**, **Prowlarr**, **SABnzbd**, **NZBGet**, **qBittorrent**, **Transmission**, **Deluge**, **Audiobookshelf** | Whatever each needs, with the key you entered for it | Only the ones you set up |
+| **Real-Debrid**, **Prowlarr**, **SABnzbd**, **NZBGet**, **qBittorrent**, **Transmission**, **Deluge**, **Torznab**, **Audiobookshelf** | Whatever each needs, with the key you entered for it | Only the ones you set up |
 | **Cover image hosts** (archive.org, Amazon's image CDN, your indexers) | Nothing but the image request, with no referrer | Your browser loads cover art directly |
 | **GitHub** (api.github.com) | Nothing but the request for the latest release | Once a day, for the update badge. Off under Settings → Updates |
 

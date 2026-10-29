@@ -991,7 +991,7 @@ function Authors(root, param) {
     ${!st.prowlarr_configured ? `
       <div class="banner">
         <div class="ico">${I.key}</div>
-        <div><strong>Connect Prowlarr so Narratarr can find these books</strong><p>You can follow authors now. Their books will wait in Wanted until Prowlarr is set up.</p></div>
+        <div><strong>Connect Prowlarr or a Torznab indexer so Narratarr can find these books</strong><p>You can follow authors now. Their books will wait in Wanted until Prowlarr or a Torznab indexer is set up.</p></div>
         <a class="btn" href="#/settings">Open Settings</a>
       </div>` : ""}
     <div class="search-wrap follow-search">
@@ -1338,6 +1338,26 @@ function Settings(root) {
       </section>
 
       <section class="panel">
+        <div><h3>Torznab</h3><p class="desc">Optional. Any indexer that speaks Torznab: <b>Jackett</b>, Prowlarr’s own Torznab endpoint, or a standalone indexer. Use this instead of Prowlarr when Jackett is what you run. Results download through your Usenet or torrent client below.</p></div>
+        <div class="body">
+          <div class="field"><label for="torznab_url">Torznab address</label><input class="input mono" id="torznab_url" name="torznab_url" placeholder="http://localhost:9117/api/v2.0/indexers/all/results/torznab/api" value="${esc(s.torznab_url)}" /><span class="hint">The full address ending in <code>/torznab/api</code>, not the Jackett dashboard.</span></div>
+          <div class="field">
+            <label for="torznab_api_key">API key</label>
+            <div class="input-row">
+              <input class="input mono" id="torznab_api_key" name="torznab_api_key" type="password" placeholder="Jackett → the key at the top of its dashboard" value="${esc(s.torznab_api_key)}" />
+              <button class="btn" type="button" id="test-torznab">Test</button>
+            </div>
+            <div id="torznab-result"></div>
+          </div>
+          <div class="field">
+            <label for="torznab_categories">Categories</label>
+            <input class="input mono" id="torznab_categories" name="torznab_categories" value="${esc(s.torznab_categories)}" style="max-width:220px" />
+            <span class="hint"><code>3030</code> is Audio › Audiobook. Separate several with commas.</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
         <div><h3>Torrents</h3><p class="desc">How torrents download. Real-Debrid fetches them for you, so nothing is shared from your computer. qBittorrent, Transmission and Deluge download on your own machine and keep seeding, which makes your IP address visible to other peers; many people run them behind a VPN.</p></div>
         <div class="body">
           <div class="field">
@@ -1462,7 +1482,7 @@ function Settings(root) {
         <div class="body">
           <div class="field">
             <label class="switch"><input type="checkbox" name="auto_search" ${s.auto_search ? "checked" : ""}><i></i>Search for Wanted books automatically</label>
-            <span class="hint">Uses Prowlarr. A few books are checked at a time to stay within your indexers’ API limits.</span>
+            <span class="hint">Uses Prowlarr and Torznab. A few books are checked at a time to stay within your indexers’ API limits.</span>
           </div>
           <div class="field">
             <label for="auto_search_hours">Look again every</label>
@@ -1649,7 +1669,7 @@ function Settings(root) {
     form.rd_api_key.value = state.settings.rd_api_key;
     form.audiobookshelf_token.value = state.settings.audiobookshelf_token;
     form.brave_api_key.value = state.settings.brave_api_key;
-    for (const key of ["prowlarr_api_key", "sabnzbd_api_key", "nzbget_password", "qbittorrent_password", "transmission_password", "deluge_password"]) {
+    for (const key of ["prowlarr_api_key", "torznab_api_key", "sabnzbd_api_key", "nzbget_password", "qbittorrent_password", "transmission_password", "deluge_password"]) {
       form[key].value = state.settings[key];
     }
     state.sources = await api("/api/sources"); // the Prowlarr tab appears once it's set up
@@ -1697,6 +1717,7 @@ function Settings(root) {
     };
   };
   tester("prowlarr", (r) => `Connected to Prowlarr ${esc(r.version)} · <b>${r.indexers}</b> indexer${r.indexers === 1 ? "" : "s"} enabled`);
+  tester("torznab", (r) => `Connected to ${esc(r.title)} · book search ${r.book_search ? "<b>available</b>" : "not offered"} · <b>${r.categories}</b> categories`);
   $$("[data-test-client]", root).forEach((btn) => {
     btn.onclick = async () => {
       const name = btn.dataset.testClient;
@@ -1951,7 +1972,7 @@ function wantedNote(lib) {
   const st = state.settings || {};
   const out = Date.parse(lib.released || "");
   if (out > Date.now()) return `Comes out ${releaseLabel(lib.released, true).replace(/^Out /, "")}. Narratarr will start looking then.`;
-  if (!st.prowlarr_configured) return "Connect Prowlarr in Settings so Narratarr can look for this book.";
+  if (!st.prowlarr_configured && !st.torznab_configured) return "Connect Prowlarr or a Torznab indexer in Settings so Narratarr can look for this book.";
   const last = lib.last_searched ? `Last looked ${ago(lib.last_searched)}. ${lib.search_note || ""}` : "";
   const next = st.auto_search ? `Narratarr looks again every ${st.auto_search_hours} hours.` : "Automatic search is off.";
   return `${last} ${next}`.trim();
@@ -2028,7 +2049,7 @@ function releasesHTML(res) {
   if (!res.items.length) {
     return `<div class="releases"><h4>Releases</h4><p class="muted">Nothing on your indexers or LibriVox looks like this book yet.</p></div>`;
   }
-  const label = (r) => r.source === "prowlarr" ? r.indexer || "Prowlarr" : sourceInfo(r.source).label;
+  const label = (r) => r.source === "prowlarr" || r.source === "torznab" ? r.indexer || sourceInfo(r.source).label : sourceInfo(r.source).label;
   return `<div class="releases">
     <h4>Releases <small>${res.items.length} found · best matches first</small></h4>
     ${res.items.map((r, i) => {

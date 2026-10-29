@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:torznab="http://torznab.com/schemas/2015/feed">
+  <channel>
+    <atom:link href="http://10.2.3.144:9117/" rel="self" type="application/rss+xml" />
+    <title>AggregateSearch</title>
+    <description>This feed includes all configured trackers</description>
+    <link>http://127.0.0.1/</link>
+    <language>en-US</language>
+    <category>search</category>
+    <item>
+      <title>Andy Weir - Project Hail Mary</title>
+      <guid>magnet:?xt=urn:btih:0F54898DC1B8E49D96E32827377F651EA6C935AF&amp;dn=Andy+Weir+-+Project+Hail+Mary&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.stealth.si%3A80%2Fannounce&amp;tr=udp%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&amp;tr=udp%3A%2F%2Fvito-tracker.space%3A6969%2Fannounce&amp;tr=udp%3A%2F%2Fvito-tracker.duckdns.org%3A6969%2Fannounce&amp;tr=udp%3A%2F%2Ftracker.theoks.net%3A6969%2Fannounce&amp;tr=udp%3A%2F%2Ftracker.srv00.com%3A6969%2Fannounce&amp;tr=udp%3A%2F%2Ftracker.qu.ax%3A6969%2Fannounce&amp;tr=udp%3A%2F%2Ftracker.corpscorp.online%3A80%2Fannounce</guid>
+      <jackettindexer id="thepiratebay">The Pirate Bay</jackettindexer>
+      <type>public</type>
+      <comments>https://thepiratebay.org/description.php?id=45465717</comments>
+      <pubDate>Sun, 16 May 2021 11:33:22 +0100</pubDate>
+      <size>933905211</size>
+      <files>30</files>
+      <description>Uploader: SeldomSeeder&lt;br&gt;Andy Weir - Project Hail Mary</description>
+      <link>magnet:?xt=urn:btih:0F54898DC1B8E49D96E32827377F651EA6C935AF&amp;dn=Andy+Weir+-+Project+Hail+Mary&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.stealth.si%3A80%2Fannounce&amp;tr=udp%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&amp;tr=udp%3A%2F%2Fvito-tracker.space%3A6969%2Fannounce&amp;tr=udp%3A%2F%2Fvito-tracker.duckdns.org%3A6969%2Fannounce&amp;tr=udp%3A%2F%2Ftracker.theoks.net%3A6969%2Fannounce&amp;tr=udp%3A%2F%2Ftracker.srv00.com%3A6969%2Fannounce&amp;tr=udp%3A%2F%2Ftracker.qu.ax%3A6969%2Fannounce&amp;tr=udp%3A%2F%2Ftracker.corpscorp.online%3A80%2Fannounce</link>
+      <category>3030</category>
+      <category>100102</category>
+      <enclosure url="magnet:?xt=urn:btih:0F54898DC1B8E49D96E32827377F651EA6C935AF&amp;dn=Andy+Weir+-+Project+Hail+Mary&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.stealth.si%3A80%2Fannounce&amp;tr=udp%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&amp;tr=udp%3A%2F%2Fvito-tracker.space%3A6969%2Fannounce&amp;tr=udp%3A%2F%2Fvito-tracker.duckdns.org%3A6969%2Fannounce&amp;tr=udp%3A%2F%2Ftracker.theoks.net%3A6969%2Fannounce&amp;tr=udp%3A%2F%2Ftracker.srv00.com%3A6969%2Fannounce&amp;tr=udp%3A%2F%2Ftracker.qu.ax%3A6969%2Fannounce&amp;tr=udp%3A%2F%2Ftracker.corpscorp.online%3A80%2Fannounce" length="933905211" type="application/x-bittorrent" />
+      <torznab:attr name="category" value="3030" />
+      <torznab:attr name="category" value="100102" />
+      <torznab:attr name="seeders" value="338" />
+      <torznab:attr name="peers" value="341" />
+      <torznab:attr name="infohash" value="0F54898DC1B8E49D96E32827377F651EA6C935AF" />
+      <torznab:attr name="magneturl" value="magnet:?xt=urn:btih:0F54898DC1B8E49D96E32827377F651EA6C935AF&amp;dn=Andy+Weir+-+Project+Hail+Mary&amp;tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce&amp;tr=udp%3A%2F%2Fopen.stealth.si%3A80%2Fannounce&amp;tr=udp%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&amp;tr=udp%3A%2F%2Fvito-tracker.space%3A6969%2Fannounce&amp;tr=udp%3A%2F%2Fvito-tracker.duckdns.org%3A6969%2Fannounce&amp;tr=udp%3A%2F%2Ftracker.theoks.net%3A6969%2Fannounce&amp;tr=udp%3A%2F%2Ftracker.srv00.com%3A6969%2Fannounce&amp;tr=udp%3A%2F%2Ftracker.qu.ax%3A6969%2Fannounce&amp;tr=udp%3A%2F%2Ftracker.corpscorp.online%3A80%2Fannounce" />
+      <torznab:attr name="downloadvolumefactor" value="0" />
+      <torznab:attr name="uploadvolumefactor" value="1" />
+    </item>
+    <item>
+      <title>Project Hail Mary - Andy Weir [MP3] [128 Kbps]</title>
+      <guid>https://audiobookbay.lu/abss/projectt-hail-mary-mp3-andy-weir/</guid>
+      <jackettindexer id="audiobookbay">AudioBook Bay</jackettindexer>
+      <type>public</type>
+      <comments>https://audiobookbay.lu/abss/projectt-hail-mary-mp3-andy-weir/</comments>
+      <pubDate>Mon, 31 May 2021 01:00:00 +0100</pubDate>
+      <size>932184064</size>
+      <description />
+      <link>http://10.2.3.144:9117/dl/audiobookbay/?jackett_apikey=REDACTED-JACKETT-KEY&amp;path=Q2ZESjhPRTZhVjFIelBST2hQdlFNN1Ywclh4ODVhcllUWkttVEtKQVNpSDE3YUJ5d2xrMGJiR3R2c1h5QjBhT3VubGNBb1ljSzBELVFyY3Y5RnVMQS1ndDJzNWtYY1pTYTFDa01BTVFKRzBaZ1IwRzk1N3pma1JnbzFWdUp4VFI5WFhnWTBGQUJMRWRtXzd0Skx4cFJlRzJ4WkpnTmg3dW9nTXc3Nzg3TGhMZTNmdVAtT0gxQm1UWFh3ZTNiQk5janFuTVVn&amp;file=Project+Hail+Mary+-+Andy+Weir+%5BMP3%5D+%5B128+Kbps%5D</link>
+      <category>3030</category>
+      <enclosure url="http://10.2.3.144:9117/dl/audiobookbay/?jackett_apikey=REDACTED-JACKETT-KEY&amp;path=Q2ZESjhPRTZhVjFIelBST2hQdlFNN1Ywclh4ODVhcllUWkttVEtKQVNpSDE3YUJ5d2xrMGJiR3R2c1h5QjBhT3VubGNBb1ljSzBELVFyY3Y5RnVMQS1ndDJzNWtYY1pTYTFDa01BTVFKRzBaZ1IwRzk1N3pma1JnbzFWdUp4VFI5WFhnWTBGQUJMRWRtXzd0Skx4cFJlRzJ4WkpnTmg3dW9nTXc3Nzg3TGhMZTNmdVAtT0gxQm1UWFh3ZTNiQk5janFuTVVn&amp;file=Project+Hail+Mary+-+Andy+Weir+%5BMP3%5D+%5B128+Kbps%5D" length="932184064" type="application/x-bittorrent" />
+      <torznab:attr name="category" value="3030" />
+      <torznab:attr name="genre" value="Adults, Adventure, Bestsellers, Sci-Fi" />
+      <torznab:attr name="seeders" value="1" />
+      <torznab:attr name="peers" value="1" />
+      <torznab:attr name="coverurl" value="http://10.2.3.144:9117/img/audiobookbay/?jackett_apikey=REDACTED-JACKETT-KEY&amp;path=Q2ZESjhPRTZhVjFIelBST2hQdlFNN1Ywclh6U3JvSXNXQUFYbjNnTERMZ2xtal8zcWtqTm5EQnZVTU5iSmI3dER0dUJhUlNWVWpCOU9lLUhKazVETFpRdFlkQkMyVTE5enRZWDhGemhCUnVfbmd6TkdPdDNYUXFhV2p5ekhVZTBvUkpVcWtQQ1BvR3dTN3o3R0dCMmRfeTNIcTlLUHN2c1ZIUlhxTXg5MF9tOVlhMzBNSnJialpZZlVSYXVXeXIzSURpVXI2bXV2UXhVdTkxMGpaNzh4QUJzRkVN&amp;file=poster" />
+      <torznab:attr name="downloadvolumefactor" value="0" />
+      <torznab:attr name="uploadvolumefactor" value="1" />
+    </item>
+    <item>
+      <title>Project Hail Mary - Andy Weir [MP3]</title>
+      <guid>https://audiobookbay.lu/abss/prjojecnt-hail-mary-andy-weir/</guid>
+      <jackettindexer id="audiobookbay">AudioBook Bay</jackettindexer>
+      <type>public</type>
+      <comments>https://audiobookbay.lu/abss/prjojecnt-hail-mary-andy-weir/</comments>
+      <pubDate>Tue, 04 May 2021 01:00:00 +0100</pubDate>
+      <size>926374952</size>
+      <description />
+      <link>http://10.2.3.144:9117/dl/audiobookbay/?jackett_apikey=REDACTED-JACKETT-KEY&amp;path=Q2ZESjhPRTZhVjFIelBST2hQdlFNN1Ywclh4dTdVN3A0Yzh0N1VHam9YMTlOVVdkOXNEWm5NYXBlcksycHRKTzdsMGtrYzFuNWZWdW05YXZKM290VV9STkJ4VDBObGZsN2JtZW4zUDNiazlvRGo1ZElIS3JxS0dSY09DVDctY3cwcGNwV3QyMlJpbEtybVN1ZGVzUkh0Ymw2akVkTUstM3libjlkbzN5ajJ6R3lWaC1zT2lKMHFNS2dFVjVkcUJCUHJwR2ln&amp;file=Project+Hail+Mary+-+Andy+Weir+%5BMP3%5D</link>
+      <category>3030</category>
+      <enclosure url="http://10.2.3.144:9117/dl/audiobookbay/?jackett_apikey=REDACTED-JACKETT-KEY&amp;path=Q2ZESjhPRTZhVjFIelBST2hQdlFNN1Ywclh4dTdVN3A0Yzh0N1VHam9YMTlOVVdkOXNEWm5NYXBlcksycHRKTzdsMGtrYzFuNWZWdW05YXZKM290VV9STkJ4VDBObGZsN2JtZW4zUDNiazlvRGo1ZElIS3JxS0dSY09DVDctY3cwcGNwV3QyMlJpbEtybVN1ZGVzUkh0Ymw2akVkTUstM3libjlkbzN5ajJ6R3lWaC1zT2lKMHFNS2dFVjVkcUJCUHJwR2ln&amp;file=Project+Hail+Mary+-+Andy+Weir+%5BMP3%5D" length="926374952" type="application/x-bittorrent" />
+      <torznab:attr name="category" value="3030" />
+      <torznab:attr name="genre" value="Sci-Fi, Science" />
+      <torznab:attr name="seeders" value="1" />
+      <torznab:attr name="peers" value="1" />
+      <torznab:attr name="coverurl" value="http://10.2.3.144:9117/img/audiobookbay/?jackett_apikey=REDACTED-JACKETT-KEY&amp;path=Q2ZESjhPRTZhVjFIelBST2hQdlFNN1Ywclh3MXcxT2RhVldSTVMzQ0lfY29KVFdDSVF6WlVUX1pWZkNqZWIyZnZUWW9yemZrT2NxX1dwdlg0ekhGaU1JWHdNZW9kR2xmZnVWY3ktZDU3WXZ5TDFScDdFTlBaOG9aLUROTjQ5NjVRNnhIcko3QXJJVm5KQlotTEpnZDBpMUFZZFJJejAzdlJhYWJEX0NEQ1dtVGR4YTJCazRUWnFSQm5qcTNfMlE0ZHhHaFJHUUlENkp3QVhoYUctem9uUGE4NWIxZkh1RXdfTkdQMWNoWS0xa0d6WmUy&amp;file=poster" />
+      <torznab:attr name="downloadvolumefactor" value="0" />
+      <torznab:attr name="uploadvolumefactor" value="1" />
+    </item>
+    <item>
+      <title>Project Hail Mary - Andy Weir [M4B] [128 Kbps]</title>
+      <guid>https://audiobookbay.lu/abss/proaject-hail-mary-andy-weir/</guid>
+      <jackettindexer id="audiobookbay">AudioBook Bay</jackettindexer>
+      <type>public</type>
+      <comments>https://audiobookbay.lu/abss/proaject-hail-mary-andy-weir/</comments>
+      <pubDate>Sun, 14 Nov 2021 00:00:00 +0000</pubDate>
+      <size>924655288</size>
+      <description />
+      <link>http://10.2.3.144:9117/dl/audiobookbay/?jackett_apikey=REDACTED-JACKETT-KEY&amp;path=Q2ZESjhPRTZhVjFIelBST2hQdlFNN1Ywclh3ZDJUcXpQai1kdWpOV2VrdzBCTGpzRFBMN0xkb3diM0hNdXdrZEUwQkFoUFYxcjBmcFE0dEUwOThLWkVyaFNxWDlQbnhQanJlMjRFSGZJcWhqZWRHQmZXU1BDU1VwNXdXTDlXZEw2M0U4UDVHUTlDUV9CV2t0WlJIemlHSXd3YVlfT0Njelk5eTBYQ3RzOU9xTUVoQnpwQXlhMEw4dkJ1WTZJdmtfa3hyRTB3&amp;file=Project+Hail+Mary+-+Andy+Weir+%5BM4B%5D+%5B128+Kbps%5D</link>
+      <category>3030</category>
+      <enclosure url="http://10.2.3.144:9117/dl/audiobookbay/?jackett_apikey=REDACTED-JACKETT-KEY&amp;path=Q2ZESjhPRTZhVjFIelBST2hQdlFNN1Ywclh3ZDJUcXpQai1kdWpOV2VrdzBCTGpzRFBMN0xkb3diM0hNdXdrZEUwQkFoUFYxcjBmcFE0dEUwOThLWkVyaFNxWDlQbnhQanJlMjRFSGZJcWhqZWRHQmZXU1BDU1VwNXdXTDlXZEw2M0U4UDVHUTlDUV9CV2t0WlJIemlHSXd3YVlfT0Njelk5eTBYQ3RzOU9xTUVoQnpwQXlhMEw4dkJ1WTZJdmtfa3hyRTB3&amp;file=Project+Hail+Mary+-+Andy+Weir+%5BM4B%5D+%5B128+Kbps%5D" length="924655288" type="application/x-bittorrent" />
+      <torznab:attr name="category" value="3030" />
+      <torznab:attr name="genre" value="Sci-Fi" />
+      <torznab:attr name="seeders" value="1" />
+      <torznab:attr name="peers" value="1" />
+      <torznab:attr name="coverurl" value="http://10.2.3.144:9117/img/audiobookbay/?jackett_apikey=REDACTED-JACKETT-KEY&amp;path=Q2ZESjhPRTZhVjFIelBST2hQdlFNN1Ywclh4UW1MY1lJNlpHc3RWckhROVlRSHV1WUJ1aFJNdXNubmxfR2w0ckZpM2F1SEltSmxoVFpSMW9Tck43SFMwcVJyd0ZYMlpRUzVUYjVLRkE2Zm9iemtWRVBjd2NEQUpEWDFqTURzUi1BVGFSYzFoVmZuUlJ4ZDJrNFBnWk9xaW1qWlJPWTFTZmNOWWxVcEtrdHFVLVBocEl4amxHREUzNmI1TW1pY1F3NlVMWjRR&amp;file=poster" />
+      <torznab:attr name="downloadvolumefactor" value="0" />
+      <torznab:attr name="uploadvolumefactor" value="1" />
+    </item>
+  </channel>
+</rss>

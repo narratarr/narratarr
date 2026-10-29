@@ -35,6 +35,9 @@ class Settings:
     prowlarr_url: str = ""
     prowlarr_api_key: str = ""
     prowlarr_categories: str = "3030"  # Newznab/Torznab "Audio/Audiobook"
+    torznab_url: str = ""
+    torznab_api_key: str = ""
+    torznab_categories: str = "3030"  # Newznab/Torznab "Audio/Audiobook"
     sabnzbd_url: str = ""
     sabnzbd_api_key: str = ""
     sabnzbd_category: str = ""
@@ -73,6 +76,7 @@ class Settings:
         d["rd_configured"] = bool(self.rd_api_key)
         d["brave_configured"] = bool(self.brave_api_key)
         d["prowlarr_configured"] = bool(self.prowlarr_url and self.prowlarr_api_key)
+        d["torznab_configured"] = bool(self.torznab_url and self.torznab_api_key)
         d["sabnzbd_configured"] = bool(self.sabnzbd_url and self.sabnzbd_api_key)
         d["nzbget_configured"] = bool(self.nzbget_url)
         d["qbittorrent_configured"] = bool(self.qbittorrent_url)
@@ -85,7 +89,7 @@ class Settings:
 
 SECRETS = (
     "rd_api_key", "audiobookshelf_token", "brave_api_key", "prowlarr_api_key", "sabnzbd_api_key",
-    "nzbget_password", "qbittorrent_password", "transmission_password", "deluge_password",
+    "nzbget_password", "qbittorrent_password", "transmission_password", "deluge_password", "torznab_api_key",
 )
 CHOICES = {
     "search_provider": ("audiobookbay", "brave"),
@@ -97,6 +101,7 @@ CHOICES = {
 # saved key can never be sent to a machine the user didn't enter it for.
 SERVICE_SECRETS = {
     "prowlarr_url": ("prowlarr_api_key",),
+    "torznab_url": ("torznab_api_key",),
     "sabnzbd_url": ("sabnzbd_api_key",),
     "nzbget_url": ("nzbget_password",),
     "qbittorrent_url": ("qbittorrent_password",),
