@@ -2,6 +2,11 @@
 
 All notable changes to Narratarr. The app shows this under **Settings → Updates**.
 
+## 0.5.6 — 2026-10-29
+
+- **Audiobookshelf setup guide.** Settings → Audiobookshelf → *Setup guide* asks where Audiobookshelf runs (this machine or another) and how it's installed (Docker or directly), guesses both from what Narratarr can see, and shows the exact steps with your own folders filled in and a Copy button on every command. It ends with **Check now**, which asks Audiobookshelf to rescan and tells you how many of your books it can see, and which are missing.
+- When Narratarr and Audiobookshelf share a server but talk over its public address, the guide suggests reconnecting through the machine itself, so Narratarr's key stays off the internet.
+
 ## 0.5.5 — 2026-10-29
 
 - **Accounts.** Everyone signs in now. Admins run settings, download clients, imports and users; listeners browse, request and listen. Each person keeps their own place in every book and their own Continue listening shelf. Add people under **Settings → Users**; everyone can change their own password from the account button in the sidebar.

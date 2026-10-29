@@ -940,3 +940,136 @@ body.gated .sidebar, body.gated .main { display: none; }
   .user-row { grid-template-columns: 34px 1fr; }
   .user-row .tools { grid-column: 1 / -1; justify-content: flex-end; }
 }
+
+
+/* ---- Audiobookshelf setup guide ------------------------------------------------ */
+
+.guide-link { display: flex; align-items: center; gap: 12px; width: 100%; margin-top: 18px; padding: 12px 14px; border-radius: 14px; border: 1px solid color-mix(in oklab, var(--accent) 30%, transparent); background: color-mix(in oklab, var(--accent) 8%, transparent); text-align: left; cursor: pointer; transition: background 0.2s, border-color 0.2s, transform 0.2s var(--ease); }
+.guide-link:hover { background: color-mix(in oklab, var(--accent) 14%, transparent); border-color: color-mix(in oklab, var(--accent) 50%, transparent); transform: translateY(-1px); }
+.guide-link svg { width: 22px; height: 22px; flex: none; fill: none; stroke: var(--accent); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.guide-link span { display: grid; gap: 2px; }
+.guide-link b { font-size: 13.5px; font-weight: 600; color: var(--text); }
+.guide-link small { font-size: 12px; color: var(--text-3); line-height: 1.35; }
+
+.modal.guide { position: relative; width: min(720px, 100%); max-height: calc(100vh - 32px); overflow-y: auto; overscroll-behavior: contain; padding: 30px 32px 32px; }
+.modal.guide h3 { font-size: 28px; margin-top: 6px; letter-spacing: -0.01em; }
+.guide-lede { max-width: 56ch; font-size: 14.5px; }
+.guide-close { position: absolute; top: 18px; right: 18px; width: 36px; height: 36px; display: grid; place-items: center; border: 0; border-radius: 50%; background: var(--surface-2); color: var(--text-2); cursor: pointer; transition: background 0.2s, color 0.2s; }
+.guide-close:hover { background: var(--surface-3); color: var(--text); }
+.guide-close svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; }
+.guide-loading { display: grid; place-items: center; padding: 48px 0; color: var(--text-3); }
+.guide-wait { margin: 22px 0 0; color: var(--text-3); font-size: 13.5px; text-align: center; }
+
+.guide-q { margin-top: 26px; }
+.q-label { display: block; margin-bottom: 10px; font-size: 12px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-3); }
+.choices { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.choice { position: relative; display: flex; align-items: center; gap: 14px; padding: 14px 16px; border-radius: 16px; border: 1px solid var(--border); background: var(--surface); text-align: left; cursor: pointer; transition: border-color 0.2s, background 0.2s, box-shadow 0.25s var(--ease), transform 0.2s var(--ease); }
+.choice:hover { border-color: var(--border-strong); background: var(--surface-2); }
+.choice:active { transform: scale(0.985); }
+.choice.on { border-color: color-mix(in oklab, var(--accent) 70%, transparent); background: color-mix(in oklab, var(--accent) 9%, transparent); box-shadow: 0 0 0 4px color-mix(in oklab, var(--accent) 12%, transparent); }
+.choice-icon { width: 42px; height: 42px; flex: none; display: grid; place-items: center; border-radius: 12px; background: var(--surface-2); color: var(--text-2); transition: background 0.2s, color 0.2s; }
+.choice.on .choice-icon { background: var(--accent-grad); color: var(--accent-ink); }
+.choice-icon svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.choice-text { display: grid; gap: 2px; min-width: 0; }
+.choice-text b { font-size: 14.5px; font-weight: 600; color: var(--text); }
+.choice-text small { font-size: 12.5px; color: var(--text-3); line-height: 1.35; }
+.guess { position: absolute; top: -9px; right: 12px; padding: 2px 8px; border-radius: 999px; font: 600 10.5px/1.6 var(--sans); font-style: normal; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ok); background: var(--bg-raised); border: 1px solid color-mix(in oklab, var(--ok) 40%, transparent); }
+
+/* The picture of the idea: one folder, seen by both apps. */
+.bridge { display: grid; grid-template-columns: minmax(0, 1fr) 96px minmax(0, 1fr); align-items: start; margin-top: 28px; padding: 22px 20px; border-radius: 20px; border: 1px solid var(--border); background:
+  radial-gradient(120% 140% at 0% 0%, color-mix(in oklab, var(--accent) 9%, transparent), transparent 55%),
+  radial-gradient(120% 140% at 100% 100%, color-mix(in oklab, var(--info) 8%, transparent), transparent 55%), var(--surface); animation: rise 0.5s var(--ease) backwards; }
+.bridge .end { display: grid; justify-items: center; gap: 6px; text-align: center; min-width: 0; }
+.end-icon { width: 46px; height: 46px; display: grid; place-items: center; border-radius: 14px; background: var(--surface-3); margin-bottom: 4px; }
+.end-icon img { width: 46px; height: 46px; border-radius: 14px; box-shadow: 0 8px 22px -8px rgba(236, 111, 85, 0.6); }
+.end-icon.abs { color: var(--info); background: color-mix(in oklab, var(--info) 14%, transparent); }
+.end-icon svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.bridge small { font-size: 12px; color: var(--text-3); }
+.bridge code { max-width: 100%; font: 12.5px/1.4 var(--mono); color: var(--text); padding: 4px 9px; border-radius: 8px; background: var(--surface-2); overflow-wrap: anywhere; }
+.link { position: relative; height: 46px; display: grid; place-items: center; }
+.link .line { position: absolute; left: 4px; right: 4px; top: 50%; height: 2px; border-radius: 2px; background: repeating-linear-gradient(90deg, var(--accent) 0 6px, transparent 6px 12px); background-size: 24px 2px; animation: flow 1.2s linear infinite; opacity: 0.8; }
+.link .mid { position: relative; width: 34px; height: 34px; display: grid; place-items: center; border-radius: 50%; background: var(--bg-raised); border: 1px solid color-mix(in oklab, var(--accent) 45%, transparent); color: var(--accent); }
+.link .mid svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+.link.broken .line { background: repeating-linear-gradient(90deg, var(--text-3) 0 6px, transparent 6px 12px); animation: none; opacity: 0.5; }
+.link.broken .mid { color: var(--err); border-color: color-mix(in oklab, var(--err) 45%, transparent); }
+@keyframes flow { to { background-position: 24px 0; } }
+.bridge-note { margin: 10px 4px 0 !important; font-size: 13px; color: var(--text-3) !important; text-align: center; }
+.bridge-note code, .step-body code, .verdict code, .guide-alt code { font: 12px var(--mono); color: var(--text); background: var(--surface-2); padding: 1px 6px; border-radius: 6px; overflow-wrap: anywhere; }
+
+/* Numbered steps on a thread. */
+.g-steps { list-style: none; margin: 30px 0 0; padding: 0; display: grid; }
+.g-step { position: relative; display: grid; grid-template-columns: 34px minmax(0, 1fr); align-items: start; gap: 16px; padding-bottom: 26px; animation: rise 0.5s var(--ease) backwards; animation-delay: calc(var(--i) * 60ms); }
+.g-step:last-child { padding-bottom: 0; }
+.g-step::before { content: ""; position: absolute; left: 16.5px; top: 38px; bottom: 4px; width: 1px; background: var(--border-strong); }
+.g-step:last-child::before { display: none; }
+.num { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 50%; font: 600 14px/1 var(--sans); color: var(--accent); background: color-mix(in oklab, var(--accent) 12%, transparent); border: 1px solid color-mix(in oklab, var(--accent) 35%, transparent); }
+.g-step.done .num { color: var(--ok); background: color-mix(in oklab, var(--ok) 14%, transparent); border-color: color-mix(in oklab, var(--ok) 40%, transparent); }
+.num svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
+.step-body { min-width: 0; padding-top: 5px; }
+.step-body h4 { margin: 0; font: 500 18px/1.3 var(--serif); }
+.g-step.done h4 { color: var(--text-2); }
+.step-body p { margin: 8px 0 0; font-size: 14px; color: var(--text-2); line-height: 1.55; }
+.step-body b, .guide-alt b { color: var(--text); font-weight: 600; }
+.step-body > .btn { margin-top: 14px; }
+.aside { font-size: 13px !important; color: var(--text-3) !important; }
+.aside.warn { padding: 10px 12px; border-radius: 12px; color: var(--text-2) !important; background: color-mix(in oklab, var(--warn) 9%, transparent); border: 1px solid color-mix(in oklab, var(--warn) 28%, transparent); }
+.clicks { margin: 10px 0 0; padding-left: 20px; display: grid; gap: 8px; font-size: 14px; color: var(--text-2); }
+.clicks li::marker { color: var(--text-3); font-size: 12.5px; }
+.clicks .cmd { margin-top: 8px; }
+
+/* Commands and snippets, each with a Copy button. */
+.cmd { position: relative; margin-top: 10px; border-radius: 12px; border: 1px solid var(--border); background: color-mix(in oklab, var(--bg) 60%, var(--surface-2)); overflow: hidden; }
+.cmd-label { display: block; padding: 7px 14px; font: 600 11px var(--mono); color: var(--text-3); border-bottom: 1px solid var(--border); }
+.cmd pre { margin: 0; padding: 12px 96px 12px 14px; overflow-x: auto; }
+.cmd code { font: 12.5px/1.65 var(--mono); color: var(--text); white-space: pre; background: none; padding: 0; border-radius: 0; }
+.cmd .ctx { color: var(--text-3); }
+.cmd .add { display: inline-block; min-width: calc(100% + 110px); margin: 0 -96px 0 -14px; padding: 0 96px 0 14px; color: var(--text); background: color-mix(in oklab, var(--ok) 12%, transparent); box-shadow: inset 2px 0 0 var(--ok); }
+.cmd .fill { color: var(--accent); font-style: italic; }
+.cmd .fill.filled { font-style: normal; color: var(--text); }
+.cmd-copy { position: absolute; right: 8px; bottom: 8px; height: 28px; padding: 0 10px; display: inline-flex; align-items: center; gap: 6px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-raised); color: var(--text-2); font: 600 12px var(--sans); cursor: pointer; transition: background 0.2s, color 0.2s, border-color 0.2s; }
+.cmd-copy:hover { background: var(--surface-3); color: var(--text); }
+.cmd-copy svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.cmd-copy.copied { color: var(--ok); border-color: color-mix(in oklab, var(--ok) 40%, transparent); }
+
+.paste { display: grid; gap: 6px; margin-top: 12px; font-size: 12.5px; font-weight: 600; color: var(--text-2); }
+
+/* The check's answer. */
+.check-result:empty { display: none; }
+.check-result { margin-top: 14px; }
+.verdict { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 12px; padding: 14px 16px; border-radius: 14px; border: 1px solid var(--border); background: var(--surface); animation: rise 0.4s var(--ease); }
+.verdict > svg, .verdict > .spinner { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; color: var(--text-3); }
+.verdict > div > b { display: block; font-size: 14.5px; color: var(--text); }
+.verdict p b { color: var(--text); font-weight: 600; }
+.verdict p { margin: 4px 0 0 !important; font-size: 13.5px !important; }
+.verdict ul { margin: 6px 0 0; padding-left: 18px; font-size: 13.5px; color: var(--text-2); }
+.verdict.ok { border-color: color-mix(in oklab, var(--ok) 35%, transparent); background: color-mix(in oklab, var(--ok) 9%, transparent); }
+.verdict.ok > svg { color: var(--ok); }
+.verdict.part { border-color: color-mix(in oklab, var(--warn) 35%, transparent); background: color-mix(in oklab, var(--warn) 8%, transparent); }
+.verdict.part > svg { color: var(--warn); }
+.verdict.bad { border-color: color-mix(in oklab, var(--err) 35%, transparent); background: color-mix(in oklab, var(--err) 8%, transparent); }
+.verdict.bad > svg { color: var(--err); }
+
+.guide-alt { margin-top: 26px; padding: 16px 18px; border-radius: 16px; border: 1px solid var(--border); background: var(--surface); }
+.guide-alt summary { cursor: pointer; font-size: 14px; font-weight: 600; color: var(--text-2); }
+.guide-alt summary:hover { color: var(--text); }
+.guide-alt[open] summary { margin-bottom: 4px; }
+.guide-alt > .btn { margin-top: 14px; }
+.guide-alt p { margin: 12px 0 0; }
+
+@media (max-width: 640px) {
+  .modal.guide { padding: 26px 18px 22px; }
+  .modal.guide h3 { font-size: 24px; padding-right: 36px; }
+  .choices { grid-template-columns: 1fr; }
+  .bridge { grid-template-columns: 1fr; gap: 6px; padding: 18px 14px; }
+  .link { height: 40px; width: 46px; justify-self: center; align-self: center; }
+  .link .line { left: 50%; right: auto; top: 0; bottom: 0; width: 2px; height: auto; background: repeating-linear-gradient(180deg, var(--accent) 0 6px, transparent 6px 12px); background-size: 2px 24px; animation: flow-down 1.2s linear infinite; }
+  .link.broken .line { background: repeating-linear-gradient(180deg, var(--text-3) 0 6px, transparent 6px 12px); }
+  .g-step { grid-template-columns: 28px minmax(0, 1fr); gap: 12px; }
+  .num { width: 28px; height: 28px; font-size: 13px; }
+  .g-step::before { left: 13.5px; top: 32px; }
+  .step-body { padding-top: 3px; }
+}
+@keyframes flow-down { to { background-position: 0 24px; } }
+@media (prefers-reduced-motion: reduce) {
+  .link .line, .bridge, .g-step, .verdict { animation: none; }
+}

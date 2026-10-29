@@ -392,6 +392,15 @@ No. LibriVox and Old-Time Radio download directly and for free. Usenet results g
 Yes. Point those apps at the same library folder. Narratarr writes the `Author/Title` layout with `cover.jpg` and `desc.txt` that Audiobookshelf reads.
 
 To have Audiobookshelf pick up new books straight away, open **Settings → Audiobookshelf** and press **Find**. Leave the address empty to look on this computer, in Docker and across your home network, or type a LAN or public IP or a domain. Then sign in with an Audiobookshelf admin account. Narratarr uses the password once, to create an API key called "Narratarr" (you can revoke it in Audiobookshelf under Settings → Users → API Keys), and never stores it. Single sign-on accounts and Audiobookshelf versions before 2.26 can paste an API key instead.
+
+**Not sure how to get the folders lined up?** Press **Setup guide** in that panel. It asks where Audiobookshelf runs and how it's installed, fills your own paths into every step, and finishes by asking Audiobookshelf which of your books it can see. In short:
+
+| Your setup | What to do |
+|---|---|
+| Audiobookshelf **in Docker**, on the same machine | Mount Narratarr's library folder into its container (`- /your/library:/narratarr` under `volumes:`), run `docker compose up -d`, then add `/narratarr` to a library under **Settings → Libraries → Folders**. |
+| Audiobookshelf **installed directly**, on the same machine | Add Narratarr's library folder to a library under **Settings → Libraries → Folders**. On Linux, Audiobookshelf's own user needs to be able to read it (it can't read inside `/root`). |
+| Narratarr **in Docker** | Use the folder on the server, not `/audiobooks`: `docker inspect narratarr --format '{{range .Mounts}}{{if eq .Destination "/audiobooks"}}{{.Source}}{{end}}{{end}}'` prints it. |
+| Audiobookshelf on **another machine** | Install Narratarr on that machine instead, or share Audiobookshelf's folder over the network and set it as Narratarr's library folder. |
 </details>
 
 <details>

@@ -115,6 +115,40 @@ def _local_network() -> ipaddress.IPv4Network | None:
     return ipaddress.ip_network(f"{ip}/24", strict=False)
 
 
+def _own_addresses() -> set[ipaddress.IPv4Address | ipaddress.IPv6Address]:
+    """This machine's own addresses, including a public one bound straight to it (as on a VPS)."""
+    found = set()
+    try:
+        found |= {info[4][0] for info in socket.getaddrinfo(socket.gethostname(), None)}
+    except OSError:
+        pass
+    for target in ("10.255.255.255", "8.8.8.8"):  # the outgoing interface for each; UDP connect sends nothing
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            try:
+                s.connect((target, 1))
+                found.add(s.getsockname()[0])
+            except OSError:
+                pass
+    return {ipaddress.ip_address(a.split("%")[0]) for a in found}
+
+
+def where(url: str) -> str:
+    """Where this Audiobookshelf runs, as far as its address tells: "here" (this machine),
+    "docker" (a container beside Narratarr's), "network" (another machine at home) or "internet"."""
+    host = (urlparse(url).hostname or "").lower()
+    if host in ("localhost", "host.docker.internal") or host.endswith(".localhost"):
+        return "here"
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        ip = None
+    if ip is None and "." not in host:
+        return "docker"  # a bare name like "audiobookshelf" is another container on the same Docker network
+    if ip is not None and (ip.is_loopback or ip in _own_addresses()):
+        return "here"
+    return "internet" if is_public(url) else "network"
+
+
 async def find_nearby(sweep: bool = True) -> list[dict]:
     """Audiobookshelf on this machine or beside it in Docker; failing that, anywhere on the home network."""
     servers = await _first(list(NEARBY), PROBE_TIMEOUT)
@@ -248,6 +282,50 @@ class Audiobookshelf:
 
     async def scan(self, library_id: str) -> None:
         await self._call("POST", f"/api/libraries/{library_id}/scan")
+
+    async def items(self, library_id: str) -> list[dict]:
+        """Every book in a library, with where Audiobookshelf found it."""
+        found, page = [], 0
+        while page < 40:  # 20,000 books is plenty for a check
+            resp = await self._call("GET", f"/api/libraries/{library_id}/items",
+                                    params={"limit": 500, "page": page, "minified": 1})
+            try:
+                data = resp.json()
+                results = data.get("results") or []
+            except (ValueError, AttributeError):
+                raise AudiobookshelfError("That address answered, but not like Audiobookshelf does.")
+            found += [{"path": i.get("path") or "", "rel": i.get("relPath") or "", "missing": bool(i.get("isMissing"))}
+                      for i in results if isinstance(i, dict)]
+            page += 1
+            if not results or len(found) >= int(data.get("total") or 0):
+                break
+        return found
+
+
+def _parts(path: str) -> tuple[str, ...]:
+    return tuple(p for p in path.replace("\\", "/").split("/") if p)
+
+
+def compare(books: list[dict], library_dir: str, items: list[dict]) -> dict:
+    """Which of Narratarr's books Audiobookshelf has, and where it sees Narratarr's library folder.
+
+    Paths differ between the two (Docker mounts, mapped drives), so books are matched by
+    where they sit under the library folder: Narratarr's "Author/Title" against the end of
+    the path Audiobookshelf found it at."""
+    root = _parts(library_dir)
+    there = [(_parts(i["path"]), _parts(i["rel"])) for i in items if not i["missing"]]
+    seen, missing, seen_at = 0, [], ""
+    for book in books:
+        path = _parts(book["path"])
+        rel = path[len(root):] if path[:len(root)] == root and len(path) > len(root) else path[-2:]
+        hit = next((full for full, r in there if len(r) >= len(rel) and r[-len(rel):] == rel), None)
+        if hit is None:
+            missing.append(book["title"])
+            continue
+        seen += 1
+        if not seen_at and len(hit) > len(rel):
+            seen_at = "/" + "/".join(hit[:-len(rel)]) if not hit[0].endswith(":") else "\\".join(hit[:-len(rel)])
+    return {"books": len(books), "seen": seen, "missing": missing[:5], "seen_at": seen_at}
 
 
 def pick_library(libraries: list[dict], library_dir: str) -> str:

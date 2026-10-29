@@ -2,6 +2,7 @@
 
 import { $, $$, esc, I, api, hue, coverHTML, firstAuthor, fmtBytes, fmtLeft, ago, toast } from "./util.js";
 import { player } from "./player.js";
+import { openAbsGuide } from "./guide.js";
 
 
 const ACTIVE = ["queued", "resolving", "caching", "downloading", "organizing"];
@@ -1527,7 +1528,8 @@ function Settings(root) {
       </section>
 
       <section class="panel">
-        <div><h3>Audiobookshelf</h3><p class="desc">Optional. Books are already filed the way Audiobookshelf expects; connect it and Audiobookshelf picks up each new book as soon as it has downloaded.</p></div>
+        <div><h3>Audiobookshelf</h3><p class="desc">Optional. Books are already filed the way Audiobookshelf expects; connect it and Audiobookshelf picks up each new book as soon as it has downloaded.</p>
+          <button class="guide-link" type="button" data-guide>${I.books}<span><b>Setup guide</b><small>Get your books into Audiobookshelf, step by step</small></span></button></div>
         <div class="body">
           <div class="field" id="abs-connected" hidden>
             <label for="audiobookshelf_library_id">Library to rescan</label>
@@ -1537,7 +1539,7 @@ function Settings(root) {
               </select>
               <button class="btn" type="button" id="test-audiobookshelf">Test</button>
             </div>
-            <span class="hint">Connected to <code id="abs-where"></code> · <a href="#" id="abs-disconnect" style="color:var(--accent)">Disconnect</a></span>
+            <span class="hint">Connected to <code id="abs-where"></code> · <a href="#" id="abs-disconnect" style="color:var(--accent)">Disconnect</a> · <a href="#" data-guide style="color:var(--accent)">Check your books</a></span>
             <div id="audiobookshelf-result"></div>
           </div>
 
@@ -1838,6 +1840,17 @@ function Settings(root) {
     toast("Disconnected. Narratarr’s key is still listed in Audiobookshelf, where you can revoke it.");
   };
   absShow();
+  $$("[data-guide]", root).forEach((el) => {
+    el.onclick = (e) => {
+      e.preventDefault();
+      openAbsGuide({
+        onConnect: () => {
+          $("#abs-setup", root).scrollIntoView({ behavior: "smooth", block: "center" });
+          form.audiobookshelf_url.focus({ preventScroll: true });
+        },
+      });
+    };
+  });
 
   // Users: who can sign in, and as what.
   const userList = $("#user-list", root);

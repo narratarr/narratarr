@@ -8,7 +8,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from narratarr import api, audiobookshelf, config
+from narratarr import api, audiobookshelf, config, db
 from narratarr.audiobookshelf import Audiobookshelf, AudiobookshelfError
 from narratarr.worker import Worker
 
@@ -25,6 +25,7 @@ class FakeABS:
             {"id": "lib-pods", "name": "Podcasts", "mediaType": "podcast", "folders": [{"fullPath": "/podcasts"}]},
         ]
         self.key_requests, self.scans, self.logins = [], [], []
+        self.items = {}  # library id -> [(path, relPath)], as Audiobookshelf found them
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         url = str(request.url)
@@ -59,6 +60,12 @@ class FakeABS:
                 return httpx.Response(404, text="Not Found")
             self.scans.append(library_id)
             return httpx.Response(200, text="OK")
+        if request.url.path.startswith("/api/libraries/") and request.url.path.endswith("/items"):
+            found = self.items.get(request.url.path.split("/")[3], [])
+            limit, page = int(request.url.params["limit"]), int(request.url.params["page"])
+            chunk = found[page * limit:(page + 1) * limit]
+            return httpx.Response(200, json={"total": len(found), "limit": limit, "page": page, "results": [
+                {"id": f"i{n}", "path": path, "relPath": rel, "isMissing": False, "media": {}} for n, (path, rel) in enumerate(chunk)]})
         return httpx.Response(404, text="Not Found")
 
 
@@ -220,3 +227,79 @@ async def test_a_rejected_rescan_is_logged_not_swallowed(fake, caplog):
         await Worker()._notify_audiobookshelf(config.load())
     assert fake.scans == []
     assert "didn't accept Narratarr's key" in caplog.text
+
+
+# ---- the setup guide -------------------------------------------------------------------
+
+
+def test_compare_sees_books_through_a_docker_mount():
+    books = [{"title": "Mistborn", "path": "/root/Audiobooks/Brandon Sanderson/Mistborn"},
+             {"title": "Dune", "path": "/root/Audiobooks/Frank Herbert/Dune"}]
+    items = [{"path": "/narratarr/Brandon Sanderson/Mistborn", "rel": "Brandon Sanderson/Mistborn", "missing": False},
+             {"path": "/narratarr/Frank Herbert/Dune", "rel": "Frank Herbert/Dune", "missing": True}]  # deleted since
+    assert audiobookshelf.compare(books, "/root/Audiobooks", items) == {
+        "books": 2, "seen": 1, "missing": ["Dune"], "seen_at": "/narratarr"}
+
+
+def test_compare_when_audiobookshelf_watches_a_folder_above_the_library():
+    books = [{"title": "Mistborn", "path": "/srv/media/narratarr/Brandon Sanderson/Mistborn"}]
+    items = [{"path": "/data/narratarr/Brandon Sanderson/Mistborn", "rel": "narratarr/Brandon Sanderson/Mistborn", "missing": False}]
+    assert audiobookshelf.compare(books, "/srv/media/narratarr", items)["seen_at"] == "/data/narratarr"
+
+
+def test_compare_finds_books_imported_in_place_by_author_and_title():
+    books = [{"title": "Earthsea", "path": "/mnt/old/Ursula K. Le Guin/Earthsea"}]  # outside the library folder
+    items = [{"path": "/old/Ursula K. Le Guin/Earthsea", "rel": "Ursula K. Le Guin/Earthsea", "missing": False}]
+    assert audiobookshelf.compare(books, "/root/Audiobooks", items)["seen"] == 1
+    other = [{"path": "/old/Someone Else/Earthsea", "rel": "Someone Else/Earthsea", "missing": False}]
+    assert audiobookshelf.compare(books, "/root/Audiobooks", other)["seen"] == 0  # same title, different author
+
+
+def test_where_audiobookshelf_runs(monkeypatch):
+    monkeypatch.setattr(audiobookshelf, "_own_addresses", lambda: {ipaddress.ip_address("8.8.4.4")})
+    assert audiobookshelf.where("http://localhost:13378") == "here"
+    assert audiobookshelf.where("http://8.8.4.4:13378") == "here"  # this server's own public address, as on a VPS
+    assert audiobookshelf.where("http://audiobookshelf:80") == "docker"
+    assert audiobookshelf.where("http://192.168.1.40:13378") == "network"
+    assert audiobookshelf.where("http://8.8.8.8:13378") == "internet"
+
+
+def _downloaded(*names):
+    root = config.load().library_dir
+    for author, title in names:
+        db.insert({"source": "local", "source_url": f"local:{title}", "title": title, "author": author,
+                   "status": "completed", "path": f"{root}/{author}/{title}"})
+
+
+def test_check_endpoint_rescans_and_reports_what_audiobookshelf_sees(client, fake, monkeypatch):
+    config.update({"audiobookshelf_url": "http://abs:13378", "audiobookshelf_token": KEY, "audiobookshelf_library_id": "lib-books"})
+    _downloaded(("Brandon Sanderson", "Mistborn"), ("Frank Herbert", "Dune"))
+    fake.items["lib-books"] = [("/audiobooks/Brandon Sanderson/Mistborn", "Brandon Sanderson/Mistborn")]
+    real_sleep = api.asyncio.sleep
+    monkeypatch.setattr(api.asyncio, "sleep", lambda s: real_sleep(0))
+    r = client.post("/api/audiobookshelf/check", json={}).json()
+    assert r == {"books": 2, "seen": 1, "missing": ["Dune"], "seen_at": "/audiobooks",
+                 "library": "Audiobooks", "folders": ["/audiobooks"]}
+    assert fake.scans == ["lib-books"]
+
+    fake.items["lib-books"].append(("/audiobooks/Frank Herbert/Dune", "Frank Herbert/Dune"))
+    assert client.post("/api/audiobookshelf/check", json={}).json()["seen"] == 2
+
+
+def test_check_endpoint_needs_a_connection(client):
+    assert client.post("/api/audiobookshelf/check", json={}).status_code == 400
+
+
+async def _nothing_nearby(sweep=True):
+    return []
+
+
+def test_guide_endpoint(client, fake, monkeypatch):
+    monkeypatch.setattr(audiobookshelf, "find_nearby", _nothing_nearby)
+    g = client.get("/api/audiobookshelf/guide").json()
+    assert (g["connected"], g["where"], g["library_dir"]) == (False, "", config.load().library_dir)
+    config.update({"audiobookshelf_url": "http://abs:13378", "audiobookshelf_token": KEY, "audiobookshelf_library_id": "lib-books"})
+    g = client.get("/api/audiobookshelf/guide").json()
+    assert g["connected"] and g["where"] == "docker"  # a bare name: another container
+    assert g["libraries"][0]["folders"] == ["/audiobooks"]
+    assert KEY not in json.dumps(g)

@@ -7,6 +7,7 @@ import base64
 import hmac
 import ipaddress
 import os
+import platform
 import re
 import shutil
 import time
@@ -887,6 +888,61 @@ async def test_audiobookshelf():
     if not library:
         raise HTTPException(400, "Connected, but no library is chosen. Pick the one Narratarr's books go into.")
     return {"version": status["version"], "library": library["name"]}
+
+
+@app.get("/api/audiobookshelf/guide")
+async def abs_guide():
+    """What the setup guide needs to fill in this machine's own paths and guess the setup."""
+    s = config.load()
+    info = {
+        "install": updates.install_kind(), "os": platform.system().lower(),
+        "library_dir": str(Path(s.library_dir).expanduser()),
+        "connected": bool(s.audiobookshelf_url and s.audiobookshelf_token), "url": s.audiobookshelf_url,
+        "where": "", "nearby": False, "libraries": [], "library_id": s.audiobookshelf_library_id, "error": "",
+    }
+    if s.audiobookshelf_url:
+        info["where"] = await asyncio.to_thread(audiobookshelf.where, s.audiobookshelf_url)
+    if info["where"] not in ("here", "docker"):
+        # Reached through a public or LAN address, but also answering on this machine: the same server.
+        info["nearby"] = bool(await audiobookshelf.find_nearby(sweep=False))
+    if info["connected"]:
+        try:
+            async with Audiobookshelf(s.audiobookshelf_url, s.audiobookshelf_token) as server:
+                info["libraries"] = await server.libraries()
+        except AudiobookshelfError as e:
+            info["error"] = str(e)
+    return info
+
+
+class Check(BaseModel):
+    scan: bool = True
+
+
+@app.post("/api/audiobookshelf/check")
+async def abs_check(body: Check):
+    """Whether Audiobookshelf can see the books Narratarr has downloaded."""
+    s = config.load()
+    if not (s.audiobookshelf_url and s.audiobookshelf_token and s.audiobookshelf_library_id):
+        raise HTTPException(400, "Connect Audiobookshelf and pick a library first.")
+    books = [b for b in db.list_books() if b["status"] == "completed" and b["path"]]
+    library_dir = str(Path(s.library_dir).expanduser().resolve())
+    try:
+        async with Audiobookshelf(s.audiobookshelf_url, s.audiobookshelf_token) as server:
+            library = next((lib for lib in await server.libraries() if lib["id"] == s.audiobookshelf_library_id), None)
+            if not library:
+                raise AudiobookshelfError("Audiobookshelf doesn't know that library any more. Pick it again.")
+            if body.scan and books:
+                await server.scan(library["id"])
+            # A scan runs in the background, so look a few times while it finds things.
+            for attempt in range(6 if body.scan and books else 1):
+                if attempt:
+                    await asyncio.sleep(1.5)
+                result = audiobookshelf.compare(books, library_dir, await server.items(library["id"]))
+                if result["seen"] == result["books"]:
+                    break
+    except AudiobookshelfError as e:
+        raise HTTPException(400, str(e))
+    return {**result, "library": library["name"], "folders": library["folders"]}
 
 
 # ---- accounts ---------------------------------------------------------------------

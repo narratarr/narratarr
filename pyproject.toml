@@ -1,6 +1,6 @@
 [project]
 name = "narratarr"
-version = "0.5.5"
+version = "0.5.6"
 description = "An *arr-style audiobook manager with a built-in player: discover, download, organize and listen."
 readme = "README.md"
 requires-python = ">=3.11"
