@@ -2,6 +2,10 @@
 
 All notable changes to Narratarr. The app shows this under **Settings → Updates**.
 
+## Unreleased
+
+- **Torznab** as a search source: Jackett, Prowlarr's Torznab endpoint, or any indexer that speaks the protocol. Written against the protocol, not one vendor; the API key is stripped from every stored link whichever parameter name the indexer uses.
+
 ## 0.7.4 — 2026-10-31
 
 - **Authors, not narrators.** Books you import now take their author from the **Artist** tag first, then **Album artist**, the same way Audiobookshelf reads them. Many audiobooks put the narrator in Album artist, which made Narratarr show the narrator as the author (and miss books by authors you follow). A name that's only the narrator never counts as the author, "Author, read by Narrator" is split in two, and Audible's narrator tag in M4B files is read too.

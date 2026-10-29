@@ -32,7 +32,7 @@ from .downloaders import ClientError
 from . import alldebrid
 from .alldebrid import AllDebrid, AllDebridError
 from .realdebrid import RealDebrid, RealDebridError
-from .sources import CATALOGS, ORDER, Prowlarr, ProwlarrError, all_sources, ebook_indexers, get_source, source_for_url
+from .sources import CATALOGS, ORDER, Prowlarr, ProwlarrError, Torznab, TorznabError, all_sources, ebook_indexers, get_source, source_for_url
 from .worker import Worker, has_files, readable_error, safe_name, tmp_dir
 
 STATIC = Path(__file__).parent / "static"
@@ -184,6 +184,12 @@ async def health():
 async def sources():
     found = all_sources()
     settings = config.load().public()
+    # Indexer sources appear once they have an address and a key; the catalogs are offered alongside Prowlarr.
+    visible = set(ORDER) - {"prowlarr", "torznab", *CATALOGS}
+    if settings["prowlarr_configured"]:
+        visible |= {"prowlarr", *CATALOGS}
+    if settings["torznab_configured"]:
+        visible.add("torznab")
     return [
         {
             "name": name,
@@ -194,7 +200,7 @@ async def sources():
             "categories": [{"slug": c.slug, "name": c.name} for c in found[name].categories()],
         }
         for name in ORDER
-        if name not in ("prowlarr", *CATALOGS) or settings["prowlarr_configured"]
+        if name in visible
     ]
 
 
@@ -262,7 +268,7 @@ async def details(url: str, source: str | None = None):
     src = _resolve(url, source)
     try:
         d = await src.details(url)
-    except ProwlarrError as e:
+    except (ProwlarrError, TorznabError) as e:
         raise HTTPException(410, str(e))
     except audible.AudibleError as e:
         raise HTTPException(502, str(e))
@@ -974,6 +980,15 @@ async def test_prowlarr():
     try:
         return await Prowlarr(s.prowlarr_url, s.prowlarr_api_key).status(s.prowlarr_ebook_categories)
     except ProwlarrError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/settings/test-torznab")
+async def test_torznab():
+    s = config.load()
+    try:
+        return await Torznab(s.torznab_url, s.torznab_api_key, s.torznab_categories).status()
+    except TorznabError as e:
         raise HTTPException(400, str(e))
 
 
