@@ -1,7 +1,7 @@
 """Narratarr's public API, version 1, mounted at /api/v1.
 
-For apps that request books on someone's behalf: search Audible's catalog, ask for a book,
-and follow it until it's in the library. The web UI uses its own internal API, which can
+For apps that request books on someone's behalf: search Audible's catalog, ask for a book
+(as an audiobook, or since 0.7.0 as an ebook), and follow it until it's in the library. The web UI uses its own internal API, which can
 change in any release; this one doesn't. Within v1, things are only ever added (new
 endpoints, new fields, new values where a list says more may come). Anything that would
 break an app goes into a v2 alongside it. Reference: docs/api.md, and /api/v1/docs.
@@ -185,6 +185,7 @@ def request_out(b: dict, names: dict[int, str]) -> dict:
     return {
         "id": b["id"],
         "asin": b.get("asin") or None,
+        "format": wanted.kind_of(b),
         "title": b["title"],
         "authors": _names(b["author"]),
         "narrators": list(b.get("narrators") or []),
@@ -202,8 +203,8 @@ def request_out(b: dict, names: dict[int, str]) -> dict:
     }
 
 
-def book_out(b: dict, have: dict | None, names: dict[int, str]) -> dict:
-    """A book in Audible's catalog, and Narratarr's request for it if there is one."""
+def book_out(b: dict, have: dict | None, names: dict[int, str], ebook: dict | None = None) -> dict:
+    """A book in Audible's catalog, and Narratarr's requests for it (audiobook and ebook) if there are any."""
     return {
         "asin": b["asin"],
         "title": b["title"],
@@ -218,7 +219,14 @@ def book_out(b: dict, have: dict | None, names: dict[int, str]) -> dict:
         "language": b.get("language") or None,
         "abridged": bool(b.get("abridged")),
         "request": request_out(have, names) if have else None,
+        "ebook_request": request_out(ebook, names) if ebook else None,
     }
+
+
+def _book_out(b: dict, books: list[dict], names: dict[int, str]) -> dict:
+    have = wanted.in_library(b["asin"], b["title"], b["author"], books)
+    ebook = wanted.in_library(b["asin"], b["title"], b["author"], books, "ebook")
+    return book_out(b, have, names, ebook)
 
 
 def _usernames() -> dict[int, str]:
@@ -235,6 +243,7 @@ def _audible_error(e: Exception) -> ApiError:
 # never removed or changed.
 
 Status = Literal["wanted", "downloading", "available", "failed"]
+Format = Literal["audiobook", "ebook"]
 Stage = Literal["queued", "preparing", "downloading", "importing"]
 
 
@@ -288,6 +297,8 @@ class RequesterOut(_Out):
 class RequestOut(_Out):
     id: int
     asin: str | None = Field(description="Null for books that didn't come from Audible's catalog.")
+    format: Format = Field(description="audiobook or ebook. A book wanted in both formats is two requests. "
+                                       "Added in Narratarr 0.7.0; more formats may be added.")
     title: str
     authors: list[str]
     narrators: list[str]
@@ -317,7 +328,9 @@ class BookOut(_Out):
     release_date: str | None = Field(description="YYYY-MM-DD.")
     language: str | None
     abridged: bool
-    request: RequestOut | None = Field(description="Narratarr's request for this book, if it has one.")
+    request: RequestOut | None = Field(description="Narratarr's request for this book as an audiobook, if it has one.")
+    ebook_request: RequestOut | None = Field(description="Narratarr's request for this book as an ebook, if it "
+                                                               "has one. Added in Narratarr 0.7.0.")
 
 
 class SearchOut(_Out):
@@ -371,6 +384,8 @@ class Refresh(_Body):
 
 class NewRequest(_Body):
     asin: str = Field(pattern=ASIN, description="The book's Audible ASIN.")
+    format: Format = Field("audiobook", description="audiobook (the default) or ebook. To want both, make two "
+                                                    "requests. Added in Narratarr 0.7.0.")
 
 
 # ---- the app ------------------------------------------------------------------------------------
@@ -378,7 +393,7 @@ class NewRequest(_Body):
 v1 = FastAPI(
     title="Narratarr API",
     version=str(API_VERSION),
-    description="Search Audible's catalog, request audiobooks and follow them until they're in the library. "
+    description="Search Audible's catalog, request audiobooks and ebooks, and follow them until they're in the library. "
                 "See docs/api.md in the Narratarr repository for the full guide.",
     docs_url="/docs",
     redoc_url=None,
@@ -492,8 +507,7 @@ async def search(me: Caller,
     except audible.AudibleError as e:
         raise _audible_error(e)
     books, names = db.list_books(), _usernames()
-    items = [book_out(b, wanted.in_library(b["asin"], b["title"], b["author"], books), names) for b in found]
-    return {"items": items, "page": page, "pages": pages}
+    return {"items": [_book_out(b, books, names) for b in found], "page": page, "pages": pages}
 
 
 @private.get("/books/{asin}", tags=["Catalog"], response_model=BookOut, summary="One book in Audible's catalog")
@@ -505,15 +519,15 @@ async def book(me: Caller, asin: Annotated[str, Path(pattern=ASIN)]):
         raise _audible_error(e)
     if not b:
         raise ApiError(404, "not_found", "Audible doesn't have a book with that ASIN.")
-    have = wanted.in_library(asin, b["title"], b["author"])
-    return book_out(b, have, _usernames())
+    return _book_out(b, db.list_books(), _usernames())
 
 
 @private.post("/requests", tags=["Requests"], response_model=RequestOut, status_code=201, summary="Request a book",
               responses={200: {"model": RequestOut, "description": "Narratarr already has it"}})
 async def create_request(body: NewRequest, me: Caller, response: Response):
     response.status_code = 200  # unless it turns out to be new
-    existing = next((b for b in db.list_books() if b.get("asin") == body.asin), None)
+    kind = body.format
+    existing = next((b for b in db.list_books() if b.get("asin") == body.asin and wanted.kind_of(b) == kind), None)
     if existing:
         return request_out(existing, _usernames())
     request_limit.take(me["id"])
@@ -523,20 +537,21 @@ async def create_request(body: NewRequest, me: Caller, response: Response):
         raise _audible_error(e)
     if not b:
         raise ApiError(404, "not_found", "Audible doesn't have a book with that ASIN.")
-    have = wanted.in_library(body.asin, b["title"], b["author"])
+    have = wanted.in_library(body.asin, b["title"], b["author"], kind=kind)
     if have:  # the same book from another source, or another edition of it
         return request_out(have, _usernames())
     try:
-        added = wanted.add_wanted(b)
+        added = wanted.add_wanted(b, kind)
     except sqlite3.IntegrityError:  # requested twice at the same moment
         added = None
     if added is None:
-        same = db.get_by_url(b["url"]) or wanted.in_library(body.asin, b["title"], b["author"])
+        same = db.get_by_url(wanted.url_for(b["url"], kind)) or wanted.in_library(body.asin, b["title"], b["author"],
+                                                                                   kind=kind)
         if same is None:
             raise ApiError(409, "conflict", "That book couldn't be added. Try again.")
         return request_out(same, _usernames())
     db.update(added["id"], requested_by=me["id"])
-    log.info("%s requested %s (%s)", me["username"], b["title"], body.asin)
+    log.info("%s requested %s (%s, %s)", me["username"], b["title"], body.asin, kind)
     from . import api as core  # here, not at the top: api.py mounts this module
 
     core._background(core._search_in_background(added["id"]))
@@ -550,6 +565,9 @@ async def list_requests(
     me: Caller,
     status: Annotated[str | None, Query(description="Comma-separated: wanted, downloading, available, failed.")] = None,
     mine: Annotated[bool, Query(description="Only books this person requested.")] = False,
+    format: Annotated[Literal["audiobook", "ebook", "all"],
+                      Query(description="Which format to list: audiobook (the default, as before 0.7.0), ebook, "
+                                        "or all.")] = "audiobook",
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     offset: Annotated[int, Query(ge=0, le=1_000_000)] = 0,
 ):
@@ -563,7 +581,8 @@ async def list_requests(
     books = db.list_books()
     books = [b for b in books
              if (not wanted_statuses or public_status(b["status"]) in wanted_statuses)
-             and (not mine or b.get("requested_by") == me["id"])]
+             and (not mine or b.get("requested_by") == me["id"])
+             and format in ("all", wanted.kind_of(b))]
     books.sort(key=lambda b: b["updated_at"], reverse=True)
     names = _usernames()
     return {"items": [request_out(b, names) for b in books[offset:offset + limit]],

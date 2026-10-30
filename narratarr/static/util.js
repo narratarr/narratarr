@@ -35,6 +35,7 @@ export const I = {
   x: '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>',
   books: '<svg viewBox="0 0 24 24"><path d="M4 19V5a1 1 0 0 1 1-1h3v16H5a1 1 0 0 1-1-1Z"/><path d="M8 4h4v16H8"/><path d="m14 5.2 3.6-.9 3.2 13.6-3.6.9z"/></svg>',
   headphones: '<svg viewBox="0 0 24 24"><path d="M4 15v-3a8 8 0 0 1 16 0v3"/><rect x="3" y="14" width="5" height="7" rx="2"/><rect x="16" y="14" width="5" height="7" rx="2"/></svg>',
+  book: '<svg viewBox="0 0 24 24"><path d="M12 6.8C10.4 5.3 7.9 4.6 3.5 4.6v13.2c4.4 0 6.9.7 8.5 2.2 1.6-1.5 4.1-2.2 8.5-2.2V4.6c-4.4 0-6.9.7-8.5 2.2Z"/><path d="M12 6.8V20"/></svg>',
 };
 
 export async function api(path, opts = {}) {
@@ -59,10 +60,11 @@ export function coverHTML(b, cls = "") {
   const h = hue(b.title + b.author);
   // Downloaded books use the cover saved next to the audio; everything else uses the source's image.
   const src = b.id && b.path ? `/api/library/${b.id}/cover` : b.cover_url || "";
-  const img = /^(https?:\/\/|\/api\/)/.test(src)
-    ? `<img src="${esc(src)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onload="this.classList.add('loaded')" onerror="this.remove()">`
-    : "";
-  return `<div class="cover ${cls}" style="--h:${h}"><div class="faux"><small>${esc(firstAuthor(b.author))}</small><b>${esc(b.title)}</b></div>${img}</div>`;
+  // Book covers are taller than audiobook squares: show the whole cover, standing on a blur of itself.
+  const book = b.kind === "ebook" || b.source === "openlibrary";
+  const tag = (extra) => `<img ${extra} src="${esc(src)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onload="this.classList.add('loaded')" onerror="this.remove()">`;
+  const img = /^(https?:\/\/|\/api\/)/.test(src) ? (book ? tag('class="blur" aria-hidden="true"') : "") + tag("") : "";
+  return `<div class="cover ${book ? "book" : ""} ${cls}" style="--h:${h}"><div class="faux"><small>${esc(firstAuthor(b.author))}</small><b>${esc(b.title)}</b></div>${img}</div>`;
 }
 
 export const firstAuthor = (a) => String(a || "").split(/,| and /)[0].trim();

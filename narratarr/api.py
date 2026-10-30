@@ -11,25 +11,30 @@ import platform
 import re
 import shutil
 import time
+import zipfile
 from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlparse
+from xml.etree.ElementTree import ParseError
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from typing import Literal
+
 from pydantic import BaseModel
 
-from . import (apiv1, audible, audiobookshelf, auth, brave, config, db, downloaders, importer, media, search, tokens,
-               updates, users, wanted)
+from . import (apiv1, audible, audiobookshelf, auth, brave, config, db, downloaders, ebooks, importer, media, search,
+               tokens, updates, users, wanted)
 from .audiobookshelf import Audiobookshelf, AudiobookshelfError
 from .downloaders import ClientError
 from .realdebrid import RealDebrid, RealDebridError
-from .sources import ORDER, Prowlarr, ProwlarrError, all_sources, get_source, source_for_url
-from .worker import Worker, has_files, readable_error, tmp_dir
+from .sources import CATALOGS, ORDER, Prowlarr, ProwlarrError, all_sources, get_source, source_for_url
+from .worker import Worker, has_files, readable_error, safe_name, tmp_dir
 
 STATIC = Path(__file__).parent / "static"
+COVER_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".gif": "image/gif"}
 
 
 @asynccontextmanager
@@ -187,7 +192,7 @@ async def sources():
             "categories": [{"slug": c.slug, "name": c.name} for c in found[name].categories()],
         }
         for name in ORDER
-        if name not in ("prowlarr", "audible") or settings["prowlarr_configured"]
+        if name not in ("prowlarr", *CATALOGS) or settings["prowlarr_configured"]
     ]
 
 
@@ -206,7 +211,7 @@ async def discover(q: str = "", category: str = "", page: int = 1, source: str =
             )
         elif q.strip() and src.name == "prowlarr":
             data = await search.careful_search(src, q.strip(), settings.smart_search)
-        elif q.strip() and src.name == "audible":
+        elif q.strip() and src.name in CATALOGS:
             data = {**(await src.search(q.strip(), page)).to_dict(), "did_you_mean": ""}
         elif q.strip():
             data = await search.smart_search(src, q.strip(), page, use_suggestions=settings.smart_search)
@@ -223,9 +228,9 @@ async def discover(q: str = "", category: str = "", page: int = 1, source: str =
     books = db.list_books()
     owned = {b["release_url"]: b for b in books if b["release_url"]} | {b["source_url"]: b for b in books}
     for item in data["items"]:
-        b = owned.get(item["url"])
+        b, e = owned.get(item["url"]), owned.get(wanted.url_for(item["url"], "ebook"))
         item["source"] = src.name
-        item["library"] = {"id": b["id"], "status": b["status"]} if b else None
+        item["library"] = {"id": (b or e)["id"], "status": (b or e)["status"]} if b or e else None
     return data
 
 
@@ -249,7 +254,7 @@ async def details(url: str, source: str | None = None):
         raise _source_error(e, src.label)
     data = d.to_dict()
     data["source"] = src.name
-    b = db.get_by_url(url)
+    b = db.get_by_url(url) or db.get_by_url(wanted.url_for(url, "ebook"))
     data["library"] = {"id": b["id"], "status": b["status"]} if b else None
     return data
 
@@ -261,11 +266,16 @@ class AddBook(BaseModel):
     url: str
     download: bool = True
     source: str | None = None
+    format: Literal["audiobook", "ebook", "both"] = "audiobook"  # catalog books only; releases are what they are
 
 
 @app.get("/api/library")
 async def library():
-    return db.list_books()
+    books = db.list_books()
+    pairs = wanted.companions(books)
+    for b in books:
+        b["companion_id"] = pairs[b["id"]]["id"] if b["id"] in pairs else None  # the same book in its other format
+    return books
 
 
 @app.get("/api/stats")
@@ -277,8 +287,9 @@ async def stats():
 async def add_book(body: AddBook, request: Request):
     source = _resolve(body.url, body.source)
     me = getattr(request.state, "user", None)
-    if source.name == "audible":
-        return await _add_wanted(body.url, body.download, me["id"] if me else None)
+    if source.name in CATALOGS:
+        kinds = ("audiobook", "ebook") if body.format == "both" else (body.format,)
+        return await _add_wanted(body.url, body.download, me["id"] if me else None, source.name, kinds)
     existing = db.get_by_url(body.url)
     if existing:
         if body.download and existing["status"] in ("wanted", "failed"):
@@ -322,23 +333,42 @@ async def add_book(body: AddBook, request: Request):
     return book
 
 
-async def _add_wanted(url: str, search_now: bool, user_id: int | None = None) -> dict:
-    """An Audible book goes to Wanted; Narratarr then looks for a release for it."""
-    asin = audible.asin_from_url(url)
+async def _catalog_book(url: str, source: str) -> dict:
+    """A catalog book's details, in the shape wanted.add_wanted takes."""
+    if source == "audible":
+        try:
+            b = await audible.book(audible.asin_from_url(url))
+        except audible.AudibleError as e:
+            raise HTTPException(502, str(e))
+        if not b:
+            raise HTTPException(404, "Audible doesn't have that book any more.")
+        return b
+    src = get_source(source)
     try:
-        b = await audible.book(asin)
-    except audible.AudibleError as e:
-        raise HTTPException(502, str(e))
-    if not b:
-        raise HTTPException(404, "Audible doesn't have that book any more.")
-    added = wanted.add_wanted(b)
-    if added and user_id:
-        db.update(added["id"], requested_by=user_id)
-        added = db.get(added["id"])
-    book = added or wanted.in_library(asin, b["title"], b["author"]) or db.get_by_url(b["url"])
-    if search_now and book["status"] == "wanted" and book["source"] == "audible":
-        _background(_search_in_background(book["id"]))
-    return book
+        d = await src.details(url.split("#")[0])
+    except httpx.HTTPError as e:
+        raise _source_error(e, src.label)
+    return {**d.to_dict(), "url": d.url}
+
+
+async def _add_wanted(url: str, search_now: bool, user_id: int | None = None, source: str = "audible",
+                      kinds: tuple[str, ...] = ("audiobook",)) -> dict:
+    """A catalog book goes to Wanted, in each format asked for; Narratarr then looks for releases.
+
+    Returns the first format's library row (the audiobook, when both were asked for)."""
+    b = await _catalog_book(url, source)
+    rows = []
+    for kind in kinds:
+        added = wanted.add_wanted(b, kind, source)
+        if added and user_id:
+            db.update(added["id"], requested_by=user_id)
+            added = db.get(added["id"])
+        book = (added or wanted.in_library(b.get("asin") or "", b["title"], b["author"], kind=kind)
+                or db.get_by_url(wanted.url_for(b["url"], kind)))
+        if search_now and book["status"] == "wanted" and book["source"] in CATALOGS:
+            _background(_search_in_background(book["id"]))
+        rows.append(book)
+    return rows[0]
 
 
 def _background(coro) -> None:
@@ -368,7 +398,7 @@ async def download(book_id: int):
     book = _get_or_404(book_id)
     if book["status"] in db.ACTIVE:
         return book
-    if book["source"] == "audible":  # no release picked yet: look for one now
+    if book["source"] in CATALOGS:  # no release picked yet: look for one now
         try:
             pick = await wanted.search_and_grab(book)
         except ProwlarrError as e:
@@ -417,16 +447,44 @@ async def remove(book_id: int, delete_files: bool = False):
     await _drop_from_client(book)
     settings = config.load()
     if delete_files and book["path"]:
-        root = Path(settings.library_dir).expanduser().resolve()
-        path = Path(book["path"]).resolve()
-        others = [Path(b["path"]).resolve() for b in db.list_books() if b["path"] and b["id"] != book_id]
-        shared = any(o == path or path in o.parents for o in others)
-        # Only ever delete inside the library, and never a folder another book also lives in.
-        if root in path.parents and path.exists() and not shared:
-            shutil.rmtree(path, ignore_errors=True)
+        await asyncio.to_thread(_delete_files, book, settings)
     kept = await asyncio.to_thread(_clear_tmp, book, settings)
     db.delete(book_id)
     return {"ok": True, "kept": kept}
+
+
+def _delete_files(book: dict, settings: config.Settings) -> None:
+    """Delete a book's files. Only ever inside the library, and never another book's files.
+
+    An audiobook's folder can also hold the same book's ebook: then everything but the
+    ebook (and the cover and description it shows with) goes. An ebook is just its file,
+    plus its folder when nothing else is left in it.
+    """
+    root = Path(settings.library_dir).expanduser().resolve()
+    path = Path(book["path"]).resolve()
+    if root not in path.parents or not path.exists():
+        return
+    others = [Path(b["path"]).resolve() for b in db.list_books() if b["path"] and b["id"] != book["id"]]
+    if path.is_file():
+        if path in others:
+            return
+        path.unlink()
+        folder = path.parent
+        alone = not any(o == folder or folder in o.parents or o in folder.parents for o in others)
+        if folder != root and alone and all(ebooks.sidecar(p) or ebooks.clutter(p) for p in folder.iterdir()):
+            shutil.rmtree(folder, ignore_errors=True)
+        return
+    inside = [o for o in others if o == path or path in o.parents]
+    if not inside:
+        shutil.rmtree(path, ignore_errors=True)
+    elif path not in inside and all(o.parent == path and not o.is_dir() for o in inside):
+        # Its other format's file lives here too. The two only ever share a folder the audiobook made, or one
+        # that held nothing but the ebook (see worker._companion_folder), so the rest is the audiobook's:
+        # everything goes except the ebook and the cover and description it shows with.
+        for item in path.iterdir():
+            if item in inside or item.name.lower().startswith("cover.") or item.name == "desc.txt":
+                continue
+            shutil.rmtree(item, ignore_errors=True) if item.is_dir() else item.unlink(missing_ok=True)
 
 
 def _clear_tmp(book: dict, settings: config.Settings) -> str:
@@ -491,15 +549,98 @@ async def stream(book_id: int, index: int):
 @app.get("/api/library/{book_id}/cover")
 async def cover(book_id: int):
     book = _get_or_404(book_id)
-    if book["path"] and Path(book["path"]).is_dir():
-        for found in sorted(Path(book["path"]).glob("cover.*")):
-            return FileResponse(found)
-        art = await asyncio.to_thread(importer.embedded_cover, Path(book["path"]))
-        if art:
-            return Response(art[0], media_type=art[1], headers={"Cache-Control": "max-age=86400"})
+    path = Path(book["path"]) if book["path"] else None
+    # Only plain images, never SVG or anything else that could run script on Narratarr's own address.
+    safe = {"headers": {"X-Content-Type-Options": "nosniff"}}
+    cached = {"headers": {"X-Content-Type-Options": "nosniff", "Cache-Control": "max-age=86400"}}
+    folder = path.parent if path and path.is_file() and wanted.kind_of(book) == "ebook" else path
+    if folder and folder.is_dir():
+        for found in sorted(folder.glob("cover.*")):
+            if found.suffix.lower() in COVER_TYPES:
+                return FileResponse(found, media_type=COVER_TYPES[found.suffix.lower()], **safe)
+        if folder == path:
+            art = await asyncio.to_thread(importer.embedded_cover, path)
+        else:
+            art = await asyncio.to_thread(ebooks.epub_cover, path) if path.suffix.lower() == ".epub" else None
+        if art and art[1] in COVER_TYPES.values():
+            return Response(art[0], media_type=art[1], **cached)
     if book["cover_url"].startswith(("http://", "https://")):
         return RedirectResponse(book["cover_url"])
     raise HTTPException(404, "No cover")
+
+
+def _ebook_path(book_id: int) -> tuple[dict, Path]:
+    book = _get_or_404(book_id)
+    path = Path(book["path"]) if book["path"] else None
+    if wanted.kind_of(book) != "ebook" or book["status"] != "completed" or not path or not ebooks.is_ebook(path):
+        raise HTTPException(404, "This ebook hasn't been downloaded yet.")
+    return book, path
+
+
+@app.get("/api/library/{book_id}/ebook")
+async def ebook_file(book_id: int, inline: bool = False):
+    """The ebook itself, to save or open in a reading app. A download, except a PDF the reader shows."""
+    book, path = _ebook_path(book_id)
+    name = f"{safe_name(book['title'], 'Ebook')}{path.suffix.lower()}"
+    shown = inline and path.suffix.lower() == ".pdf"  # the browser's own PDF viewer; never anything that runs script
+    return FileResponse(path, media_type=ebooks.EBOOK_TYPES[path.suffix.lower()], filename=name,
+                        content_disposition_type="inline" if shown else "attachment",
+                        headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-cache"})
+
+
+# Pages of a book come from the internet, so they're locked down: no scripts, nothing from outside
+# Narratarr, no forms, and only the reader may frame them. They keep Narratarr's origin (without
+# scripts) so the reader can lay them out as pages.
+READER_CSP = ("default-src 'none'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; "
+              "media-src 'self'; script-src 'none'; sandbox allow-same-origin; frame-ancestors 'self'; "
+              "base-uri 'none'; form-action 'none'")
+
+
+@app.get("/api/library/{book_id}/read")
+async def read_book(book_id: int):
+    """What the reader needs: the reading order and the table of contents."""
+    _, path = _ebook_path(book_id)
+    if path.suffix.lower() != ".epub":
+        raise HTTPException(415, "Narratarr can show EPUB books. Download this one to read it in another app.")
+    try:
+        index = await asyncio.to_thread(ebooks.epub_index, path)
+    except (ValueError, KeyError, zipfile.BadZipFile, ParseError, OSError) as e:
+        raise HTTPException(422, f"This EPUB can't be opened. It may be damaged. ({type(e).__name__})")
+    return {k: index[k] for k in ("title", "spine", "toc", "rtl")}
+
+
+@app.get("/api/library/{book_id}/read/{member:path}")
+async def read_page(book_id: int, member: str):
+    """One file from inside the book: a chapter, or a picture, stylesheet or font it uses."""
+    _, path = _ebook_path(book_id)
+    if path.suffix.lower() != ".epub":
+        raise HTTPException(404, "Not an EPUB.")
+    try:
+        found = await asyncio.to_thread(ebooks.epub_member, path, member)
+    except (ValueError, KeyError, zipfile.BadZipFile, ParseError, OSError):
+        found = None
+    if not found:
+        raise HTTPException(404, "That isn't in this book.")
+    data, kind = found
+    headers = {"Content-Security-Policy": READER_CSP, "X-Content-Type-Options": "nosniff",
+               "Cache-Control": "private, max-age=3600", "Referrer-Policy": "no-referrer"}
+    if kind == "application/octet-stream":
+        headers["Content-Disposition"] = "attachment"
+    return Response(data, media_type=kind, headers=headers)
+
+
+@app.post("/api/library/{book_id}/other-format")
+async def other_format(book_id: int, request: Request):
+    """Want the same book in the other format: the ebook of an audiobook, or the audiobook of an ebook."""
+    book = _get_or_404(book_id)
+    other, new = wanted.want_other_format(book)
+    if not new:
+        return other
+    me = getattr(request.state, "user", None)
+    if me:
+        db.update(other["id"], requested_by=me["id"])
+    _background(_search_in_background(other["id"]))
+    return db.get(other["id"])
 
 
 class Progress(BaseModel):
@@ -573,8 +714,8 @@ async def import_scan(body: ScanFolder):
                                                                for b in books if b["source"] == "local"}
     library = Path(config.load().library_dir).expanduser().resolve()
     for f in found:
-        f["in_library"] = f["path"] in known_paths or bool(wanted.in_library("", f["title"], f["author"], books)
-                                                           and f["title"] and f["author"])
+        same = wanted.in_library("", f["title"], f["author"], books, f["kind"])
+        f["in_library"] = f["path"] in known_paths or bool(same and f["title"] and f["author"])
         f["inside_library"] = library == Path(f["path"]) or library in Path(f["path"]).parents
     return {"folder": str(folder), "books": found}
 
@@ -603,7 +744,8 @@ async def import_books(body: ImportBooks):
         if not f:
             continue  # only books that are really in that folder
         f = {**f, "title": item.title.strip() or f["title"], "author": item.author.strip() or f["author"]}
-        mode = "copy" if body.mode == "inplace" and f["single_file"] else body.mode
+        # The player needs an audiobook in a folder of its own; an ebook is a single file anyway.
+        mode = "copy" if body.mode == "inplace" and f["single_file"] and f["kind"] == "audiobook" else body.mode
         if db.get_by_url(importer.url_for(Path(f["path"]))) or db.get_by_path(f["path"]):
             continue
         added.append(db.insert(importer.as_book(f, mode, "completed" if mode == "inplace" else "queued")))

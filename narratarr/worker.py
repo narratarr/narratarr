@@ -12,6 +12,10 @@ the client to finish, then brings the files into the library: moved for Usenet,
 hard-linked or copied for torrents so they can keep seeding.
 
 Local imports (books the user already has) are copied or moved in from a folder.
+
+Ebooks go through the same steps, but only one file is kept (see ebooks.py), and it goes
+into the audiobook's folder when the library has the same book as an audiobook, so
+Audiobookshelf shows the two together. An ebook's path is its file, not a folder.
 """
 
 from __future__ import annotations
@@ -28,7 +32,7 @@ from pathlib import Path
 
 import httpx
 
-from . import audiobookshelf, config, db, downloaders, importer, media, wanted
+from . import audiobookshelf, config, db, downloaders, ebooks, importer, media, wanted
 from .downloaders import ClientError
 from .realdebrid import DEAD, RealDebrid, RealDebridError
 from .sources import Details, ProwlarrError, get_source
@@ -111,19 +115,60 @@ def tmp_dir(book: dict, settings: config.Settings) -> Path:
     return Path(settings.library_dir).expanduser() / ".narratarr-tmp" / f"{book['id']}-{tag}"
 
 
+def _companion_folder(book: dict, books: list[dict], root: Path) -> Path | None:
+    """The folder the same book's other format lives in, when this one can join it there.
+
+    An ebook joins its audiobook's folder. An audiobook joins the folder an ebook download
+    made, but only one holding nothing except that ebook and its cover and description:
+    never a folder of the user's own, like an author folder imported where it was. Either
+    way it has to be a folder in the library that no other book claims.
+    """
+    other = wanted.companion(book, books)
+    if not other or not other.get("path") or other["status"] != "completed":
+        return None
+    path = Path(other["path"]).resolve()
+    folder = path if wanted.kind_of(other) == "audiobook" else path.parent
+    if folder == root or root not in folder.parents or not folder.is_dir():
+        return None
+    if wanted.kind_of(book) == "audiobook":
+        if other["import_mode"] == "inplace" or any(
+            p != path and not ebooks.sidecar(p) and not ebooks.clutter(p) for p in folder.iterdir()
+        ):
+            return None
+    for b in books:
+        if b["id"] in (book["id"], other["id"]) or not b["path"]:
+            continue
+        p = Path(b["path"]).resolve()
+        if p == folder or folder in p.parents or p in folder.parents:
+            return None
+    return folder
+
+
 def unique_destination(book: dict, settings: config.Settings) -> Path:
-    """The book's folder: the one it already lives in, or a fresh one nobody else uses.
+    """The book's folder: the one it already lives in, its other format's, or a fresh one nobody else uses.
 
     Two books can resolve to the same folder (a template like "{author}", or two editions
     with the same title), and the library may hold folders Narratarr never made. Sharing
-    one would mix files and let "delete files" on one book wipe another's.
+    one would mix files and let "delete files" on one book wipe another's. The one exception
+    is the same book in both formats, which Audiobookshelf expects in one folder.
     """
     root = Path(settings.library_dir).expanduser().resolve()
+    ebook = wanted.kind_of(book) == "ebook"
     own = Path(book["path"]).resolve() if book.get("path") else None
+    if own and ebook:
+        own = own.parent
     if own and root in own.parents and own.is_dir():
         return own  # downloading again goes back where the book already lives
+    books = db.list_books()
+    shared = _companion_folder(book, books, root)
+    if shared:
+        return shared
     dest = destination(book, settings)
-    taken = {Path(b["path"]).resolve() for b in db.list_books() if b["path"] and b["id"] != book["id"]}
+    taken = {Path(b["path"]).resolve() for b in books if b["path"] and b["id"] != book["id"]}
+    if ebook and any(t in dest.parents and t != root for t in taken):
+        # A book lives in a folder above this one (say, audio straight in an author folder from an older
+        # "{author}" template): go beside it as "Author - Title" rather than into it.
+        dest = root / safe_name(f"{book['author']} - {book['title']}" if book["author"] else book["title"])
     base, n = dest, 2
     while dest in taken or any(dest in t.parents for t in taken) or has_files(dest):
         dest = base.with_name(f"{base.name} ({n})")
@@ -493,7 +538,10 @@ class Worker:
 
             db.update(book_id, status="downloading", progress=0, detail=f"Sent to {client.label}")
             folder = await self._wait_for_client(client, book_id, job_id, settings)
-            if not (folder.is_file() and folder.suffix.lower() in media.AUDIO_TYPES) and not media.audio_files(folder):
+            if wanted.kind_of(book) == "ebook":
+                if not ebooks.ebook_files(folder):
+                    raise ValueError("The torrent finished, but there's no ebook in it.")
+            elif not (folder.is_file() and folder.suffix.lower() in media.AUDIO_TYPES) and not media.audio_files(folder):
                 raise ValueError("The torrent finished, but there are no audio files in it.")
             tmp = self._fresh_tmp(book, settings)
             db.update(book_id, detail="Copying files from the torrent…")
@@ -603,6 +651,8 @@ class Worker:
     async def _organize(self, book: dict, tmp: Path, settings: config.Settings) -> Path:
         for archive in list(tmp.glob("*.zip")):
             await asyncio.to_thread(extract_zip, archive, tmp)
+        if wanted.kind_of(book) == "ebook":
+            return await self._organize_ebook(book, tmp, settings)
 
         dest = unique_destination(book, settings)
         replacing = bool(book.get("path")) and Path(book["path"]).resolve() == dest  # downloading again
@@ -618,7 +668,40 @@ class Worker:
             await self._in_thread(book["id"], lambda a, b, _stop: shutil.move(a, b), str(item), str(target))
         shutil.rmtree(tmp, ignore_errors=True)
 
-        # Audiobookshelf picks these up automatically.
+        await self._extras(book, dest)
+        await asyncio.to_thread(importer.extract_cover, dest)
+        return dest
+
+    async def _organize_ebook(self, book: dict, tmp: Path, settings: config.Settings) -> Path:
+        """Keep the best ebook file from the download, filed next to its audiobook if the library has one."""
+        pick = ebooks.best(await asyncio.to_thread(ebooks.ebook_files, tmp))
+        if pick is None:
+            raise ValueError("The download finished, but there's no ebook in it.")
+        folder = unique_destination(book, settings)
+        folder.mkdir(parents=True, exist_ok=True)
+        target = folder / f"{safe_name(book['title'], 'Untitled')}{pick.suffix.lower()}"
+        old = Path(book["path"]) if book.get("path") else None
+        mine = old is not None and old.parent.resolve() == folder.resolve()  # downloading again
+        if not (mine and old.name == target.name):
+            target = free_name(target)
+        db.update(book["id"], path=str(target))  # claim it, so a parallel download can't pick the same name
+        # Staged next to its final name, then swapped in, so a failed move never costs the copy we had.
+        staged = folder / f".{target.name}.narratarr-part"
+        await self._in_thread(book["id"], lambda a, b, _stop: shutil.move(a, b), str(pick), str(staged))
+        staged.replace(target)
+        if mine and old.name != target.name and old.is_file():
+            old.unlink()  # the earlier download, in another format
+        shutil.rmtree(tmp, ignore_errors=True)
+        if not media.audio_files(folder):  # the audiobook's own description and cover win when it's there
+            await self._extras(book, folder)
+            if not any(folder.glob("cover.*")) and target.suffix == ".epub":
+                art = await asyncio.to_thread(ebooks.epub_cover, target)
+                if art:
+                    (folder / ("cover.png" if "png" in art[1] else "cover.jpg")).write_bytes(art[0])
+        return target
+
+    async def _extras(self, book: dict, dest: Path) -> None:
+        """Description, narrator and cover next to the book. Audiobookshelf picks these up automatically."""
         if book["description"]:
             (dest / "desc.txt").write_text(book["description"])
         if book["narrators"]:
@@ -635,8 +718,6 @@ class Worker:
                                 (dest / f"cover.{ext}").write_bytes(data)
             except httpx.HTTPError:
                 pass
-        await asyncio.to_thread(importer.extract_cover, dest)
-        return dest
 
     async def _notify_audiobookshelf(self, settings: config.Settings) -> None:
         if not (settings.audiobookshelf_url and settings.audiobookshelf_token and settings.audiobookshelf_library_id):

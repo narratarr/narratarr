@@ -35,6 +35,7 @@ class Settings:
     prowlarr_url: str = ""
     prowlarr_api_key: str = ""
     prowlarr_categories: str = "3030"  # Newznab/Torznab "Audio/Audiobook"
+    prowlarr_ebook_categories: str = "7020"  # "Books/EBook"
     sabnzbd_url: str = ""
     sabnzbd_api_key: str = ""
     sabnzbd_category: str = ""

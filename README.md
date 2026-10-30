@@ -75,6 +75,7 @@ No other app needed. You get chapters (including the chapter markers inside `.m4
 - **Light and dark** themes that follow your system
 - Plugs into your **\*arr stack**: **Prowlarr** for search; **SABnzbd** or **NZBGet** for Usenet; **qBittorrent**, **Transmission**, **Deluge** or Real-Debrid for torrents
 - **Wanted list** that fills itself: follow **authors and series** and new releases are found and downloaded automatically
+- **Ebooks too:** want any book as an audiobook, an ebook or both, and read EPUBs right in Narratarr. The ebook lands next to its audiobook, so Audiobookshelf shows them as one book
 - **Import** the audiobooks you already have, or point it at an existing Audiobookshelf library
 - **Audiobookshelf** in a click: Narratarr finds your server (on this machine, in Docker, across your network, or at a public address), you sign in once, and it rescans after every download
 - **Accounts for the whole household**: admins run things, listeners browse, request and listen, and everyone keeps their own place in every book
@@ -237,6 +238,7 @@ flowchart LR
 | **AudiobookBay** *(optional)* | Torrent listings | Via Real-Debrid (paid account required) |
 | **Prowlarr** *(optional)* | Whatever indexers you've added to your own [Prowlarr](https://prowlarr.com) | Usenet via SABnzbd or NZBGet; torrents via Real-Debrid, qBittorrent, Transmission or Deluge |
 | **Audible catalog** *(with Prowlarr)* | Every audiobook in Audible's store, with covers, series and release dates | Nothing downloads from Audible: books go to **Wanted** and Narratarr finds them on your indexers (or free on LibriVox) |
+| **Open Library** *(with Prowlarr)* | Millions of books, including ones that were never made into audiobooks: trending, by subject, or by search | Like the Audible catalog: books go to **Wanted**, as ebooks unless you pick otherwise |
 
 Narratarr deliberately sticks to the Internet Archive's **curated** LibriVox and Old-Time Radio collections. The Archive's general uploads include copyrighted audiobooks posted without permission, so those are left out.
 
@@ -264,7 +266,7 @@ Press **Test** next to each one. Once Prowlarr is connected, a **Prowlarr** tab 
 - **qBittorrent / Transmission / Deluge:** when the torrent finishes, Narratarr **hard-links** the files into your library (copying only if they're on different drives). The torrent keeps seeding, which matters on private trackers.
 - **Stop or Remove** in Narratarr also removes an unfinished download from the client.
 
-Narratarr searches category `3030` (*Audio › Audiobook*) by default; you can add more under **Settings → Prowlarr**. To go easy on indexer API limits, each search is sent once as typed, and a second, spelling-corrected search is only made when the first finds little.
+Narratarr searches category `3030` (*Audio › Audiobook*) for audiobooks and `7020` (*Books › EBook*) for ebooks by default; you can change either under **Settings → Prowlarr**. To go easy on indexer API limits, each search is sent once as typed, and a second, spelling-corrected search is only made when the first finds little.
 
 > [!TIP]
 > **Running it all in Docker?** Narratarr needs to see your clients' finished downloads. Mount the same host folder into every container, ideally at the same path:
@@ -290,11 +292,12 @@ Some books aren't out yet, or aren't on your indexers yet. Put them on your **Wa
 - **Add any book:** the **Audible catalog** tab on Discover browses and searches Audible's whole store, including bestsellers, new releases, genres and books that haven't come out yet. Press **Add to Wanted**. Nothing is downloaded from Audible; it's only used for the book's details.
 - **Automatic search:** Narratarr checks your Prowlarr indexers, and LibriVox for public-domain titles, every 12 hours (adjustable). It only grabs a release when both the title *and* the author match, preferring free LibriVox recordings, M4B files and torrents with seeders. A few books are checked at a time to stay within your indexers' API limits, and books that aren't released yet wait until their release date.
 - **Pick a release yourself:** open a Wanted book and press **Pick a release** to see every match with a score, then **Grab** the one you want. The book keeps Audible's title, cover and description whichever release you pick.
+- **Audiobook, ebook or both:** when you add a book to Wanted, choose the format. You can also open any book in your library and press **Want it too** on the format you don't have yet. Ebooks are searched for in your indexers' ebook categories, and Narratarr keeps one file per book, preferring EPUB, then AZW3, MOBI and PDF. The ebook goes into the audiobook's folder (or the audiobook into the ebook's), which is how Audiobookshelf shows both as one book. A finished EPUB opens in Narratarr's own reader (pages you turn, Paper, Sepia and Night themes, text size and font, contents, and your place remembered), a PDF in your browser's viewer, and any ebook can be downloaded for Apple Books, Kindle, Kobo or another reading app.
 - **Follow authors and series:** on the **Authors** page, search for an author and press **Follow**, or press **Follow** on any book's author or series. Their new releases (and, if you like, everything already out) go straight to Wanted. Each author and series page shows their books, what's in your library, and an **Add all missing** button.
 
 ### Importing books you already have
 
-**Library → Import books** scans any folder on the computer running Narratarr. Each folder of audio files becomes one book (`CD1`/`Disc 2` sub-folders stay together), named from the files' tags or from the folder names (`Author/Title` or `Author - Title`). Check the names, fix any, then choose:
+**Library → Import books** scans any folder on the computer running Narratarr. Each folder of audio files becomes one book (`CD1`/`Disc 2` sub-folders stay together), named from the files' tags or from the folder names (`Author/Title` or `Author - Title`). Ebook files (EPUB, MOBI, AZW3, PDF, FB2, CBZ, CBR) that aren't inside an audiobook's folder come in as ebooks, named from the EPUB itself where possible. Several formats of the same book count once. Check the names, fix any, then choose:
 
 - **Copy in:** copies them into your library, organized as `Author/Title`, and leaves the originals alone.
 - **Move in:** the same, but moves them.
@@ -343,7 +346,7 @@ docker exec -it -u "$(id -u):$(id -g)" narratarr narratarr users passwd <name>  
 
 ### Requesting from other apps (API)
 
-Apps can request books for you without opening Narratarr. They sign in with your account once, get tokens of their own, and can then search Audible's catalog, request a book and follow it until it's in your library. Every app signed in to your account is listed under the account button, where you can disconnect it. Changing your password disconnects them all.
+Apps can request books for you without opening Narratarr. They sign in with your account once, get tokens of their own, and can then search Audible's catalog, request a book (as an audiobook or an ebook) and follow it until it's in your library. Every app signed in to your account is listed under the account button, where you can disconnect it. Changing your password disconnects them all.
 
 App tokens only reach this API, never settings or users. The API is versioned and only ever grows, so apps built on it keep working. For developers: [docs/api.md](docs/api.md), plus a live reference at `/api/v1/docs`.
 
@@ -365,9 +368,10 @@ Narratarr has no telemetry and phones nobody. These are the only outside service
 | **archive.org** | Your LibriVox / Old-Time Radio searches, and the titles of Wanted books during automatic searches | Using those tabs; automatic search |
 | **Apple's audiobook search** (itunes.apple.com) | What you type in the search box, and Prowlarr release names (to work out the real title) | Only while **Smart search** is on |
 | **Audible's catalog** and **Audnexus** (api.audnex.us) | Your searches on the Audible tab, and the authors and series you follow | Using the Audible tab; following |
+| **Open Library** (openlibrary.org) | Your searches and the subjects you browse on the Open Library tab | Using the Open Library tab |
 | **Brave Search** | Your searches, with your Brave key | Only if you turn it on |
 | **Real-Debrid**, **Prowlarr**, **SABnzbd**, **NZBGet**, **qBittorrent**, **Transmission**, **Deluge**, **Audiobookshelf** | Whatever each needs, with the key you entered for it | Only the ones you set up |
-| **Cover image hosts** (archive.org, Amazon's image CDN, your indexers) | Nothing but the image request, with no referrer | Your browser loads cover art directly |
+| **Cover image hosts** (archive.org, Amazon's image CDN, covers.openlibrary.org, your indexers) | Nothing but the image request, with no referrer | Your browser loads cover art directly |
 | **GitHub** (api.github.com) | Nothing but the request for the latest release | Once a day, for the update badge. Off under Settings → Updates |
 
 Fonts are bundled, so the UI itself never contacts a CDN. Torrents downloaded through **qBittorrent, Transmission or Deluge** expose your IP address to other peers, as with any torrent client; Real-Debrid doesn't.
@@ -454,9 +458,11 @@ narratarr/
     audiobookbay.py   optional torrent source
     prowlarr.py       searches your Prowlarr indexers (Usenet + torrents)
     audible.py        Audible's catalog as a Discover tab (adds to Wanted)
+    openlibrary.py    Open Library as a Discover tab (adds to Wanted, mostly for ebooks)
   wanted.py         Wanted books: release matching, automatic search, following
   audible.py        Audible catalog + Audnexus client (book, author and series details)
   importer.py       finds and brings in books already on disk
+  ebooks.py         ebook files: which to keep, what an EPUB says about itself, and its pages for the reader
   downloaders.py    common shape for download clients
   sabnzbd.py, nzbget.py, qbittorrent.py, transmission.py
   search.py         typo correction + ranking

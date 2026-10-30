@@ -609,6 +609,39 @@ def test_requests_are_rate_limited_per_person(app, kid, monkeypatch):
     assert app.post("/api/v1/requests", json={"asin": "B002V1OF70"}, headers=kid).status_code == 200  # re-asking is free
 
 
+def test_ebooks_are_requested_alongside_audiobooks(app, kid):
+    audio = app.post("/api/v1/requests", json={"asin": "B002V1OF70"}, headers=kid).json()
+    assert audio["format"] == "audiobook"  # what every request was before 0.7.0
+    r = app.post("/api/v1/requests", json={"asin": "B002V1OF70", "format": "ebook"}, headers=kid)
+    assert r.status_code == 201
+    ebook = r.json()
+    assert ebook["format"] == "ebook" and ebook["id"] != audio["id"] and ebook["narrators"] == []
+    again = app.post("/api/v1/requests", json={"asin": "B002V1OF70", "format": "ebook"}, headers=kid)
+    assert again.status_code == 200 and again.json()["id"] == ebook["id"]
+
+    book = app.get("/api/v1/books/B002V1OF70", headers=kid).json()
+    assert book["request"]["id"] == audio["id"] and book["ebook_request"]["id"] == ebook["id"]
+    other = app.get("/api/v1/search", params={"q": "hail mary"}, headers=kid).json()["items"][0]
+    assert other["request"] is None and other["ebook_request"] is None
+
+    # Lists show audiobooks unless asked: apps built before 0.7.0 see just what they always saw.
+    ids = lambda **q: [i["id"] for i in app.get("/api/v1/requests", params=q, headers=kid).json()["items"]]  # noqa: E731
+    assert ids() == [audio["id"]]
+    assert ids(format="ebook") == [ebook["id"]]
+    assert sorted(ids(format="all")) == sorted([audio["id"], ebook["id"]])
+    assert err(app.get("/api/v1/requests", params={"format": "pdf"}, headers=kid)) == "validation_error"
+    assert err(app.post("/api/v1/requests", json={"asin": "B08G9PRS1K", "format": "both"}, headers=kid)) == "validation_error"
+
+
+def test_an_ebook_already_in_the_library_isnt_requested_again(app, kid):
+    db.insert({"source": "local", "source_url": "local:dune.epub", "title": "Dune", "author": "Frank Herbert",
+               "status": "completed", "kind": "ebook"})
+    r = app.post("/api/v1/requests", json={"asin": "B002V1OF70", "format": "ebook"}, headers=kid)
+    assert r.status_code == 200 and r.json()["status"] == "available" and r.json()["format"] == "ebook"
+    r = app.post("/api/v1/requests", json={"asin": "B002V1OF70"}, headers=kid)
+    assert r.status_code == 201 and r.json()["format"] == "audiobook"  # having the ebook isn't having the audiobook
+
+
 def test_requests_from_the_web_ui_remember_who_asked(people):
     c = client(HOME)
     try:

@@ -60,6 +60,17 @@
             ],
             "title": "Description"
           },
+          "ebook_request": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RequestOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Narratarr's request for this book as an ebook, if it has one. Added in Narratarr 0.7.0."
+          },
           "language": {
             "anyOf": [
               {
@@ -99,7 +110,7 @@
                 "type": "null"
               }
             ],
-            "description": "Narratarr's request for this book, if it has one."
+            "description": "Narratarr's request for this book as an audiobook, if it has one."
           },
           "runtime_minutes": {
             "anyOf": [
@@ -148,7 +159,8 @@
           "release_date",
           "language",
           "abridged",
-          "request"
+          "request",
+          "ebook_request"
         ],
         "title": "BookOut",
         "type": "object"
@@ -266,6 +278,16 @@
             "pattern": "^[A-Z0-9]{10}$",
             "title": "Asin",
             "type": "string"
+          },
+          "format": {
+            "default": "audiobook",
+            "description": "audiobook (the default) or ebook. To want both, make two requests. Added in Narratarr 0.7.0.",
+            "enum": [
+              "audiobook",
+              "ebook"
+            ],
+            "title": "Format",
+            "type": "string"
           }
         },
         "required": [
@@ -333,6 +355,15 @@
               }
             ],
             "title": "Cover Url"
+          },
+          "format": {
+            "description": "audiobook or ebook. A book wanted in both formats is two requests. Added in Narratarr 0.7.0; more formats may be added.",
+            "enum": [
+              "audiobook",
+              "ebook"
+            ],
+            "title": "Format",
+            "type": "string"
           },
           "id": {
             "title": "Id",
@@ -432,6 +463,7 @@
         "required": [
           "id",
           "asin",
+          "format",
           "title",
           "authors",
           "narrators",
@@ -668,7 +700,7 @@
     }
   },
   "info": {
-    "description": "Search Audible's catalog, request audiobooks and follow them until they're in the library. See docs/api.md in the Narratarr repository for the full guide.",
+    "description": "Search Audible's catalog, request audiobooks and ebooks, and follow them until they're in the library. See docs/api.md in the Narratarr repository for the full guide.",
     "title": "Narratarr API",
     "version": "1"
   },
@@ -1236,6 +1268,23 @@
               "description": "Only books this person requested.",
               "title": "Mine",
               "type": "boolean"
+            }
+          },
+          {
+            "description": "Which format to list: audiobook (the default, as before 0.7.0), ebook, or all.",
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "default": "audiobook",
+              "description": "Which format to list: audiobook (the default, as before 0.7.0), ebook, or all.",
+              "enum": [
+                "audiobook",
+                "ebook",
+                "all"
+              ],
+              "title": "Format",
+              "type": "string"
             }
           },
           {

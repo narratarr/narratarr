@@ -3,9 +3,11 @@ from .archive import ArchiveSource, librivox, oldtimeradio
 from .audible import AudibleCatalog
 from .audiobookbay import AudiobookBay
 from .base import Category, Details, Listing, Page, Source
+from .openlibrary import OpenLibrary
 from .prowlarr import Prowlarr, ProwlarrError
 
-ORDER = ("librivox", "oldtimeradio", "audiobookbay", "prowlarr", "audible")
+ORDER = ("librivox", "oldtimeradio", "audiobookbay", "prowlarr", "audible", "openlibrary")
+CATALOGS = ("audible", "openlibrary")  # where book details come from; the book itself comes from your indexers
 
 
 def all_sources() -> dict[str, Source]:
@@ -16,7 +18,14 @@ def all_sources() -> dict[str, Source]:
         "oldtimeradio": oldtimeradio(),
         "prowlarr": Prowlarr(s.prowlarr_url, s.prowlarr_api_key, s.prowlarr_categories),
         "audible": AudibleCatalog(),
+        "openlibrary": OpenLibrary(),
     }
+
+
+def ebook_indexers() -> Prowlarr:
+    """Prowlarr, searching the ebook categories instead of the audiobook ones."""
+    s = config.load()
+    return Prowlarr(s.prowlarr_url, s.prowlarr_api_key, s.prowlarr_ebook_categories, fallback="7020")
 
 
 def get_source(name: str = "audiobookbay") -> Source:
@@ -35,6 +44,6 @@ def source_for_url(url: str) -> Source | None:
 
 
 __all__ = [
-    "ArchiveSource", "AudibleCatalog", "AudiobookBay", "Category", "Details", "Listing", "Page", "Prowlarr", "ProwlarrError", "Source",
-    "all_sources", "get_source", "source_for_url",
+    "CATALOGS", "ArchiveSource", "AudibleCatalog", "AudiobookBay", "Category", "Details", "Listing", "OpenLibrary", "Page",
+    "Prowlarr", "ProwlarrError", "Source", "all_sources", "ebook_indexers", "get_source", "source_for_url",
 ]

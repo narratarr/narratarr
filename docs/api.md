@@ -1,6 +1,6 @@
 # Narratarr API v1
 
-For apps that request audiobooks on someone's behalf: search Audible's catalog, ask for a book, and follow it until it's in the library. Narratarr then finds a release, downloads it and files it, and media servers like Audiobookshelf pick it up from there.
+For apps that request books on someone's behalf: search Audible's catalog, ask for a book as an audiobook or an ebook, and follow it until it's in the library. Narratarr then finds a release, downloads it and files it, and media servers like Audiobookshelf pick it up from there.
 
 - **Base URL:** `https://<your Narratarr>/api/v1`
 - **Interactive reference:** `/api/v1/docs` on any Narratarr 0.6.0 or later
@@ -121,7 +121,8 @@ GET /api/v1/search?q=project%20hail%20mary&page=1
       "release_date": "2021-05-04",
       "language": "English",
       "abridged": false,
-      "request": null
+      "request": null,
+      "ebook_request": null
     }
   ],
   "page": 1,
@@ -129,7 +130,7 @@ GET /api/v1/search?q=project%20hail%20mary&page=1
 }
 ```
 
-The search covers Audible's catalog for the server's region, with one edition per title and books only (no podcasts). `q` is 1–200 characters and `page` is 1–10. When Narratarr already has a book, `request` holds it (see below), so you can show "Requested" or "In library" next to the result.
+The search covers Audible's catalog for the server's region, with one edition per title and books only (no podcasts). `q` is 1–200 characters and `page` is 1–10. When Narratarr already has a book, `request` holds it (see below), so you can show "Requested" or "In library" next to the result. `ebook_request` is the same for the book's ebook (since 0.7.0).
 
 `GET /api/v1/books/{asin}` returns one book in the same shape.
 
@@ -145,12 +146,26 @@ Content-Type: application/json
 - **`201 Created`** means it's new. The reply is the request, and `Location` gives its URL. Narratarr starts looking for a release straight away and keeps looking on its schedule.
 - **`200 OK`** means Narratarr already has it, whether requested, downloading or in the library. That includes the same book from another source or another edition. The reply is the existing request. Asking twice is always safe.
 
+### Ebooks
+
+Since Narratarr 0.7.0, a request can be for the ebook instead:
+
+```http
+POST /api/v1/requests
+Content-Type: application/json
+
+{"asin": "B08G9PRS1K", "format": "ebook"}
+```
+
+`format` is `audiobook` (the default, and what every request was before 0.7.0) or `ebook`. A book wanted in both formats is two requests, each with its own id and status, so to ask for both, send both. Having one format doesn't count as having the other. The ASIN is still the Audible one: it says which book, and Narratarr finds the ebook on the server's indexers. When both formats arrive, Narratarr files them in one folder, so Audiobookshelf shows the book with a player and a reader.
+
 A request looks like this:
 
 ```json
 {
   "id": 42,
   "asin": "B08G9PRS1K",
+  "format": "audiobook",
   "title": "Project Hail Mary",
   "authors": ["Andy Weir"],
   "narrators": ["Ray Porter"],
@@ -174,12 +189,12 @@ A request looks like this:
 | `available` | In the library. `available_at` says since when. |
 | `failed` | It didn't work. `message` says why. Narratarr's admin can retry it. |
 
-`asin` is `null` for books that didn't come from Audible's catalog, such as imports or AudiobookBay. Times are ISO 8601 in UTC. `message` is for people.
+`asin` is `null` for books that didn't come from Audible's catalog, such as imports or AudiobookBay. `format` is `audiobook` or `ebook`; ignore requests in formats you don't know, since more may be added. An ebook has no narrators. Times are ISO 8601 in UTC. `message` is for people.
 
 ### Following requests
 
 ```http
-GET /api/v1/requests?status=wanted,downloading&mine=true&limit=50&offset=0
+GET /api/v1/requests?status=wanted,downloading&mine=true&format=audiobook&limit=50&offset=0
 ```
 
 ```json
@@ -190,6 +205,7 @@ The list includes everything Narratarr has (everyone shares one library), most r
 
 - `status` takes one or more of the four statuses, comma-separated.
 - `mine=true` keeps only books this person requested.
+- `format` is `audiobook` (the default), `ebook` or `all`. The default keeps lists exactly as they were before 0.7.0, so apps that don't know about ebooks never see one.
 - `limit` is 1–100 and `offset` starts at 0.
 
 `GET /api/v1/requests/{id}` returns one request. Polling every 15–30 seconds while something is downloading, and less often otherwise, is plenty.
@@ -258,3 +274,4 @@ If you're signed in to Narratarr in the same browser, `/api/v1/docs` lets you tr
 ## Changes
 
 - **v1, Narratarr 0.6.0:** first release: sign-in, search, books, requests.
+- **v1, Narratarr 0.7.0:** ebooks. `format` on new requests and on every request, `ebook_request` on books, and a `format` filter on `GET /requests` (audiobooks by default).

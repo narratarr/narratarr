@@ -70,7 +70,10 @@ MIGRATIONS = {
     "last_searched": "REAL",
     "search_note": "TEXT NOT NULL DEFAULT ''",
     "requested_by": "INTEGER",  # the user who added it, when known
+    "kind": "TEXT NOT NULL DEFAULT 'audiobook'",  # or "ebook"; a book wanted in both formats is two rows
 }
+
+KINDS = ("audiobook", "ebook")
 
 JSON_COLUMNS = ("narrators", "categories", "trackers", "files", "series")
 

@@ -2,6 +2,17 @@
 
 All notable changes to Narratarr. The app shows this under **Settings → Updates**.
 
+## 0.7.0 — 2026-10-30
+
+- **Ebooks.** Want any book as an **audiobook, an ebook or both**: choose when you add it to Wanted, or open a book in your library and press **Want it too** on the format you don't have. Ebooks are found in your indexers' ebook categories (`7020`, *Books › EBook*, by default; change it under **Settings → Prowlarr**), and one file is kept per book, preferring EPUB, then AZW3, MOBI and PDF.
+- **Next to its audiobook.** The ebook goes into the audiobook's folder, or the audiobook into the ebook's, which is how Audiobookshelf shows the two as one book with both a player and a reader. Removing one format with its files leaves the other alone.
+- **Open Library** on Discover, for books that never became audiobooks: trending, twelve subjects, and search. Its books are wanted as ebooks unless you pick otherwise.
+- **Read in Narratarr.** EPUBs open in a built-in reader that turns pages like a book: two pages side by side on a wide screen, one on a phone. Tap or swipe the edges, or use the arrow keys. Choose Paper, Sepia or Night (or follow your system), the text size and the font, and one page or two on a wide screen. The contents show each chapter's number and where you are, and the footer shows the page and roughly how long the book has left. On a phone, the contents and the text and theme settings rise from the bottom, within reach of your thumb. It remembers your place, and **Continue reading** sits next to Continue listening in your library. PDFs open in your browser's viewer, and every ebook can still be downloaded for Apple Books, Kindle, Kobo or any reading app.
+- Books from the internet can't do anything in the reader: their pages run no scripts, load nothing from outside Narratarr, and can't send forms.
+- In your library, ebooks wear an **Ebook** badge, show their whole cover and how far you've read. Filter by format.
+- **Import** brings in ebook files too, named from the EPUB itself where possible. An ebook can be left where it is.
+- **API:** requests take an optional `format` (`audiobook` or `ebook`), and every request now says its format. Lists still show audiobooks unless an app asks for `format=ebook` or `format=all`, so apps built for 0.6.0 see exactly what they did. See `docs/api.md`.
+
 ## 0.6.0 — 2026-10-29
 
 - **An API for apps: request books without opening Narratarr.** Apps such as audiobook players can sign in with your account and then search Audible's catalog, request a book, and follow it from Wanted to in your library. It's versioned (`/api/v1`) and only ever grows, so apps built on it keep working across releases. Developers: see `docs/api.md`, or `/api/v1/docs` on your server.

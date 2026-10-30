@@ -3,6 +3,7 @@
 import { $, $$, esc, I, api, hue, coverHTML, firstAuthor, fmtBytes, fmtLeft, ago, toast } from "./util.js";
 import { player } from "./player.js";
 import { openAbsGuide } from "./guide.js";
+import { reader } from "./reader.js";
 
 
 const ACTIVE = ["queued", "resolving", "caching", "downloading", "organizing"];
@@ -23,6 +24,14 @@ const PHASES = [
   ["organizing", "Organize"],
 ];
 const CLIENTS = { sabnzbd: "SABnzbd", nzbget: "NZBGet", realdebrid: "Real-Debrid", qbittorrent: "qBittorrent", transmission: "Transmission", deluge: "Deluge" };
+// Catalogs are where book details come from; the book itself is then found on your indexers.
+const CATALOGS = ["audible", "openlibrary"];
+const isCatalog = (name) => CATALOGS.includes(name);
+const FORMATS = {
+  audiobook: { label: "Audiobook", icon: "headphones", wanted: "" },
+  ebook: { label: "Ebook", icon: "book", wanted: " as an ebook" },
+  both: { label: "Both", icon: "", wanted: " as an audiobook and an ebook" },
+};
 
 
 // ---------------------------------------------------------------------------
@@ -35,7 +44,9 @@ const state = {
   libraryKey: "",
   discover: { q: "", category: "", page: 0, total: 1, items: [], loading: false, error: "", token: 0, dym: "", lang: "", fmt: "", sort: "", source: lastSource() },
   libFilter: "all",
+  libFormat: "",
   libSearch: "",
+  format: savedFormat(), // what catalog books are wanted as: audiobook, ebook or both ("" until someone picks)
   drawer: null, // { url, bookId }
   view: null,
   follows: [],
@@ -44,6 +55,21 @@ const state = {
 
 
 const byUrl = () => new Map(state.library.map((b) => [b.source_url, b]));
+// A catalog book in the library: its audiobook, or its ebook when that's all there is.
+const libFor = (map, url) => map.get(url) || map.get(`${url}#ebook`);
+const isEbook = (b) => b?.kind === "ebook";
+// EPUBs open in Narratarr's reader, PDFs in the browser's own viewer; other formats are downloaded.
+const canRead = (b) => isEbook(b) && b.status === "completed" && /\.(epub|pdf)$/i.test(b.path || "");
+// Part-way through: listening (seconds) or reading (percent).
+const underway = (b) => b.status === "completed" && !b.finished && b.listen_duration
+  && (isEbook(b) ? b.listen_position > 0 : b.listen_position > 30);
+const readLeft = (b) => `${Math.max(1, Math.round(100 - (b.listen_position / b.listen_duration) * 100))}% left`;
+
+function savedFormat() {
+  try { return localStorage.getItem("narratarr.format") || ""; } catch { return ""; }
+}
+// Open Library is mostly for ebooks, so its books start out as ebooks until someone picks otherwise.
+const formatFor = (source) => state.format || (source === "openlibrary" ? "ebook" : "audiobook");
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -103,6 +129,7 @@ function lastSource() {
 const FALLBACK_SOURCES = {
   local: { label: "Your files", delivery: "local" },
   audible: { label: "Audible catalog", delivery: "wanted" },
+  openlibrary: { label: "Open Library", delivery: "wanted" },
 };
 const sourceInfo = (name) => state.sources.find((s) => s.name === name)
   || { name, label: name, delivery: "torrent", categories: [], ...FALLBACK_SOURCES[name] };
@@ -110,7 +137,7 @@ const isDirect = (name) => sourceInfo(name).delivery === "direct";
 
 // Which download client a book needs that isn't set up yet ("" when it can download now).
 function missingClient(source, protocol) {
-  if (isDirect(source) || source === "audible" || source === "local") return "";
+  if (isDirect(source) || isCatalog(source) || source === "local") return "";
   const st = state.settings || {};
   if (protocol === "usenet") return st.usenet_configured ? "" : CLIENTS[st.usenet_client] || "SABnzbd";
   return st.torrent_configured ? "" : CLIENTS[st.torrent_client] || "Real-Debrid";
@@ -130,12 +157,12 @@ function phasesFor(b) {
 // ---------------------------------------------------------------------------
 // library actions (shared by every view)
 
-async function addBook(url, { cover = "", title = "", source = "audiobookbay", protocol = "" } = {}) {
-  if (source === "audible") {
-    // Audible is only the catalog: the book goes to Wanted and Narratarr looks for a release.
-    const book = await api("/api/library", { method: "POST", body: { url, download: true, source } });
+async function addBook(url, { cover = "", title = "", source = "audiobookbay", protocol = "", format = formatFor(source) } = {}) {
+  if (isCatalog(source)) {
+    // A catalog only describes the book: it goes to Wanted and Narratarr looks for a release.
+    const book = await api("/api/library", { method: "POST", body: { url, download: true, source, format } });
     await refreshLibrary();
-    toast(book.status === "wanted" ? `${book.title} is on your Wanted list. Looking for it now…` : `${book.title} is already in your library`,
+    toast(book.status === "wanted" ? `${book.title} is on your Wanted list${FORMATS[format].wanted}. Looking for it now…` : `${book.title} is already in your library`,
       { kind: "ok", cover: cover || book.cover_url });
     return book;
   }
@@ -240,7 +267,7 @@ function cardHTML(item, lib, i = 0) {
   const facts = [
     item.format, item.size, item.language && item.language !== "English" ? item.language : "",
     item.protocol === "usenet" ? "Usenet" : item.seeders != null ? `${item.seeders} seeder${item.seeders === 1 ? "" : "s"}` : "",
-    item.source === "audible" ? shortLength(item.length) : "",
+    item.source === "audible" ? shortLength(item.length) : item.source === "openlibrary" ? item.posted : "",
     item.source === "audible" ? releaseLabel(item.released || item.posted) : "",
   ].filter(Boolean);
   const active = lib && ACTIVE.includes(lib.status);
@@ -270,7 +297,12 @@ function releaseLabel(day, always = false) {
 }
 
 function quickButton(item, lib) {
-  if (!lib && item.source === "audible") return `<button class="quick" data-quick aria-label="Add ${esc(item.title)} to Wanted" title="Add to Wanted">${I.bookmark}</button>`;
+  if (!lib && isCatalog(item.source)) {
+    const as = FORMATS[formatFor(item.source)].wanted;
+    return `<button class="quick" data-quick aria-label="Add ${esc(item.title)} to Wanted${as}" title="Add to Wanted${as}">${I.bookmark}</button>`;
+  }
+  if (canRead(lib)) return `<button class="quick play-quick" data-play="${lib.id}" aria-label="Read ${esc(item.title)}" title="Read">${I.book}</button>`;
+  if (isEbook(lib) && lib.status === "completed") return `<a class="quick" href="/api/library/${lib.id}/ebook" download aria-label="Download the ebook of ${esc(item.title)}" title="Download ebook">${I.down}</a>`;
   if (!lib) return `<button class="quick" data-quick aria-label="Download ${esc(item.title)}" title="Download">${I.plus}</button>`;
   if (lib.status === "completed") return `<button class="quick play-quick" data-play="${lib.id}" aria-label="Play ${esc(item.title)}" title="Play">${I.play}</button>`;
   return "";
@@ -294,12 +326,12 @@ function Discover(root) {
     <header class="hero">
       <div>
         <div class="eyebrow">${greeting}</div>
-        <h1 class="page-title">What are we <em>listening</em> to next?</h1>
+        <h1 class="page-title">What are we <em>${isCatalog(d.source) && formatFor(d.source) === "ebook" ? "reading" : "listening"}</em> to next?</h1>
       </div>
       <div class="sources" id="sources" role="tablist" aria-label="Where to look">
         ${state.sources.map((s) => `
           <button role="tab" aria-selected="${s.name === d.source}" class="source ${s.name === d.source ? "on" : ""}" data-src="${esc(s.name)}">
-            <b>${esc(s.label)}</b><small>${esc({ direct: "Free · direct download", indexer: "Your indexers", wanted: "Add to Wanted" }[s.delivery] || "Torrents")}</small>
+            <b>${esc(s.label)}</b><small>${esc(s.name === "openlibrary" ? "Books · for ebooks" : { direct: "Free · direct download", indexer: "Your indexers", wanted: "Add to Wanted" }[s.delivery] || "Torrents")}</small>
           </button>`).join("")}
       </div>
       <div class="search-wrap">
@@ -379,7 +411,7 @@ function Discover(root) {
   function renderItems() {
     const lib = byUrl();
     const items = visibleItems();
-    grid.innerHTML = items.map((it, i) => cardHTML(it, lib.get(it.url), i)).join("");
+    grid.innerHTML = items.map((it, i) => cardHTML(it, libFor(lib, it.url), i)).join("");
     if (!items.length && !d.loading) {
       const filtered = d.items.length > 0;
       grid.innerHTML = `<div class="empty" style="grid-column:1/-1">
@@ -531,6 +563,7 @@ function Discover(root) {
       renderItems(); heading();
       return;
     }
+    if (e.target.closest("a.quick")) return; // an ebook download: let the link do it
     const play = e.target.closest("[data-play]");
     if (play) return playBook(Number(play.dataset.play));
     const card = e.target.closest(".card[data-url]");
@@ -562,7 +595,7 @@ function Discover(root) {
       if (structural && !d.loading && d.items.length) return renderItems();
       const lib = byUrl();
       $$(".card[data-url]", grid).forEach((card) => {
-        const b = lib.get(card.dataset.url);
+        const b = libFor(lib, card.dataset.url);
         const bar = $(".bar i", card);
         if (bar && b) bar.style.width = `${b.progress || 0}%`;
       });
@@ -577,7 +610,14 @@ function Discover(root) {
 function libCardHTML(b, i) {
   const h = hue(b.title + b.author);
   const active = ACTIVE.includes(b.status);
-  const listening = b.status === "completed" && !b.finished && b.listen_position > 30 && b.listen_duration;
+  const listening = underway(b);
+  const ebook = isEbook(b);
+  const quick = b.status !== "completed" ? ""
+    : canRead(b) ? `<button class="quick play-quick" data-play="${b.id}" aria-label="Read ${esc(b.title)}" title="Read">${I.book}</button>`
+    : ebook ? `<a class="quick" href="/api/library/${b.id}/ebook" download aria-label="Download the ebook of ${esc(b.title)}" title="Download ebook">${I.down}</a>`
+    : `<button class="quick play-quick" data-play="${b.id}" aria-label="Play ${esc(b.title)}" title="Play">${I.play}</button>`;
+  const facts = listening ? [ebook ? readLeft(b) : fmtLeft(b.listen_duration - b.listen_position)]
+    : ebook ? [b.format, b.size] : [shortLength(b.length), b.size];
   return `
     <article class="card" tabindex="0" data-id="${b.id}" style="--glow:hsl(${h} 80% 55%);animation-delay:${Math.min(i, 12) * 30}ms">
       <div class="cover-wrap">
@@ -586,33 +626,38 @@ function libCardHTML(b, i) {
         ${b.finished ? `<span class="finished-tag" title="Finished">${I.check}</span>` : ""}
         ${active ? `<div class="bar"><i style="width:${b.progress || 0}%"></i></div>` : ""}
         ${listening ? `<div class="listen-bar"><i style="width:${(b.listen_position / b.listen_duration) * 100}%"></i></div>` : ""}
-        ${b.status === "completed" ? `<button class="quick play-quick" data-play="${b.id}" aria-label="Play ${esc(b.title)}" title="Play">${I.play}</button>` : ""}
+        ${ebook ? `<span class="kind-tag" title="Ebook">${I.book}Ebook</span>` : ""}
+        ${quick}
       </div>
       <div class="meta">
         <div class="title">${esc(b.title)}</div>
         <div class="author">${esc(b.author || "Unknown author")}</div>
-        <div class="facts">${(listening ? [fmtLeft(b.listen_duration - b.listen_position)] : [b.length ? b.length.replace(/ hours?/, "h").replace(/ and /, " ").replace(/ minutes?/, "m") : "", b.size]).filter(Boolean).map((f) => `<span>${esc(f)}</span>`).join("")}</div>
+        <div class="facts">${facts.filter(Boolean).map((f) => `<span>${esc(f)}</span>`).join("")}</div>
       </div>
     </article>`;
 }
 
 function continueListening() {
+  return shelfHTML("Continue listening", (b) => !isEbook(b)) + shelfHTML("Continue reading", isEbook);
+}
+
+function shelfHTML(title, which) {
   const books = state.library
-    .filter((b) => b.status === "completed" && !b.finished && b.listen_position > 30 && b.listen_duration)
+    .filter((b) => which(b) && underway(b))
     .sort((a, b) => (b.listened_at || 0) - (a.listened_at || 0))
     .slice(0, 8);
   if (!books.length) return "";
   return `
-    <div class="section-head"><h2>Continue listening</h2></div>
+    <div class="section-head"><h2>${title}</h2></div>
     <div class="shelf">${books.map((b, i) => `
       <button class="resume" data-play="${b.id}" style="animation-delay:${i * 40}ms">
         ${coverHTML(b)}
         <span style="min-width:0">
           <b>${esc(b.title)}</b>
-          <small>${esc(fmtLeft(b.listen_duration - b.listen_position))}</small>
+          <small>${esc(isEbook(b) ? readLeft(b) : fmtLeft(b.listen_duration - b.listen_position))}</small>
           <span class="progress"><i style="width:${(b.listen_position / b.listen_duration) * 100}%"></i></span>
         </span>
-        <span class="go">${I.play}</span>
+        <span class="go">${isEbook(b) ? I.book : I.play}</span>
       </button>`).join("")}
     </div>`;
 }
@@ -620,8 +665,18 @@ function continueListening() {
 async function playBook(id) {
   const book = state.library.find((b) => b.id === id);
   if (!book) return;
+  if (isEbook(book)) return canRead(book) ? reader.open(book) : downloadEbook(book);
   if (player.book?.id === id) player.toggle();
   else await player.open(book);
+}
+
+function downloadEbook(b) {
+  const a = document.createElement("a");
+  a.href = `/api/library/${b.id}/ebook`;
+  a.download = "";
+  document.body.append(a);
+  a.click();
+  a.remove();
 }
 
 function Library(root) {
@@ -645,7 +700,10 @@ function Library(root) {
     <div class="stats" id="stats"></div>
     <div class="toolbar">
       <div class="segmented" id="filters"></div>
-      <input class="input" id="lib-search" type="search" placeholder="Filter by title or author" value="${esc(state.libSearch)}" aria-label="Filter library" />
+      <div class="lib-tools">
+        <div class="segmented formats-filter" id="lib-format" hidden></div>
+        <input class="input" id="lib-search" type="search" placeholder="Filter by title or author" value="${esc(state.libSearch)}" aria-label="Filter library" />
+      </div>
     </div>
     <div class="grid" id="lib-grid"></div>`;
 
@@ -663,9 +721,18 @@ function Library(root) {
     $("#filters", root).innerHTML = filters.map(([k, label, fn]) =>
       `<button class="${state.libFilter === k ? "on" : ""}" data-f="${k}">${label} <small>${count(fn)}</small></button>`).join("");
 
+    // Audiobooks and ebooks side by side, or one at a time once there are ebooks to tell apart.
+    const ebooks = count(isEbook);
+    const fmtBox = $("#lib-format", root);
+    fmtBox.hidden = !ebooks;
+    if (!ebooks) state.libFormat = "";
+    fmtBox.innerHTML = [["", "All"], ["audiobook", `${I.headphones} Audiobooks`], ["ebook", `${I.book} Ebooks`]]
+      .map(([k, label]) => `<button class="${state.libFormat === k ? "on" : ""}" data-format="${k}" aria-pressed="${state.libFormat === k}">${label}</button>`).join("");
+
     const fn = filters.find((f) => f[0] === state.libFilter)[2];
     const q = state.libSearch.toLowerCase();
-    const books = lib.filter(fn).filter((b) => !q || `${b.title} ${b.author} ${b.narrators.join(" ")}`.toLowerCase().includes(q));
+    const books = lib.filter(fn).filter((b) => !state.libFormat || (b.kind || "audiobook") === state.libFormat)
+      .filter((b) => !q || `${b.title} ${b.author} ${b.narrators.join(" ")}`.toLowerCase().includes(q));
     const grid = $("#lib-grid", root);
 
     if (!lib.length) {
@@ -689,7 +756,14 @@ function Library(root) {
     render();
   };
   $("#lib-search", root).oninput = (e) => { state.libSearch = e.target.value; render(); };
+  $("#lib-format", root).onclick = (e) => {
+    const b = e.target.closest("[data-format]");
+    if (!b) return;
+    state.libFormat = b.dataset.format;
+    render();
+  };
   root.onclick = (e) => {
+    if (e.target.closest("a.quick")) return; // an ebook download: let the link do it
     if (e.target.closest("#import-btn, [data-import]")) return openImport();
     const play = e.target.closest("[data-play]");
     if (play) return playBook(Number(play.dataset.play));
@@ -854,7 +928,7 @@ function openImport(folder = "") {
   scrim.innerHTML = `
     <div class="modal wide import" role="dialog" aria-modal="true" aria-labelledby="imp-title">
       <h3 id="imp-title">Import books you already have</h3>
-      <p>Point Narratarr at a folder on this computer. Each folder of audio files becomes one book, named from the files’ tags or the folder names.</p>
+      <p>Point Narratarr at a folder on this computer. Each folder of audio files becomes one audiobook, and each ebook file (EPUB, MOBI, AZW3, PDF…) one ebook, named from the files themselves or the folder names.</p>
       <form class="input-row" id="imp-form">
         <input class="input mono" id="imp-folder" placeholder="/path/to/your/audiobooks" value="${esc(folder)}" autocomplete="off" />
         <button class="btn primary" id="imp-scan" type="submit">${I.search} Scan</button>
@@ -884,7 +958,7 @@ function openImport(folder = "") {
   const MODES = [
     ["copy", "Copy in", "Copies them into your library folder and leaves the originals alone."],
     ["move", "Move in", "Moves them into your library folder, organized as Author/Title."],
-    ["inplace", "Leave where they are", "Adds them to Narratarr without touching the files. Single loose files are copied in."],
+    ["inplace", "Leave where they are", "Adds them to Narratarr without touching the files. Loose audio files are copied in."],
   ];
   const sync = () => {
     const n = chosen().length;
@@ -900,7 +974,7 @@ function openImport(folder = "") {
     imp.folder = res.folder;
     const fresh = res.books.filter((b) => !b.in_library).length;
     if (!res.books.length) {
-      results.innerHTML = `<div class="imp-empty">${I.search}<p>No audiobooks found in that folder. Narratarr looks for MP3, M4B, M4A, FLAC, OGG and Opus files.</p></div>`;
+      results.innerHTML = `<div class="imp-empty">${I.search}<p>No books found in that folder. Narratarr looks for MP3, M4B, M4A, FLAC, OGG and Opus audio, and EPUB, MOBI, AZW3, PDF, FB2, CBZ and CBR ebooks.</p></div>`;
       return sync();
     }
     imp.mode = res.books.every((b) => b.inside_library) ? "inplace" : "copy";
@@ -914,7 +988,7 @@ function openImport(folder = "") {
           <span class="imp-meta">
             <input class="imp-title" data-edit="title" data-i="${i}" value="${esc(b.title)}" aria-label="Title" ${b.in_library ? "disabled" : ""}>
             <input class="imp-author" data-edit="author" data-i="${i}" value="${esc(b.author)}" placeholder="Unknown author" aria-label="Author" ${b.in_library ? "disabled" : ""}>
-            <small>${b.in_library ? "Already in your library · " : ""}${b.files} file${b.files === 1 ? "" : "s"} · ${esc(fmtBytes(b.bytes))}${b.format ? ` · ${esc(b.format)}` : ""}</small>
+            <small>${b.in_library ? "Already in your library · " : ""}${b.kind === "ebook" ? `<span class="kind-inline">${I.book}Ebook</span> · ` : `${b.files} file${b.files === 1 ? "" : "s"} · `}${esc(fmtBytes(b.bytes))}${b.format ? ` · ${esc(b.format)}` : ""}</small>
           </span>
         </label>`).join("")}
       </div>
@@ -1145,6 +1219,7 @@ function AuthorDetail(root, id) {
       } catch (err) { toast(err.message, { kind: "err" }); spinBtn(act, false); }
       return;
     }
+    if (e.target.closest("a.quick")) return; // an ebook download: let the link do it
     const play = e.target.closest("[data-play]");
     if (play) return playBook(Number(play.dataset.play));
     const card = e.target.closest(".card[data-url]");
@@ -1209,7 +1284,7 @@ function Activity(root) {
         ${coverHTML(b)}
         <div style="min-width:0">
           <h3>${esc(b.title)}</h3>
-          <div class="by">${esc(b.author)}</div>
+          <div class="by">${esc(b.author)}${isEbook(b) ? ` <span class="kind-inline">${I.book}Ebook</span>` : ""}</div>
           ${stepsHTML(b)}
           <div class="progress ${["caching", "downloading"].includes(b.status) ? "" : "indeterminate"}"><i style="width:${b.progress || 0}%"></i></div>
           <div class="detail">${jobDetail(b)}</div>
@@ -1228,7 +1303,7 @@ function Activity(root) {
       <div class="history">${recent.map((b) => `
         <div class="row" data-id="${b.id}">
           ${coverHTML(b)}
-          <div style="min-width:0"><div class="t">${esc(b.title)}</div><div class="s">${esc(b.status === "failed" ? b.error : b.author)}</div></div>
+          <div style="min-width:0"><div class="t">${esc(b.title)}${isEbook(b) ? ` <span class="kind-inline">${I.book}Ebook</span>` : ""}</div><div class="s">${esc(b.status === "failed" ? b.error : b.author)}</div></div>
           <div class="when">${statusTag(b.status)}<span>${ago(b.completed_at || b.updated_at)}</span></div>
         </div>`).join("")}</div>` : "";
   }
@@ -1331,9 +1406,14 @@ function Settings(root) {
             <div id="prowlarr-result"></div>
           </div>
           <div class="field">
-            <label for="prowlarr_categories">Categories</label>
+            <label for="prowlarr_categories">Audiobook categories</label>
             <input class="input mono" id="prowlarr_categories" name="prowlarr_categories" value="${esc(s.prowlarr_categories)}" style="max-width:220px" />
             <span class="hint"><code>3030</code> is Audio › Audiobook. Separate several with commas.</span>
+          </div>
+          <div class="field">
+            <label for="prowlarr_ebook_categories">Ebook categories</label>
+            <input class="input mono" id="prowlarr_ebook_categories" name="prowlarr_ebook_categories" value="${esc(s.prowlarr_ebook_categories)}" style="max-width:220px" />
+            <span class="hint"><code>7020</code> is Books › EBook. Wanted ebooks are searched for here.</span>
           </div>
         </div>
       </section>
@@ -1957,7 +2037,7 @@ scrim.onclick = closeDrawer;
 function drawerBook() {
   const d = state.drawer;
   if (!d) return null;
-  return d.bookId ? state.library.find((b) => b.id === d.bookId) : byUrl().get(d.url);
+  return d.bookId ? state.library.find((b) => b.id === d.bookId) : libFor(byUrl(), d.url);
 }
 
 function wantedNote(lib) {
@@ -1970,20 +2050,54 @@ function wantedNote(lib) {
   return `${last} ${next}`.trim();
 }
 
-function liveHTML(lib) {
-  if (!lib && state.drawer?.source === "audible") {
-    return `<div class="cta">
-      <button class="btn primary" data-act="add">${I.bookmark} Add to Wanted</button>
+// Audiobook, ebook or both: what a catalog book goes to Wanted as. Remembered for next time.
+function formatPickHTML() {
+  const format = formatFor(state.drawer?.source);
+  const notes = {
+    audiobook: "Narratarr will look for the audiobook on your indexers and download it when it turns up.",
+    ebook: "Narratarr will look for the ebook on your indexers and download it when it turns up.",
+    both: "Narratarr will look for both, and file the ebook next to the audiobook so Audiobookshelf shows them together.",
+  };
+  return `<div class="format-pick" role="radiogroup" aria-label="Want it as">
+      ${Object.entries(FORMATS).map(([k, f]) => `
+        <button type="button" role="radio" aria-checked="${format === k}" class="${format === k ? "on" : ""}" data-format="${k}">
+          <span class="ic">${f.icon ? I[f.icon] : I.headphones + I.book}</span><b>${f.label}</b>
+        </button>`).join("")}
     </div>
-    <p class="cta-note">Narratarr will look for it on your indexers and download it when it turns up.</p>`;
-  }
+    <div class="cta"><button class="btn primary" data-act="add">${I.bookmark} Add to Wanted</button></div>
+    <p class="cta-note">${notes[format]}</p>`;
+}
+
+// The book in both formats: where each one is, and a way to want the one you don't have.
+function formatsHTML(lib) {
+  const other = lib.companion_id ? state.library.find((b) => b.id === lib.companion_id) : null;
+  const pair = { audiobook: isEbook(lib) ? other : lib, ebook: isEbook(lib) ? lib : other };
+  const tile = (kind) => {
+    const b = pair[kind], f = FORMATS[kind];
+    if (!b) {
+      return `<button class="fmt add" data-act="other-format" title="Add the ${f.label.toLowerCase()} to Wanted too">
+        ${I[f.icon]}<span><b>${f.label}</b><small>Want it too</small></span><i class="plus">${I.plus}</i></button>`;
+    }
+    const here = b.id === lib.id;
+    return `<button class="fmt ${here ? "on" : ""}" ${here ? 'aria-current="true"' : `data-open-book="${b.id}"`} title="${here ? "Showing" : "Show"} the ${f.label.toLowerCase()}">
+      ${I[f.icon]}<span><b>${f.label}</b><small>${statusTag(b.status)}</small></span></button>`;
+  };
+  return `<div class="formats" aria-label="Formats">${tile("audiobook")}${tile("ebook")}</div>`;
+}
+
+function liveHTML(lib) {
+  if (!lib && isCatalog(state.drawer?.source)) return formatPickHTML();
+  return lib ? formatsHTML(lib) + libraryLiveHTML(lib) : libraryLiveHTML(lib);
+}
+
+function libraryLiveHTML(lib) {
   if (!lib) {
     return `<div class="cta">
       <button class="btn primary" data-act="add">${I.down} Download</button>
       <button class="btn" data-act="want">${I.bookmark} Add to Wanted</button>
     </div>`;
   }
-  if (lib.status === "wanted" && lib.source === "audible") {
+  if (lib.status === "wanted" && isCatalog(lib.source)) {
     return `<div class="state wanted">
         <div class="top"><span>${I.bookmark} Wanted</span><span>${lib.last_searched ? esc(ago(lib.last_searched)) : "Not searched yet"}</span></div>
         <p>${esc(wantedNote(lib))}</p>
@@ -2002,6 +2116,24 @@ function liveHTML(lib) {
         <div class="top" style="margin-top:10px"><span style="color:var(--text-3);font-size:12.5px">${esc(lib.status === "queued" ? "Waiting for a free slot…" : lib.detail)}</span></div>
       </div>
       <div class="cta"><button class="btn" data-act="stop">${I.stop} Stop</button></div>`;
+  }
+  if (lib.status === "completed" && isEbook(lib)) {
+    const local = lib.source === "local";
+    const label = !lib.finished && underway(lib) ? `${I.book} Continue reading · ${esc(readLeft(lib))}`
+      : `${I.book} ${lib.finished ? "Read again" : "Read"}`;
+    return `<div class="cta">
+        ${canRead(lib) ? `<button class="btn primary" data-act="play">${label}</button>
+        <a class="btn" href="/api/library/${lib.id}/ebook" download>${I.down} Download</a>`
+        : `<a class="btn primary" href="/api/library/${lib.id}/ebook" download>${I.down} Download ebook</a>`}
+        <button class="btn ghost" data-act="toggle-finished">${lib.finished ? "Mark unread" : "Mark read"}</button>
+      </div>
+      <p class="cta-note">${canRead(lib) ? `Reads right here, and opens in Audiobookshelf or any reading app too.`
+        : `${esc(lib.format || "This format")} doesn’t open in Narratarr. It works with ${esc(readers(lib.format))}.`}</p>
+      <div class="state done">${local ? "Imported" : "Downloaded"} ${esc(ago(lib.completed_at))}${local && lib.import_mode === "inplace" ? ", left where it was," : ""} to<code>${esc(lib.path)}</code></div>
+      <div class="cta" style="margin-top:14px">
+        ${local ? "" : `<button class="btn sm ghost" data-act="download">${I.retry} Download again</button>`}
+        <button class="btn sm ghost danger" data-act="remove">${I.trash} Remove</button>
+      </div>`;
   }
   if (lib.status === "completed") {
     const current = player.book?.id === lib.id;
@@ -2035,11 +2167,25 @@ function liveHTML(lib) {
     </div>`;
 }
 
+function readers(format) {
+  return {
+    EPUB: "Apple Books, Google Play Books, Kobo and most e-readers",
+    AZW3: "Kindle devices and the Kindle app",
+    AZW: "Kindle devices and the Kindle app",
+    MOBI: "older Kindles and Calibre",
+    PDF: "any PDF viewer",
+    CBZ: "comic readers",
+    CBR: "comic readers",
+  }[(format || "").toUpperCase()] || "Calibre and most reading apps";
+}
+
 // ---- releases (pick one yourself) ----
 
 function releasesHTML(res) {
   if (!res.items.length) {
-    return `<div class="releases"><h4>Releases</h4><p class="muted">Nothing on your indexers or LibriVox looks like this book yet.</p></div>`;
+    return `<div class="releases"><h4>Releases</h4><p class="muted">${isEbook(drawerBook())
+      ? "Nothing in your indexers’ ebook categories looks like this book yet."
+      : "Nothing on your indexers or LibriVox looks like this book yet."}</p></div>`;
   }
   const label = (r) => r.source === "prowlarr" ? r.indexer || "Prowlarr" : sourceInfo(r.source).label;
   return `<div class="releases">
@@ -2131,10 +2277,11 @@ function updateDrawerLive() {
 function drawerHTML(b, loading) {
   const narrators = b.narrators || [];
   const pills = [
-    b.length && [I.clock, b.length],
+    b.length && [/pages$/.test(b.length) ? I.book : I.clock, b.length],
     b.format && [I.file, b.format],
     b.bitrate && b.bitrate !== "?" && [I.wave, b.bitrate],
     b.size && [I.disc, b.size],
+    isEbook(b) && [I.book, "Ebook"],
     b.language && [I.globe, b.language],
     isDirect(b.source) && [I.check, "Free & legal"],
     releaseLabel(b.released) && [I.clock, releaseLabel(b.released)],
@@ -2157,16 +2304,16 @@ function drawerHTML(b, loading) {
       ${desc ? `<div class="about"><h4>About this book</h4><p class="${desc.length > 520 ? "clamped" : ""}">${esc(desc)}</p>${desc.length > 520 ? '<button class="more" data-more>Read more</button>' : ""}</div>` : ""}
       ${!loading ? `<dl>
         ${(b.series || []).length ? `<dt>Series</dt><dd>${b.series.map((x) => esc(x.sequence ? `${x.title} #${x.sequence}` : x.title)).join(" · ")}</dd>` : ""}
-        ${(b.categories || []).length && b.source !== "audible" ? `<dt>Genres</dt><dd>${esc(b.categories.join(", "))}</dd>` : ""}
+        ${(b.categories || []).length && b.source !== "audible" ? `<dt>${b.source === "openlibrary" ? "Subjects" : "Genres"}</dt><dd>${esc(b.categories.join(", "))}</dd>` : ""}
         ${b.released ? `<dt>Released</dt><dd>${esc(releaseLabel(b.released, true))}</dd>` : ""}
-        ${b.posted && !b.released ? `<dt>Posted</dt><dd>${esc(b.posted)}</dd>` : ""}
+        ${b.posted && !b.released ? `<dt>${b.source === "openlibrary" ? "First published" : "Posted"}</dt><dd>${esc(b.posted)}</dd>` : ""}
         ${b.info_hash ? `<dt>Info hash</dt><dd class="mono">${esc(b.info_hash)}</dd>` : ""}
         ${(b.files || []).length ? `<dt>Files</dt><dd>${b.files.length} ${esc(b.format || "audio")} file${b.files.length === 1 ? "" : "s"}${b.size ? ` · ${esc(b.size)}` : ""}</dd>` : ""}
         ${b.release ? `<dt>Release</dt><dd class="mono">${esc(b.release)}</dd>` : ""}
         ${b.indexer ? `<dt>Indexer</dt><dd>${esc(b.indexer)}</dd>` : ""}
         <dt>Source</dt><dd>${b.source === "local" ? `Your files${b.import_mode === "inplace" ? " (left in place)" : ""}`
           : /^https?:/.test(b.url || b.source_url || "")
-          ? `<a href="${esc(b.url || b.source_url)}" target="_blank" rel="noopener noreferrer">${esc(sourceInfo(b.source).label)}${isDirect(b.source) ? " on Internet Archive" : ""} ↗</a>`
+          ? `<a href="${esc((b.url || b.source_url).split("#")[0])}" target="_blank" rel="noopener noreferrer">${esc(sourceInfo(b.source).label)}${isDirect(b.source) ? " on Internet Archive" : ""} ↗</a>`
           : esc(sourceInfo(b.source).label)}</dd>
       </dl>` : ""}
     </div>`;
@@ -2242,6 +2389,14 @@ drawer.onclick = async (e) => {
     }
     return;
   }
+  const pick = e.target.closest("[data-format]");
+  if (pick && state.drawer) {
+    state.format = pick.dataset.format;
+    try { localStorage.setItem("narratarr.format", state.format); } catch { /* private mode */ }
+    return updateDrawerLive();
+  }
+  const open = e.target.closest("[data-open-book]");
+  if (open) return openDrawer({ bookId: Number(open.dataset.openBook) });
   const btn = e.target.closest("[data-act]");
   if (!btn || !state.drawer) return;
   const act = btn.dataset.act;
@@ -2255,8 +2410,13 @@ drawer.onclick = async (e) => {
         await refreshLibrary();
         toast("Saved to Wanted", { kind: "ok" });
       } else {
-        await addBook(url, { cover: $(".hero-cover img", drawer)?.src, source: state.drawer.source, protocol: state.drawer.protocol });
+        await addBook(url, { cover: $(".hero-cover img:not(.blur)", drawer)?.src, source: state.drawer.source, protocol: state.drawer.protocol });
       }
+    } else if (act === "other-format") {
+      const lib = drawerBook();
+      const other = await api(`/api/library/${lib.id}/other-format`, { method: "POST" });
+      await refreshLibrary();
+      toast(`Looking for the ${isEbook(other) ? "ebook" : "audiobook"} of ${other.title} too`, { kind: "ok", cover: other.cover_url });
     } else if (act === "follow-author" || act === "follow-series") {
       spinBtn(btn, false);
       if (await followFromDrawer(act.slice(7), btn)) {
@@ -2287,6 +2447,7 @@ drawer.onclick = async (e) => {
 // boot
 
 document.addEventListener("keydown", (e) => {
+  if (document.body.classList.contains("reading")) return; // the reader has the keys while a book is open
   if (e.key === "Escape" && state.drawer) closeDrawer();
   const typing = e.target.matches("input, textarea, select");
   if (!typing && (e.key === "/" || (e.key === "k" && (e.metaKey || e.ctrlKey)))) {
@@ -2494,6 +2655,7 @@ async function boot() {
   window.addEventListener("hashchange", route);
   route();
   player.onChange = () => updateDrawerLive();
+  reader.onChange = () => { if (!reader.book) refreshLibrary(); }; // the shelf and cards show how far you got
   player.restore(state.library);
   setInterval(refreshLibrary, 2000);
   checkUpdates();

@@ -27,7 +27,8 @@ REMEMBER = 3000  # releases kept in memory so a result can still be opened or ad
 _releases: OrderedDict[str, dict] = OrderedDict()
 _search_cache: Cache[list[dict]] = Cache(CACHE_SECONDS, 200)
 
-_FORMAT_RE = re.compile(r"\b(m4b|mp3|flac|aac|m4a|ogg|opus)\b", re.I)
+_FORMAT_RE = re.compile(r"\b(m4b|mp3|flac|aac|m4a|ogg|opus|epub|azw3|azw|mobi|pdf|fb2|cbz|cbr|djvu)\b", re.I)
+_AUDIO = {"m4b", "mp3", "flac", "aac", "m4a", "ogg", "opus"}
 _BITRATE_RE = re.compile(r"\b(\d{2,3})\s?kb(?:ps|it)?s?\b", re.I)
 _BRACKETS_RE = re.compile(r"\s*[\(\[\{][^\)\]\}]*[\)\]\}]")
 
@@ -103,14 +104,19 @@ def to_details(r: dict) -> Details:
     if magnet.startswith("magnet:"):
         h, trackers = parse_magnet(magnet)
         info_hash = info_hash or h
-    fmt = _FORMAT_RE.search(release)
+    found = [m.group(1) for m in _FORMAT_RE.finditer(release)]
+    # "Dune (PDF + M4B)" is an audiobook with a companion PDF: its audio format is the one that counts.
+    # "Opus" is also a word ("Magnum Opus [EPUB]"), so it only counts when nothing else is named.
+    fmt = next((f for f in found if f.lower() in _AUDIO and f.lower() != "opus"), found[0] if found else "")
+    if fmt.lower() == "opus" and len(found) > 1:
+        fmt = found[1]
     rate = _BITRATE_RE.search(release)
     seeders = r.get("seeders")
     return Details(
         url=_url_for(r),
         title=tidy_title(release),
         cover_url=r.get("posterUrl") or "",
-        format=fmt.group(1).upper() if fmt else "",
+        format=fmt.upper(),
         bitrate=f"{rate.group(1)} Kbps" if rate else "",
         size=_fmt_size(int(r.get("size") or 0)) if r.get("size") else "",
         posted=(r.get("publishDate") or "")[:10],
@@ -139,10 +145,11 @@ class Prowlarr:
     default_label = "Latest from your indexers"
     delivery = "indexer"
 
-    def __init__(self, url: str, api_key: str, categories: str = "3030", client: httpx.AsyncClient | None = None):
+    def __init__(self, url: str, api_key: str, categories: str = "3030", client: httpx.AsyncClient | None = None,
+                 fallback: str = "3030"):
         self.base = url.rstrip("/")
         self.api_key = api_key
-        self.cats = [c for c in re.split(r"[,\s]+", categories or "") if c.isdigit()] or ["3030"]
+        self.cats = [c for c in re.split(r"[,\s]+", categories or "") if c.isdigit()] or [fallback]
         self._client = client
 
     # ---- Source interface ----------------------------------------------------

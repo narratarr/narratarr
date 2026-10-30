@@ -314,18 +314,23 @@ def compare(books: list[dict], library_dir: str, items: list[dict]) -> dict:
     the path Audiobookshelf found it at."""
     root = _parts(library_dir)
     there = [(_parts(i["path"]), _parts(i["rel"])) for i in items if not i["missing"]]
-    seen, missing, seen_at = 0, [], ""
+    # Audiobookshelf sees a book's folder. An ebook's path is its file, and an ebook that shares its
+    # audiobook's folder is the same item there, so it counts once.
+    folders: dict[tuple[str, ...], str] = {}
     for book in books:
         path = _parts(book["path"])
+        folders.setdefault(path[:-1] if book.get("kind") == "ebook" else path, book["title"])
+    seen, missing, seen_at = 0, [], ""
+    for path, title in folders.items():
         rel = path[len(root):] if path[:len(root)] == root and len(path) > len(root) else path[-2:]
         hit = next((full for full, r in there if len(r) >= len(rel) and r[-len(rel):] == rel), None)
         if hit is None:
-            missing.append(book["title"])
+            missing.append(title)
             continue
         seen += 1
         if not seen_at and len(hit) > len(rel):
             seen_at = "/" + "/".join(hit[:-len(rel)]) if not hit[0].endswith(":") else "\\".join(hit[:-len(rel)])
-    return {"books": len(books), "seen": seen, "missing": missing[:5], "seen_at": seen_at}
+    return {"books": len(folders), "seen": seen, "missing": missing[:5], "seen_at": seen_at}
 
 
 def pick_library(libraries: list[dict], library_dir: str) -> str:

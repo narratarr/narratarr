@@ -213,6 +213,7 @@ class Player {
 
     document.addEventListener("keydown", (e) => {
       if (!this.book || e.target.matches("input, textarea, select, [contenteditable]") || e.metaKey || e.ctrlKey) return;
+      if (document.body.classList.contains("reading")) return; // the reader has the keys while a book is open
       if (e.code === "Space") { e.preventDefault(); this.toggle(); }
       else if (e.key === "ArrowLeft") { e.preventDefault(); this.skip(-15); }
       else if (e.key === "ArrowRight") { e.preventDefault(); this.skip(30); }

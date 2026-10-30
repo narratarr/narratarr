@@ -1,9 +1,14 @@
-"""Bringing in audiobooks the user already has: a folder of books, an existing library, or a watched inbox.
+"""Bringing in books the user already has: a folder of books, an existing library, or a watched inbox.
 
-A "book" is a folder with audio files in it (multi-disc "CD1"/"Disc 2" folders
+An audiobook is a folder with audio files in it (multi-disc "CD1"/"Disc 2" folders
 count as one book), or a single audio file on its own. Title, author and
 narrator come from the files' tags when they have them, otherwise from the
 folder names ("Author/Title" or "Author - Title").
+
+An ebook is an ebook file that isn't inside an audiobook's folder (one that is
+comes along with its audiobook). Several formats of one book side by side
+("Dune.epub", "Dune.mobi") count once, as the best of them. Its details come from
+the EPUB itself when it has them, otherwise from the names.
 """
 
 from __future__ import annotations
@@ -16,6 +21,7 @@ from urllib.parse import unquote, urlparse
 
 import mutagen
 
+from . import ebooks
 from .media import AUDIO_TYPES, audio_files
 
 _DISC_RE = re.compile(r"^(cd|disc|disk|part|vol(ume)?)[\s._-]*\d+$", re.I)
@@ -34,12 +40,16 @@ def _is_audio(p: Path) -> bool:
     return p.is_file() and p.suffix.lower() in AUDIO_TYPES and not p.name.startswith("._")
 
 
+def _hidden(f: Path, root: Path) -> bool:
+    return any(part in _SKIP_DIRS or part.startswith(".") for part in f.relative_to(root).parts[:-1])
+
+
 def find_books(root: Path) -> list[Path]:
-    """Every book under root: folders holding audio, plus loose audio files sitting directly in a folder of books."""
+    """Every audiobook under root: folders holding audio, plus loose audio files sitting directly in a folder of books."""
     root = root.resolve()
     books: set[Path] = set()
     for f in root.rglob("*"):
-        if any(part in _SKIP_DIRS or part.startswith(".") for part in f.relative_to(root).parts[:-1]):
+        if _hidden(f, root):
             continue
         if not _is_audio(f):
             continue
@@ -54,6 +64,50 @@ def find_books(root: Path) -> list[Path]:
         if not any(k.is_dir() and k in b.parents for k in kept):
             kept.append(b)
     return sorted(kept, key=lambda p: str(p).lower())
+
+
+def _stem(p: Path) -> str:
+    return " ".join(re.sub(r"[\W_]+", " ", p.stem.lower()).split())
+
+
+def find_ebooks(root: Path, audiobooks: list[Path]) -> list[Path]:
+    """Every ebook under root that isn't part of an audiobook: one file per book, the best format of it."""
+    root = root.resolve()
+    folders = [b for b in audiobooks if b.is_dir()]
+    groups: dict[tuple[Path, str], list[Path]] = {}
+    for f in root.rglob("*"):
+        if _hidden(f, root) or not ebooks.is_ebook(f) or any(b in f.parents for b in folders):
+            continue
+        groups.setdefault((f.parent, _stem(f)), []).append(f)
+    return sorted((ebooks.best(g) for g in groups.values()), key=lambda p: str(p).lower())
+
+
+def read_ebook_meta(book: Path, root: Path) -> dict:
+    meta = ebooks.epub_meta(book) if book.suffix.lower() == ".epub" else {}
+    title, author = meta.get("title", ""), meta.get("author", "")
+    folder = book.parent
+    guess_author, guess_title = "", book.stem
+    if " - " in book.stem:
+        guess_author, guess_title = (x.strip() for x in book.stem.split(" - ", 1))
+    elif folder != root and _stem(folder) == _stem(book):  # Author/Title/Title.epub
+        guess_author = folder.parent.name if folder.parent != root and root in folder.parents else ""
+    elif folder != root:  # Author/Title.epub
+        guess_author = folder.name
+    description = meta.get("description", "")
+    if not description and folder != root and (folder / "desc.txt").is_file() and _stem(folder) == _stem(book):
+        description = (folder / "desc.txt").read_text(errors="ignore").strip()
+    return {
+        "path": str(book),
+        "title": title or guess_title,
+        "author": author or guess_author,
+        "narrators": [],
+        "description": description,
+        "files": 1,
+        "bytes": book.stat().st_size,
+        "format": book.suffix.lstrip(".").upper(),
+        "single_file": True,
+        "kind": "ebook",
+    }
 
 
 def _tags(f: Path) -> dict:
@@ -110,12 +164,15 @@ def read_meta(book: Path, root: Path) -> dict:
         "bytes": size,
         "format": (files[0].suffix.lstrip(".").upper() if files else ""),
         "single_file": book.is_file(),
+        "kind": "audiobook",
     }
 
 
 def scan(root: Path) -> list[dict]:
     root = root.resolve()
-    return [read_meta(b, root) for b in find_books(root)]
+    audiobooks = find_books(root)
+    found = [read_meta(b, root) for b in audiobooks] + [read_ebook_meta(e, root) for e in find_ebooks(root, audiobooks)]
+    return sorted(found, key=lambda f: f["path"].lower())
 
 
 def fmt_size(n: int) -> str:
@@ -140,6 +197,7 @@ def as_book(found: dict, mode: str, status: str) -> dict:
         "size": fmt_size(found["bytes"]),
         "import_mode": mode,
         "status": status,
+        "kind": found.get("kind", "audiobook"),
     }
     if mode == "inplace":
         book.update(path=str(path), progress=100, completed_at=time.time())
