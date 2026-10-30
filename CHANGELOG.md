@@ -2,6 +2,14 @@
 
 All notable changes to Narratarr. The app shows this under **Settings → Updates**.
 
+## 0.7.2 — 2026-10-30
+
+- **Settings, in pages.** Settings is no longer one long scroll. It's six short pages (General, Search & sources, Downloads, Audiobookshelf, Users and Updates), with a menu that shows each one's state at a glance: which download clients are ready, whether Prowlarr and Audiobookshelf are connected, how many people can sign in, and whether an update is out. Each page has its own address, so the browser's Back button works.
+- **A save bar that shows up only when it's needed.** Change something and a bar appears with how many changes are unsaved, **Discard** and **Save changes**. Moving between Settings pages keeps what you've typed.
+- Torrent clients are now tiles that say which ones are ready, the download-folder mapping reads left to right, and Prowlarr's categories fold away until you need them.
+- **Audiobookshelf** shows when it's connected, and **Check now** counts how many of your books it can see, right on the page.
+- On a phone, Settings opens as a list. Each area has a page of its own with a way back, and the save bar sits above the tab bar.
+
 ## 0.7.1 — 2026-10-30
 
 - **Ebooks on the Prowlarr tab.** Discover's Prowlarr tab has an **Audiobooks / Ebooks** switch, so you can browse and search ebook releases from all your indexers directly, not only through Wanted. Ebooks you download from there are filed as ebooks.

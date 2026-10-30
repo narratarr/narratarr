@@ -254,6 +254,11 @@ const views = { discover: Discover, library: Library, authors: Authors, activity
 function route() {
   let [name = "discover", param] = location.hash.replace(/^#\/?/, "").split("?")[0].split("/");
   if (name === "settings" && state.user?.role !== "admin") name = "discover";
+  if (name === "settings" && state.viewName === "settings" && state.view?.go) {
+    state.view.go(param); // another Settings page: same form, so nothing typed is lost
+    window.scrollTo({ top: 0 });
+    return;
+  }
   const View = views[name] || Discover;
   $$("[data-nav]").forEach((a) => a.classList.toggle("active", a.dataset.nav === name));
   state.view?.destroy?.();
@@ -262,6 +267,7 @@ function route() {
   void root.offsetWidth;
   root.classList.add("enter");
   state.view = View(root, param);
+  state.viewName = name;
   window.scrollTo({ top: 0 });
 }
 
@@ -1367,16 +1373,66 @@ function Activity(root) {
 // ---------------------------------------------------------------------------
 // Settings
 
-function Settings(root) {
+// Settings: six short pages (#/settings/<page>) instead of one long one. Every field still lives in
+// one form, so moving between pages keeps unsaved changes, and one Save covers them all.
+const SETTINGS_PAGES = [
+  ["general", "General", "Where your books live, how their folders are named, and what comes in by itself.",
+    '<svg viewBox="0 0 24 24"><path d="M3 7.5 12 3l9 4.5M5 9.5V19h14V9.5M9 19v-6h6v6"/></svg>'],
+  ["search", "Search & sources", "Where Narratarr looks for books, and how often it looks for the ones you want.", I.search],
+  ["downloads", "Downloads", "What fetches your books, and where Narratarr finds them when they’re done.", I.down],
+  ["abs", "Audiobookshelf", "Every book Narratarr files shows up in Audiobookshelf as soon as it’s done.",
+    '<svg viewBox="0 0 24 24"><path d="M4 19V6l8-3 8 3v13M4 19h16M9 19v-7h6v7"/></svg>'],
+  ["users", "Users", "Who can sign in. Admins run Narratarr; listeners browse, request and listen, each with their own place in every book.",
+    '<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.6a3.5 3.5 0 0 1 0 6.8M18.5 14.4A6.5 6.5 0 0 1 21.5 20"/></svg>'],
+  ["updates", "Updates", "Which version you have, and whether a newer one is out.", I.retry],
+];
+const SETTINGS_PAGE = Object.fromEntries(SETTINGS_PAGES.map((p) => [p[0], p]));
+
+// The one-line status under each page in the Settings menu: [text, tone] where tone is "ok", "warn" or "".
+function settingsStatus(key, users) {
+  const st = state.settings || {};
+  const u = state.updates;
+  if (key === "general") return [st.library_dir || "", ""];
+  if (key === "search") return st.prowlarr_configured ? ["Prowlarr connected", "ok"] : ["Prowlarr not connected", ""];
+  if (key === "downloads") {
+    const ready = [st.torrent_configured && CLIENTS[st.torrent_client], st.usenet_configured && CLIENTS[st.usenet_client]].filter(Boolean);
+    return ready.length ? [ready.join(" · "), "ok"] : ["Set up a download client", "warn"];
+  }
+  if (key === "abs") return st.audiobookshelf_url && st.audiobookshelf_token ? ["Connected", "ok"] : ["Not connected", ""];
+  if (key === "users") return [users == null ? "" : `${users} ${users === 1 ? "person" : "people"}`, ""];
+  if (key === "updates") {
+    if (u?.update_available) return [`${u.latest.version} is out`, "warn"];
+    return [u?.current ? `${u.current}${u.latest ? " · up to date" : ""}` : "Version and what’s new", ""];
+  }
+  return ["", ""];
+}
+
+function Settings(root, page) {
   const s = state.settings || {};
+  const tile = (client, label, where) => {
+    const ready = s[`${client === "realdebrid" ? "rd" : client}_configured`];
+    return `<button type="button" role="radio" data-v="${client}"><b>${label}</b><small>${ready ? `<i class="dot ok"></i>Ready` : where}</small></button>`;
+  };
   root.innerHTML = `
-    <header>
-      <div class="eyebrow">Preferences</div>
-      <h1 class="page-title">Settings</h1>
-    </header>
+    <div class="set-wrap" id="set-wrap">
+      <a class="set-back" href="#/settings">${I.chevron}Settings</a>
+      <header class="set-head">
+        <div class="eyebrow">Settings</div>
+        <h1 class="page-title"><span class="t-home">Settings</span><span class="t-page" id="set-title"></span></h1>
+        <p class="lede" id="set-lede"></p>
+      </header>
+      <div class="set-layout">
+        <nav class="set-nav" aria-label="Settings">
+          ${SETTINGS_PAGES.map(([key, label, , icon]) => `
+            <a href="#/settings/${key}" data-page="${key}">
+              <span class="ic" aria-hidden="true">${icon}</span>
+              <span class="tx"><b>${esc(label)}</b><small><i class="dot"></i><span data-status></span></small></span>
+              <span class="chev" aria-hidden="true">${I.chevron}</span>
+            </a>`).join("")}
+        </nav>
     <form id="settings" class="settings" autocomplete="off">
-      <section class="panel">
-        <div><h3>Library</h3><p class="desc">Where finished audiobooks go, and how folders are named.</p></div>
+      <section class="panel" data-page="general">
+        <div class="ph"><h3>Library</h3><p class="desc">Finished books are filed here. Audiobookshelf can watch the same folder.</p></div>
         <div class="body">
           <div class="field">
             <label for="library_dir">Library folder</label>
@@ -1385,21 +1441,42 @@ function Settings(root) {
           <div class="field">
             <label for="folder_template">Folder layout</label>
             <input class="input mono" id="folder_template" name="folder_template" value="${esc(s.folder_template)}" />
-            <span class="hint">Use <code>{author}</code>, <code>{title}</code> and <code>{narrator}</code>. Separate folders with <code>/</code>.</span>
             <div class="preview-path" id="path-preview"></div>
+            <span class="hint">Use <code>{author}</code>, <code>{title}</code> and <code>{narrator}</code>, with <code>/</code> between folders. Ebooks go into the same folder as their audiobook.</span>
           </div>
-          <div class="field">
-            <label for="max_concurrent">Simultaneous downloads</label>
-            <input class="input" id="max_concurrent" name="max_concurrent" type="number" min="1" max="8" value="${esc(s.max_concurrent)}" style="width:120px" />
+          <div class="set-row">
+            <label for="max_concurrent"><b>Downloads at once</b><small>More finish sooner, but share your bandwidth.</small></label>
+            <div class="stepper">
+              <button type="button" data-step="-1" aria-label="Fewer">−</button>
+              <input id="max_concurrent" name="max_concurrent" type="number" min="1" max="8" value="${esc(s.max_concurrent)}" />
+              <button type="button" data-step="1" aria-label="More">+</button>
+            </div>
           </div>
         </div>
       </section>
 
-      <section class="panel">
-        <div><h3>Users</h3><p class="desc">Who can sign in. Admins run Narratarr; listeners browse, request and listen, each with their own place in every book.</p></div>
+      <section class="panel" data-page="general">
+        <div class="ph"><h3>Import folder</h3><p class="desc">Drop books here and they move into your library on their own, once they’ve finished copying. Audiobooks and ebooks both.</p></div>
+        <div class="body">
+          <div class="field">
+            <label for="import_folder">Folder to watch</label>
+            <input class="input mono" id="import_folder" name="import_folder" placeholder="e.g. ~/Downloads/Audiobooks to import" value="${esc(s.import_folder)}" />
+            <span class="hint">Checked every minute. Must be outside your library folder. Leave it empty to turn this off.</span>
+          </div>
+          <div><button class="btn" type="button" id="open-import">${I.down} Import books now…</button></div>
+        </div>
+      </section>
+
+      <section class="panel" data-page="users">
+        <div class="ph"><h3>People</h3><p class="desc">Everyone signs in with their own account.</p></div>
         <div class="body">
           <div class="user-list" id="user-list"><span class="spinner"></span></div>
           <div><button class="btn" type="button" id="add-user">${I.plus} Add someone</button></div>
+        </div>
+      </section>
+      <section class="panel" data-page="users">
+        <div class="ph"><h3>Home network</h3></div>
+        <div class="body">
           <div class="field">
             <label class="switch"><input type="checkbox" name="auth_local_bypass" ${s.auth_local_bypass ? "checked" : ""}><i></i>Don’t ask for a password on my home network</label>
             <span class="hint">Phones and computers on this network open Narratarr signed in as the first admin. Leave this off if Narratarr can be reached from the internet. Anything that comes through a reverse proxy always has to sign in.</span>
@@ -1407,8 +1484,8 @@ function Settings(root) {
         </div>
       </section>
 
-      <section class="panel">
-        <div><h3>Updates</h3><p class="desc">You have Narratarr <b>${esc(state.updates?.current || "")}</b>.${state.updates?.update_available ? ` Version <b>${esc(state.updates.latest.version)}</b> is out.` : state.updates?.latest ? " You’re up to date." : ""}</p></div>
+      <section class="panel" data-page="updates">
+        <div class="ph"><h3>Updates</h3><p class="desc">You have Narratarr <b>${esc(state.updates?.current || "")}</b>.${state.updates?.update_available ? ` Version <b>${esc(state.updates.latest.version)}</b> is out.` : state.updates?.latest ? " You’re up to date." : ""}</p></div>
         <div class="body">
           <div class="field">
             <label class="switch"><input type="checkbox" name="check_updates" ${s.check_updates ? "checked" : ""}><i></i>Check for new versions</label>
@@ -1422,44 +1499,48 @@ function Settings(root) {
         </div>
       </section>
 
-      <section class="panel">
-        <div><h3>Prowlarr</h3><p class="desc">Optional. Search the indexers you’ve added to Prowlarr, and find books on your Wanted list. Results download through your Usenet or torrent client below.</p></div>
+      <section class="panel" data-page="search">
+        <div class="ph ph-row">
+          <div><h3>Prowlarr</h3><p class="desc">Searches the indexers you’ve added to Prowlarr, for Discover and for your Wanted list. Results download through your clients under Downloads.</p></div>
+          <span class="state-chip ok" id="prowlarr-chip" ${s.prowlarr_configured ? "" : "hidden"}><i class="dot ok"></i>Connected</span>
+        </div>
         <div class="body">
-          <div class="field"><label for="prowlarr_url">Prowlarr address</label><input class="input mono" id="prowlarr_url" name="prowlarr_url" placeholder="http://localhost:9696" value="${esc(s.prowlarr_url)}" /></div>
-          <div class="field">
-            <label for="prowlarr_api_key">API key</label>
-            <div class="input-row">
-              <input class="input mono" id="prowlarr_api_key" name="prowlarr_api_key" type="password" placeholder="Prowlarr → Settings → General → API Key" value="${esc(s.prowlarr_api_key)}" />
-              <button class="btn" type="button" id="test-prowlarr">Test</button>
+          <div class="set-grid">
+            <div class="field"><label for="prowlarr_url">Address</label><input class="input mono" id="prowlarr_url" name="prowlarr_url" placeholder="http://localhost:9696" value="${esc(s.prowlarr_url)}" /></div>
+            <div class="field">
+              <label for="prowlarr_api_key">API key</label>
+              <div class="input-row">
+                <input class="input mono" id="prowlarr_api_key" name="prowlarr_api_key" type="password" placeholder="Prowlarr → Settings → General" value="${esc(s.prowlarr_api_key)}" />
+                <button class="btn" type="button" id="test-prowlarr">Test</button>
+              </div>
             </div>
-            <div id="prowlarr-result"></div>
           </div>
-          <div class="field">
-            <label for="prowlarr_categories">Audiobook categories</label>
-            <input class="input mono" id="prowlarr_categories" name="prowlarr_categories" value="${esc(s.prowlarr_categories)}" style="max-width:220px" />
-            <span class="hint"><code>3030</code> is Audio › Audiobook. Separate several with commas.</span>
-          </div>
-          <div class="field">
-            <label for="prowlarr_ebook_categories">Ebook categories</label>
-            <input class="input mono" id="prowlarr_ebook_categories" name="prowlarr_ebook_categories" value="${esc(s.prowlarr_ebook_categories)}" style="max-width:220px" />
-            <span class="hint"><code>7020</code> is Books › EBook. Wanted ebooks are searched for here.</span>
-          </div>
+          <div id="prowlarr-result"></div>
+          <details class="set-more">
+            <summary>Categories</summary>
+            <div class="set-grid">
+              <div class="field">
+                <label for="prowlarr_categories">Audiobooks</label>
+                <input class="input mono" id="prowlarr_categories" name="prowlarr_categories" value="${esc(s.prowlarr_categories)}" />
+                <span class="hint"><code>3030</code> is Audio › Audiobook. Separate several with commas.</span>
+              </div>
+              <div class="field">
+                <label for="prowlarr_ebook_categories">Ebooks</label>
+                <input class="input mono" id="prowlarr_ebook_categories" name="prowlarr_ebook_categories" value="${esc(s.prowlarr_ebook_categories)}" />
+                <span class="hint"><code>7020</code> is Books › EBook.</span>
+              </div>
+            </div>
+          </details>
         </div>
       </section>
 
-      <section class="panel">
-        <div><h3>Torrents</h3><p class="desc">How torrents download. Real-Debrid fetches them for you, so nothing is shared from your computer. qBittorrent, Transmission and Deluge download on your own machine and keep seeding, which makes your IP address visible to other peers; many people run them behind a VPN.</p></div>
+      <section class="panel" data-page="downloads">
+        <div class="ph"><h3>Torrents</h3><p class="desc">Real-Debrid fetches them for you, so nothing is shared from your computer. qBittorrent, Transmission and Deluge download on your own machine and keep seeding, which shows your IP address to other peers; many people run them behind a VPN.</p></div>
         <div class="body">
-          <div class="field">
-            <label>Download torrents with</label>
-            <div class="segmented" data-choice="torrent_client" role="radiogroup" aria-label="Torrent client">
-              <button type="button" role="radio" data-v="realdebrid">Real-Debrid</button>
-              <button type="button" role="radio" data-v="qbittorrent">qBittorrent</button>
-              <button type="button" role="radio" data-v="transmission">Transmission</button>
-              <button type="button" role="radio" data-v="deluge">Deluge</button>
-            </div>
-            <input type="hidden" name="torrent_client" value="${esc(s.torrent_client)}" />
+          <div class="choice-tiles" data-choice="torrent_client" role="radiogroup" aria-label="Download torrents with">
+            ${tile("realdebrid", "Real-Debrid", "In the cloud")}${tile("qbittorrent", "qBittorrent", "On this machine")}${tile("transmission", "Transmission", "On this machine")}${tile("deluge", "Deluge", "On this machine")}
           </div>
+          <input type="hidden" name="torrent_client" value="${esc(s.torrent_client)}" />
           <div class="client-fields" data-for="torrent_client:realdebrid">
             <div class="field">
               <label for="rd_api_key">Real-Debrid API key</label>
@@ -1473,148 +1554,142 @@ function Settings(root) {
             <label class="switch"><input type="checkbox" name="delete_from_rd_after" ${s.delete_from_rd_after ? "checked" : ""}><i></i>Remove torrents from Real-Debrid after downloading</label>
           </div>
           <div class="client-fields" data-for="torrent_client:qbittorrent">
-            <div class="field"><label for="qbittorrent_url">qBittorrent Web UI address</label><input class="input mono" id="qbittorrent_url" name="qbittorrent_url" placeholder="http://localhost:8080" value="${esc(s.qbittorrent_url)}" /></div>
-            <div class="input-row two">
-              <div class="field"><label for="qbittorrent_username">Username</label><input class="input mono" id="qbittorrent_username" name="qbittorrent_username" value="${esc(s.qbittorrent_username)}" autocomplete="off" /></div>
-              <div class="field"><label for="qbittorrent_password">Password</label><input class="input mono" id="qbittorrent_password" name="qbittorrent_password" type="password" value="${esc(s.qbittorrent_password)}" /></div>
-            </div>
             <div class="field">
-              <label for="qbittorrent_category">Category</label>
+              <label for="qbittorrent_url">qBittorrent Web UI address</label>
               <div class="input-row">
-                <input class="input mono" id="qbittorrent_category" name="qbittorrent_category" value="${esc(s.qbittorrent_category)}" style="max-width:220px" />
+                <input class="input mono" id="qbittorrent_url" name="qbittorrent_url" placeholder="http://localhost:8080" value="${esc(s.qbittorrent_url)}" />
                 <button class="btn" type="button" data-test-client="qbittorrent">Test</button>
               </div>
               <div data-result="qbittorrent"></div>
             </div>
+            <div class="set-grid three">
+              <div class="field"><label for="qbittorrent_username">Username</label><input class="input mono" id="qbittorrent_username" name="qbittorrent_username" value="${esc(s.qbittorrent_username)}" autocomplete="off" /></div>
+              <div class="field"><label for="qbittorrent_password">Password</label><input class="input mono" id="qbittorrent_password" name="qbittorrent_password" type="password" value="${esc(s.qbittorrent_password)}" /></div>
+              <div class="field"><label for="qbittorrent_category">Category</label><input class="input mono" id="qbittorrent_category" name="qbittorrent_category" value="${esc(s.qbittorrent_category)}" /></div>
+            </div>
           </div>
           <div class="client-fields" data-for="torrent_client:transmission">
-            <div class="field"><label for="transmission_url">Transmission address</label><input class="input mono" id="transmission_url" name="transmission_url" placeholder="http://localhost:9091" value="${esc(s.transmission_url)}" /></div>
-            <div class="input-row two">
+            <div class="field">
+              <label for="transmission_url">Transmission address</label>
+              <div class="input-row">
+                <input class="input mono" id="transmission_url" name="transmission_url" placeholder="http://localhost:9091" value="${esc(s.transmission_url)}" />
+                <button class="btn" type="button" data-test-client="transmission">Test</button>
+              </div>
+              <div data-result="transmission"></div>
+            </div>
+            <div class="set-grid">
               <div class="field"><label for="transmission_username">Username</label><input class="input mono" id="transmission_username" name="transmission_username" value="${esc(s.transmission_username)}" autocomplete="off" placeholder="If you set one" /></div>
               <div class="field"><label for="transmission_password">Password</label><input class="input mono" id="transmission_password" name="transmission_password" type="password" value="${esc(s.transmission_password)}" /></div>
             </div>
-            <div><button class="btn" type="button" data-test-client="transmission">Test connection</button><div data-result="transmission"></div></div>
           </div>
           <div class="client-fields" data-for="torrent_client:deluge">
-            <div class="field"><label for="deluge_url">Deluge Web UI address</label><input class="input mono" id="deluge_url" name="deluge_url" placeholder="http://localhost:8112" value="${esc(s.deluge_url)}" /></div>
+            <div class="field">
+              <label for="deluge_url">Deluge Web UI address</label>
+              <div class="input-row">
+                <input class="input mono" id="deluge_url" name="deluge_url" placeholder="http://localhost:8112" value="${esc(s.deluge_url)}" />
+                <button class="btn" type="button" data-test-client="deluge">Test</button>
+              </div>
+              <div data-result="deluge"></div>
+            </div>
             <div class="field">
               <label for="deluge_password">Password</label>
               <input class="input mono" id="deluge_password" name="deluge_password" type="password" value="${esc(s.deluge_password)}" />
-              <span class="hint">Deluge's web password (it has no username). Set it under Preferences &rarr; Interface &rarr; Password.</span>
+              <span class="hint">Deluge’s web password (it has no username). Set it under Preferences → Interface → Password.</span>
             </div>
-            <div><button class="btn" type="button" data-test-client="deluge">Test connection</button><div data-result="deluge"></div></div>
           </div>
         </div>
       </section>
 
-      <section class="panel">
-        <div><h3>Usenet</h3><p class="desc">Optional. Downloads the Usenet results you pick from Prowlarr, then Narratarr files them into your library.</p></div>
-        <div class="body">
-          <div class="field">
-            <label>Download Usenet releases with</label>
-            <div class="segmented" data-choice="usenet_client" role="radiogroup" aria-label="Usenet client">
-              <button type="button" role="radio" data-v="sabnzbd">SABnzbd</button>
-              <button type="button" role="radio" data-v="nzbget">NZBGet</button>
-            </div>
-            <input type="hidden" name="usenet_client" value="${esc(s.usenet_client)}" />
+      <section class="panel" data-page="downloads">
+        <div class="ph ph-row">
+          <div><h3>Usenet</h3><p class="desc">For the Usenet results Prowlarr finds.</p></div>
+          <div class="segmented" data-choice="usenet_client" role="radiogroup" aria-label="Download Usenet releases with">
+            <button type="button" role="radio" data-v="sabnzbd">SABnzbd</button>
+            <button type="button" role="radio" data-v="nzbget">NZBGet</button>
           </div>
+        </div>
+        <div class="body">
+          <input type="hidden" name="usenet_client" value="${esc(s.usenet_client)}" />
           <div class="client-fields" data-for="usenet_client:sabnzbd">
-            <div class="field"><label for="sabnzbd_url">SABnzbd address</label><input class="input mono" id="sabnzbd_url" name="sabnzbd_url" placeholder="http://localhost:8080" value="${esc(s.sabnzbd_url)}" /></div>
-            <div class="field">
-              <label for="sabnzbd_api_key">API key</label>
-              <div class="input-row">
-                <input class="input mono" id="sabnzbd_api_key" name="sabnzbd_api_key" type="password" placeholder="SABnzbd → Config → General → API Key" value="${esc(s.sabnzbd_api_key)}" />
-                <button class="btn" type="button" data-test-client="sabnzbd">Test</button>
+            <div class="set-grid">
+              <div class="field"><label for="sabnzbd_url">SABnzbd address</label><input class="input mono" id="sabnzbd_url" name="sabnzbd_url" placeholder="http://localhost:8080" value="${esc(s.sabnzbd_url)}" /></div>
+              <div class="field">
+                <label for="sabnzbd_api_key">API key</label>
+                <div class="input-row">
+                  <input class="input mono" id="sabnzbd_api_key" name="sabnzbd_api_key" type="password" placeholder="Config → General → API Key" value="${esc(s.sabnzbd_api_key)}" />
+                  <button class="btn" type="button" data-test-client="sabnzbd">Test</button>
+                </div>
               </div>
-              <div data-result="sabnzbd"></div>
             </div>
+            <div data-result="sabnzbd"></div>
             <div class="field">
               <label for="sabnzbd_category">Category</label>
-              <input class="input mono" id="sabnzbd_category" name="sabnzbd_category" placeholder="audiobooks" value="${esc(s.sabnzbd_category)}" style="max-width:220px" />
-              <span class="hint">Optional. Must already exist in SABnzbd. Leave empty to use its default.</span>
+              <input class="input mono" id="sabnzbd_category" name="sabnzbd_category" placeholder="audiobooks" value="${esc(s.sabnzbd_category)}" style="max-width:240px" />
+              <span class="hint">Optional. Must already exist in SABnzbd. Leave it empty to use its default.</span>
             </div>
           </div>
           <div class="client-fields" data-for="usenet_client:nzbget">
-            <div class="field"><label for="nzbget_url">NZBGet address</label><input class="input mono" id="nzbget_url" name="nzbget_url" placeholder="http://localhost:6789" value="${esc(s.nzbget_url)}" /></div>
-            <div class="input-row two">
-              <div class="field"><label for="nzbget_username">Username</label><input class="input mono" id="nzbget_username" name="nzbget_username" value="${esc(s.nzbget_username)}" placeholder="nzbget" autocomplete="off" /></div>
-              <div class="field"><label for="nzbget_password">Password</label><input class="input mono" id="nzbget_password" name="nzbget_password" type="password" value="${esc(s.nzbget_password)}" /></div>
-            </div>
             <div class="field">
-              <label for="nzbget_category">Category</label>
+              <label for="nzbget_url">NZBGet address</label>
               <div class="input-row">
-                <input class="input mono" id="nzbget_category" name="nzbget_category" placeholder="Audiobooks" value="${esc(s.nzbget_category)}" style="max-width:220px" />
+                <input class="input mono" id="nzbget_url" name="nzbget_url" placeholder="http://localhost:6789" value="${esc(s.nzbget_url)}" />
                 <button class="btn" type="button" data-test-client="nzbget">Test</button>
               </div>
-              <span class="hint">The username and password are NZBGet’s ControlUsername and ControlPassword (Settings → Security).</span>
               <div data-result="nzbget"></div>
             </div>
+            <div class="set-grid three">
+              <div class="field"><label for="nzbget_username">Username</label><input class="input mono" id="nzbget_username" name="nzbget_username" value="${esc(s.nzbget_username)}" placeholder="nzbget" autocomplete="off" /></div>
+              <div class="field"><label for="nzbget_password">Password</label><input class="input mono" id="nzbget_password" name="nzbget_password" type="password" value="${esc(s.nzbget_password)}" /></div>
+              <div class="field"><label for="nzbget_category">Category</label><input class="input mono" id="nzbget_category" name="nzbget_category" placeholder="Audiobooks" value="${esc(s.nzbget_category)}" /></div>
+            </div>
+            <span class="hint">The username and password are NZBGet’s ControlUsername and ControlPassword (Settings → Security).</span>
           </div>
         </div>
       </section>
 
-      <section class="panel">
-        <div><h3>Download folders</h3><p class="desc">Only needed when your download clients and Narratarr see the downloads folder at different paths, such as separate Docker containers.</p></div>
+      <section class="panel" data-page="downloads">
+        <div class="ph"><h3>Download folders</h3><p class="desc">Only needed when your download clients see the downloads folder at a different path, such as in separate Docker containers.</p></div>
         <div class="body">
-          <div class="field">
-            <label for="path_remote">Path mapping</label>
-            <div class="input-row">
-              <input class="input mono" id="path_remote" name="path_remote" placeholder="The client's path, e.g. /downloads" value="${esc(s.path_remote)}" />
-              <input class="input mono" id="path_local" name="path_local" placeholder="Same folder here, e.g. /data/downloads" value="${esc(s.path_local)}" />
-            </div>
-            <span class="hint">Narratarr swaps the first for the second when a client reports where it saved a book.</span>
+          <div class="path-map">
+            <div class="field"><label for="path_remote">Your client saves to</label><input class="input mono" id="path_remote" name="path_remote" placeholder="e.g. /downloads" value="${esc(s.path_remote)}" /></div>
+            <span class="arrow" aria-hidden="true">${I.chevron}</span>
+            <div class="field"><label for="path_local">Narratarr sees it at</label><input class="input mono" id="path_local" name="path_local" placeholder="e.g. /data/downloads" value="${esc(s.path_local)}" /></div>
           </div>
         </div>
       </section>
 
-      <section class="panel">
-        <div><h3>Wanted &amp; following</h3><p class="desc">Books you want but don’t have yet, including new releases from authors and series you follow.</p></div>
+      <section class="panel" data-page="search">
+        <div class="ph"><h3>Wanted &amp; following</h3><p class="desc">Books you want but don’t have yet, and new books from authors and series you follow.</p></div>
         <div class="body">
-          <div class="field">
-            <label class="switch"><input type="checkbox" name="auto_search" ${s.auto_search ? "checked" : ""}><i></i>Search for Wanted books automatically</label>
-            <span class="hint">Uses Prowlarr. A few books are checked at a time to stay within your indexers’ API limits.</span>
-          </div>
-          <div class="field">
-            <label for="auto_search_hours">Look again every</label>
-            <div class="input-row" style="align-items:center;max-width:260px">
-              <input class="input" id="auto_search_hours" name="auto_search_hours" type="number" min="1" max="168" value="${esc(s.auto_search_hours)}" style="width:100px;flex:none" />
-              <span class="muted">hours</span>
+          <div class="set-row">
+            <label class="switch"><input type="checkbox" name="auto_search" ${s.auto_search ? "checked" : ""}><i></i><span><b>Look for Wanted books by itself</b><small>A few at a time, to stay within your indexers’ limits.</small></span></label>
+            <div class="inline-field">
+              <label for="auto_search_hours">every</label>
+              <input class="input" id="auto_search_hours" name="auto_search_hours" type="number" min="1" max="168" value="${esc(s.auto_search_hours)}" />
+              <span>hours</span>
             </div>
           </div>
-          <div class="field">
-            <label for="audible_region">Audible store for book details</label>
-            <select class="select" id="audible_region" name="audible_region" style="max-width:260px">
+          <div class="set-row">
+            <label for="audible_region"><b>Audible store for book details</b><small>Covers, series and release dates come from here. Nothing is downloaded from Audible.</small></label>
+            <select class="select" id="audible_region" name="audible_region">
               ${[["us", "United States"], ["uk", "United Kingdom"], ["ca", "Canada"], ["au", "Australia"], ["in", "India"], ["de", "Germany"], ["fr", "France"], ["it", "Italy"], ["es", "Spain"], ["jp", "Japan"]]
                 .map(([v, l]) => `<option value="${v}" ${s.audible_region === v ? "selected" : ""}>${l}</option>`).join("")}
             </select>
-            <span class="hint">Only used for titles, covers, series and release dates. Nothing is downloaded from Audible, but what you search on the Audible tab, and the authors you follow, are sent to Audible’s and Audnexus’s public catalogs.</span>
           </div>
         </div>
       </section>
 
-      <section class="panel">
-        <div><h3>Import</h3><p class="desc">Bring in audiobooks you already have. Books dropped into the import folder are moved into your library automatically.</p></div>
+      <section class="panel" data-page="search">
+        <div class="ph"><h3>AudiobookBay</h3><p class="desc">The AudiobookBay tab on Discover. Change the address if the site moves.</p></div>
         <div class="body">
           <div class="field">
-            <label for="import_folder">Import folder</label>
-            <input class="input mono" id="import_folder" name="import_folder" placeholder="e.g. ~/Downloads/Audiobooks to import" value="${esc(s.import_folder)}" />
-            <span class="hint">Checked every minute. A book is moved in once nothing in its folder has changed for two minutes. Must be outside your library folder.</span>
-          </div>
-          <div><button class="btn" type="button" id="open-import">${I.down} Import books now…</button></div>
-        </div>
-      </section>
-
-      <section class="panel">
-        <div><h3>Source</h3><p class="desc">The site Discover browses. Change this if the domain moves.</p></div>
-        <div class="body">
-          <div class="field">
-            <label for="abb_base_url">AudiobookBay address</label>
+            <label for="abb_base_url">Address</label>
             <input class="input mono" id="abb_base_url" name="abb_base_url" value="${esc(s.abb_base_url)}" />
           </div>
           <div class="field">
             <label>Search with</label>
             <div class="segmented" id="provider" role="radiogroup" aria-label="Search provider">
-              <button type="button" role="radio" data-v="audiobookbay">AudiobookBay’s search</button>
+              <button type="button" role="radio" data-v="audiobookbay">AudiobookBay’s own search</button>
               <button type="button" role="radio" data-v="brave">Brave Search</button>
             </div>
             <input type="hidden" name="search_provider" value="${esc(s.search_provider)}" />
@@ -1629,26 +1704,37 @@ function Settings(root) {
             <span class="hint">Get one at <a href="https://api-dashboard.search.brave.com" target="_blank" rel="noopener" style="color:var(--accent)">api-dashboard.search.brave.com</a>. Each search uses one query from your Brave plan.</span>
             <div id="brave-result"></div>
           </div>
+        </div>
+      </section>
+
+      <section class="panel" data-page="search">
+        <div class="ph"><h3>Smart search</h3></div>
+        <div class="body">
           <div class="field">
-            <label class="switch"><input type="checkbox" name="smart_search" ${s.smart_search ? "checked" : ""}><i></i>Smart search</label>
-            <span class="hint">Fixes typos and suggests titles as you type, using Apple’s public audiobook catalog. What you type in the search box is sent to Apple.</span>
+            <label class="switch"><input type="checkbox" name="smart_search" ${s.smart_search ? "checked" : ""}><i></i>Fix typos and suggest titles as you type</label>
+            <span class="hint">Uses Apple’s public audiobook catalog, so what you type in the search box is sent to Apple.</span>
           </div>
         </div>
       </section>
 
-      <section class="panel">
-        <div><h3>Audiobookshelf</h3><p class="desc">Optional. Books are already filed the way Audiobookshelf expects; connect it and Audiobookshelf picks up each new book as soon as it has downloaded.</p>
-          <button class="guide-link" type="button" data-guide>${I.books}<span><b>Setup guide</b><small>Get your books into Audiobookshelf, step by step</small></span></button></div>
+      <section class="panel" data-page="abs">
+        <div class="ph abs-connected-head" id="abs-head" hidden>
+          <span class="abs-badge" aria-hidden="true">${SETTINGS_PAGE.abs[3]}</span>
+          <div class="abs-who"><h3>Connected</h3><p class="desc">To <code id="abs-where"></code></p></div>
+          <button class="btn" type="button" id="abs-disconnect">Disconnect</button>
+        </div>
+        <div class="ph" id="abs-intro"><h3>Connect Audiobookshelf</h3><p class="desc">Books are already filed the way Audiobookshelf expects. Connect it and Audiobookshelf picks up each new book as soon as it has downloaded.</p></div>
         <div class="body">
           <div class="field" id="abs-connected" hidden>
-            <label for="audiobookshelf_library_id">Library to rescan</label>
-            <div class="input-row">
-              <select class="select abs-select" id="audiobookshelf_library_id" name="audiobookshelf_library_id">
-                <option value="${esc(s.audiobookshelf_library_id)}">${s.audiobookshelf_library_id ? "Loading…" : "Choose a library"}</option>
-              </select>
-              <button class="btn" type="button" id="test-audiobookshelf">Test</button>
+            <div class="set-row">
+              <label for="audiobookshelf_library_id"><b>Library to rescan</b><small>After every download. It should watch Narratarr’s library folder.</small></label>
+              <div class="input-row">
+                <select class="select abs-select" id="audiobookshelf_library_id" name="audiobookshelf_library_id">
+                  <option value="${esc(s.audiobookshelf_library_id)}">${s.audiobookshelf_library_id ? "Loading…" : "Choose a library"}</option>
+                </select>
+                <button class="btn" type="button" id="test-audiobookshelf">Test</button>
+              </div>
             </div>
-            <span class="hint">Connected to <code id="abs-where"></code> · <a href="#" id="abs-disconnect" style="color:var(--accent)">Disconnect</a> · <a href="#" data-guide style="color:var(--accent)">Check your books</a></span>
             <div id="audiobookshelf-result"></div>
           </div>
 
@@ -1674,26 +1760,74 @@ function Settings(root) {
             <div id="abs-signin-result"></div>
           </div>
 
-          <details class="abs-manual" id="abs-manual">
+          <details class="abs-manual set-more" id="abs-manual">
             <summary>Paste an API key instead</summary>
             <div class="field">
               <label for="audiobookshelf_token">API key</label>
               <input class="input mono" id="audiobookshelf_token" name="audiobookshelf_token" type="password" value="${esc(s.audiobookshelf_token)}" />
-              <span class="hint">For single sign-on (OpenID) accounts, or older Audiobookshelf versions. Create one in Audiobookshelf under Settings → Users → API Keys, then press Save changes.</span>
+              <span class="hint">For single sign-on (OpenID) accounts, or older Audiobookshelf versions. Create one in Audiobookshelf under Settings → Users → API Keys, then save.</span>
             </div>
           </details>
         </div>
       </section>
 
-      <div class="save-bar"><button class="btn primary" type="submit" id="save">${I.check} Save changes</button></div>
-    </form>`;
+      <section class="panel" data-page="abs" id="abs-check-panel" hidden>
+        <div class="ph ph-row">
+          <div><h3>Can it see your books?</h3><p class="desc">Asks Audiobookshelf to rescan, then counts which of Narratarr’s books it found.</p></div>
+          <button class="btn primary" type="button" id="abs-check">Check now</button>
+        </div>
+        <div class="body" id="abs-check-result" hidden></div>
+      </section>
+
+      <button class="panel guide-card" type="button" data-page="abs" data-guide>
+        <span class="ic" aria-hidden="true">${I.book}</span>
+        <span class="tx"><b>Setup guide</b><small>Step by step, for Docker or a direct install, on this machine or another.</small></span>
+        <span class="chev" aria-hidden="true">${I.chevron}</span>
+      </button>
+    </form>
+      </div>
+    </div>
+    <div class="save-float" id="save-bar" role="status" hidden>
+      <i class="dot warn" aria-hidden="true"></i>
+      <span id="save-count"></span>
+      <button class="btn ghost" type="button" id="discard">Discard</button>
+      <button class="btn primary" type="submit" form="settings" id="save">Save<span class="long"> changes</span></button>
+    </div>`;
 
   const form = $("#settings", root);
+  const wrap = $("#set-wrap", root);
+  let userCount = null;
+  let saved = null; // the settings as last saved; the save bar shows when the form differs
+
+  // Which page shows. No page: on a phone the menu itself; on a wide screen, General.
+  function go(p) {
+    const key = SETTINGS_PAGE[p] ? p : "";
+    const shown = key || "general";
+    const [, label, lede] = SETTINGS_PAGE[shown];
+    wrap.classList.toggle("home", !key);
+    $("#set-title", root).textContent = label;
+    $("#set-lede", root).textContent = lede;
+    $$("[data-page]", form).forEach((el) => { el.hidden = el.dataset.page !== shown || (el.id === "abs-check-panel" && !absConnected()); });
+    $$(".set-nav a", root).forEach((a) => {
+      const on = a.dataset.page === shown;
+      a.classList.toggle("on", on);
+      a.setAttribute("aria-current", on ? "page" : "false");
+    });
+    page = key;
+  }
+  function statuses() {
+    $$(".set-nav a", root).forEach((a) => {
+      const [text, tone] = settingsStatus(a.dataset.page, userCount);
+      $("[data-status]", a).textContent = text;
+      $(".dot", a).className = `dot ${tone}`;
+    });
+  }
+
   const preview = () => {
     const dir = form.library_dir.value.replace(/\/+$/, "");
     const sample = { author: "Frank Herbert", title: "Dune", narrator: "Scott Brick" };
     const rel = (form.folder_template.value || "{author}/{title}").replace(/\{(\w+)\}/g, (_, k) => sample[k] ?? `{${k}}`);
-    $("#path-preview", root).innerHTML = `${esc(dir)}/<b>${esc(rel)}</b>/Dune.m4b`;
+    $("#path-preview", root).innerHTML = `${esc(dir)}/<b>${esc(rel)}</b>`;
   };
   form.folder_template.oninput = preview;
   form.library_dir.oninput = preview;
@@ -1711,6 +1845,7 @@ function Settings(root) {
     });
     $("#provider-hint", root).textContent = hints[v];
     $("#brave-field", root).hidden = v !== "brave";
+    dirty();
   };
   setProvider(s.search_provider || "audiobookbay");
   $("#provider", root).onclick = (e) => { const b = e.target.closest("[data-v]"); if (b) setProvider(b.dataset.v); };
@@ -1723,6 +1858,7 @@ function Settings(root) {
       b.setAttribute("aria-checked", b.dataset.v === v);
     });
     $$(`[data-for^="${group}:"]`, root).forEach((el) => { el.hidden = el.dataset.for !== `${group}:${v}`; });
+    dirty();
   };
   $$("[data-choice]", root).forEach((seg) => {
     choose(seg.dataset.choice, form[seg.dataset.choice].value);
@@ -1766,8 +1902,33 @@ function Settings(root) {
     state.sources = await api("/api/sources"); // the Prowlarr tab appears once it's set up
     updateRdPill();
     if (absConnected() === $("#abs-connected", root).hidden) absShow(); // a pasted API key just connected it
+    $("#prowlarr-chip", root).hidden = !state.settings.prowlarr_configured;
+    saved = snapshot();
+    dirty();
+    statuses();
     if (!quiet) toast("Settings saved", { kind: "ok" });
   }
+
+  // The save bar: shown only when something differs from what's saved.
+  const snapshot = () => collect();
+  function dirty() {
+    if (!saved) return;
+    const now = collect();
+    const n = [...new Set([...Object.keys(now), ...Object.keys(saved)])]
+      .filter((k) => JSON.stringify(now[k]) !== JSON.stringify(saved[k])).length;
+    $("#save-bar", root).hidden = !n;
+    $("#save-count", root).textContent = `${n} unsaved change${n === 1 ? "" : "s"}`;
+  }
+  form.addEventListener("input", dirty);
+  form.addEventListener("change", dirty);
+  $("#discard", root).onclick = () => { state.view = Settings(root, page); };
+  $$(".stepper [data-step]", form).forEach((b) => {
+    b.onclick = () => {
+      const input = form.max_concurrent;
+      input.value = Math.max(1, Math.min(8, (Number(input.value) || 1) + Number(b.dataset.step)));
+      dirty();
+    };
+  });
 
   form.onsubmit = async (e) => {
     e.preventDefault();
@@ -1853,6 +2014,10 @@ function Settings(root) {
   const absShow = async (libs) => {
     const on = absConnected();
     $("#abs-connected", root).hidden = !on;
+    $("#abs-head", root).hidden = !on;
+    $("#abs-intro", root).hidden = on;
+    $("#abs-check-panel", root).hidden = !on || page !== "abs";
+    statuses();
     $("#abs-setup", root).hidden = on;
     $("#abs-manual", root).hidden = on;
     $("#abs-signin", root).hidden = on || !(absServer?.ready && absServer?.password_login);
@@ -1945,13 +2110,34 @@ function Settings(root) {
     $("#audiobookshelf-result", root).innerHTML = "";
     try { await save(true); } catch (err) { toast(err.message, { kind: "err" }); }
   };
+  $("#abs-check", root).onclick = async (e) => {
+    const btn = e.currentTarget;
+    const out = $("#abs-check-result", root);
+    spinBtn(btn, true);
+    out.hidden = false;
+    out.innerHTML = `<span class="hint"><span class="spinner"></span> Asking Audiobookshelf to rescan…</span>`;
+    try {
+      const r = await api("/api/audiobookshelf/check", { method: "POST", body: { scan: true } });
+      const all = r.seen === r.books;
+      out.innerHTML = `<div class="abs-count ${all ? "ok" : ""}"><b>${r.seen}<small> / ${r.books}</small></b>
+        <span>${!r.books ? "Narratarr hasn’t downloaded any books yet."
+          : all ? "All of your books are in Audiobookshelf."
+          : `Audiobookshelf can’t see ${r.books - r.seen} of them yet, such as ${r.missing.slice(0, 3).map((t) => `“${esc(t)}”`).join(", ")}. The setup guide shows how to fix that.`}</span></div>`;
+    } catch (err) {
+      out.innerHTML = badLine(err.message);
+    }
+    spinBtn(btn, false);
+  };
   tester("audiobookshelf", (r) => `Connected to Audiobookshelf ${esc(r.version)} · rescans <b>${esc(r.library)}</b> after each download`);
   $("#abs-disconnect", root).onclick = async (e) => {
     e.preventDefault();
     state.settings = await api("/api/settings", { method: "PUT", body: { audiobookshelf_token: "", audiobookshelf_library_id: "" } });
     form.audiobookshelf_token.value = "";
     $("#audiobookshelf-result", root).innerHTML = "";
+    $("#abs-check-result", root).hidden = true;
     absShow();
+    saved = snapshot();
+    dirty();
     toast("Disconnected. Narratarr’s key is still listed in Audiobookshelf, where you can revoke it.");
   };
   absShow();
@@ -1960,6 +2146,7 @@ function Settings(root) {
       e.preventDefault();
       openAbsGuide({
         onConnect: () => {
+          location.hash = "#/settings/abs";
           $("#abs-setup", root).scrollIntoView({ behavior: "smooth", block: "center" });
           form.audiobookshelf_url.focus({ preventScroll: true });
         },
@@ -1972,6 +2159,8 @@ function Settings(root) {
   const renderUsers = async () => {
     try {
       const all = await api("/api/users");
+      userCount = all.length;
+      statuses();
       userList.innerHTML = all.map((u) => `
         <div class="user-row" data-id="${u.id}" data-name="${esc(u.username)}">
           <span class="avatar">${esc(u.username.slice(0, 1))}</span>
@@ -2052,7 +2241,10 @@ function Settings(root) {
   });
   renderUsers();
 
-  return {};
+  go(page);
+  statuses();
+  saved = snapshot();
+  return { go };
 }
 
 // ---------------------------------------------------------------------------
