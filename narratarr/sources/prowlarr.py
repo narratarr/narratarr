@@ -26,6 +26,7 @@ REMEMBER = 3000  # releases kept in memory so a result can still be opened or ad
 
 _releases: OrderedDict[str, dict] = OrderedDict()
 _search_cache: Cache[list[dict]] = Cache(CACHE_SECONDS, 200)
+_offering: Cache[list[str]] = Cache(600, 20)  # which indexers offer which categories
 
 _FORMAT_RE = re.compile(r"\b(m4b|mp3|flac|aac|m4a|ogg|opus|epub|azw3|azw|mobi|pdf|fb2|cbz|cbr|djvu)\b", re.I)
 _AUDIO = {"m4b", "mp3", "flac", "aac", "m4a", "ogg", "opus"}
@@ -35,6 +36,20 @@ _BRACKETS_RE = re.compile(r"\s*[\(\[\{][^\)\]\}]*[\)\]\}]")
 
 class ProwlarrError(Exception):
     pass
+
+
+def split_categories(text: str, fallback: str) -> list[str]:
+    """ "3030, 3040" -> ["3030", "3040"]; the fallback when nothing usable is there."""
+    return [c for c in re.split(r"[,\s]+", text or "") if c.isdigit()] or [fallback]
+
+
+def offers(indexer: dict, cats: list[str]) -> bool:
+    """Whether an indexer (as Prowlarr describes it) has any of these categories, or one inside them."""
+    found = set()
+    for c in (indexer.get("capabilities") or {}).get("categories") or []:
+        found.add(str(c.get("id")))
+        found.update(str(sub.get("id")) for sub in c.get("subCategories") or [])
+    return bool(found & set(cats))
 
 
 def _fmt_size(n: int) -> str:
@@ -149,7 +164,7 @@ class Prowlarr:
                  fallback: str = "3030"):
         self.base = url.rstrip("/")
         self.api_key = api_key
-        self.cats = [c for c in re.split(r"[,\s]+", categories or "") if c.isdigit()] or [fallback]
+        self.cats = split_categories(categories, fallback)
         self._client = client
 
     # ---- Source interface ----------------------------------------------------
@@ -230,11 +245,29 @@ class Prowlarr:
             remember(r)
         return list(found)
 
-    async def status(self) -> dict:
-        info = await self.request("/api/v1/system/status")
+    async def _enabled(self) -> list[dict]:
         indexers = await self.request("/api/v1/indexer")
-        enabled = [i for i in indexers if i.get("enable")] if isinstance(indexers, list) else []
-        return {"version": info.get("version", ""), "indexers": len(enabled)}
+        return [i for i in indexers if isinstance(i, dict) and i.get("enable")] if isinstance(indexers, list) else []
+
+    async def status(self, ebook_categories: str = "7020") -> dict:
+        info = await self.request("/api/v1/system/status")
+        enabled = await self._enabled()
+        cats = split_categories(ebook_categories, "7020")
+        return {"version": info.get("version", ""), "indexers": len(enabled),
+                "ebook_indexers": sorted((i.get("name") or "?" for i in enabled if offers(i, cats)), key=str.lower),
+                "ebook_categories": cats}
+
+    async def offering(self) -> list[str] | None:
+        """The enabled indexers that search this instance's categories; None if Prowlarr can't say right now."""
+        key = (self.base, tuple(self.cats))
+        names = _offering.get(key)
+        if names is None:
+            try:
+                names = sorted((i.get("name") or "?" for i in await self._enabled() if offers(i, self.cats)), key=str.lower)
+            except ProwlarrError:
+                return None
+            _offering.set(key, names)
+        return names
 
 
 async def fetch(url: str, base: str, api_key: str, transport: httpx.AsyncBaseTransport | None = None):

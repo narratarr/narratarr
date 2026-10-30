@@ -266,7 +266,7 @@ Press **Test** next to each one. Once Prowlarr is connected, a **Prowlarr** tab 
 - **qBittorrent / Transmission / Deluge:** when the torrent finishes, Narratarr **hard-links** the files into your library (copying only if they're on different drives). The torrent keeps seeding, which matters on private trackers.
 - **Stop or Remove** in Narratarr also removes an unfinished download from the client.
 
-Narratarr searches category `3030` (*Audio › Audiobook*) for audiobooks and `7020` (*Books › EBook*) for ebooks by default; you can change either under **Settings → Prowlarr**. To go easy on indexer API limits, each search is sent once as typed, and a second, spelling-corrected search is only made when the first finds little.
+Narratarr searches category `3030` (*Audio › Audiobook*) for audiobooks and `7020` (*Books › EBook*) for ebooks by default; you can change either under **Settings → Prowlarr**. The Prowlarr tab on Discover has an **Audiobooks / Ebooks** switch, and **Test** tells you which of your indexers offer ebooks. To go easy on indexer API limits, each search is sent once as typed, and a second, spelling-corrected search is only made when the first finds little.
 
 > [!TIP]
 > **Running it all in Docker?** Narratarr needs to see your clients' finished downloads. Mount the same host folder into every container, ideally at the same path:

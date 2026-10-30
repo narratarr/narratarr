@@ -2,6 +2,11 @@
 
 All notable changes to Narratarr. The app shows this under **Settings → Updates**.
 
+## 0.7.1 — 2026-10-30
+
+- **Ebooks on the Prowlarr tab.** Discover's Prowlarr tab has an **Audiobooks / Ebooks** switch, so you can browse and search ebook releases from all your indexers directly, not only through Wanted. Ebooks you download from there are filed as ebooks.
+- **Which indexers have ebooks.** **Test** under Settings → Prowlarr now lists the indexers that offer ebooks, or says none do. When an ebook search, or a Wanted ebook, finds nothing because no indexer has an ebook category, Narratarr says so instead of "Nothing found yet".
+
 ## 0.7.0 — 2026-10-30
 
 - **Ebooks.** Want any book as an **audiobook, an ebook or both**: choose when you add it to Wanted, or open a book in your library and press **Want it too** on the format you don't have. Ebooks are found in your indexers' ebook categories (`7020`, *Books › EBook*, by default; change it under **Settings → Prowlarr**), and one file is kept per book, preferring EPUB, then AZW3, MOBI and PDF.

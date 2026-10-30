@@ -631,3 +631,90 @@ def test_epub2_contents_come_from_the_ncx(tmp_path):
     index = ebooks.epub_index(path)
     assert index["rtl"] and [s["href"] for s in index["spine"]] == ["a.html"]
     assert [(t["title"], t["fragment"], t["depth"]) for t in index["toc"]] == [("One", "x", 0), ("One, part two", "y", 1)]
+
+
+# ---- ebooks on the Prowlarr tab, and which indexers have them -------------------------------------------
+
+INDEXERS = [
+    {"name": "1337x", "enable": True, "capabilities": {"categories": [
+        {"id": 3000, "name": "Audio", "subCategories": [{"id": 3030}]}, {"id": 7000, "name": "Books", "subCategories": [{"id": 7020}]}]}},
+    {"name": "AudioOnly", "enable": True, "capabilities": {"categories": [{"id": 3000, "subCategories": [{"id": 3030}]}]}},
+    {"name": "Switched off", "enable": False, "capabilities": {"categories": [{"id": 7000, "subCategories": [{"id": 7020}]}]}},
+]
+
+
+@pytest.fixture
+def prowlarr_api(monkeypatch):
+    """A fake Prowlarr with a list of indexers and search results; records which categories were searched."""
+    state = {"indexers": list(INDEXERS), "releases": [], "searched": []}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host != "prowlarr":
+            return httpx.Response(404)
+        if request.url.path == "/api/v1/indexer":
+            return httpx.Response(200, json=state["indexers"])
+        if request.url.path == "/api/v1/system/status":
+            return httpx.Response(200, json={"version": "1.30.2"})
+        if request.url.path == "/api/v1/search":
+            state["searched"].append(request.url.params.get_list("categories"))
+            return httpx.Response(200, json=state["releases"])
+        return httpx.Response(404)
+
+    transport = httpx.MockTransport(handler)
+    real = httpx.AsyncClient
+    monkeypatch.setattr(httpx, "AsyncClient", lambda *a, **kw: real(*a, **{**kw, "transport": transport}))
+    config.update({"prowlarr_url": PROWLARR, "prowlarr_api_key": "K", "smart_search": False,
+                   "qbittorrent_url": "http://qbt", "torrent_client": "qbittorrent"})
+    prowlarr._offering.clear()
+    return state
+
+
+def test_settings_says_which_indexers_have_ebooks(client, prowlarr_api):
+    r = client.post("/api/settings/test-prowlarr").json()
+    assert (r["version"], r["indexers"], r["ebook_indexers"], r["ebook_categories"]) == ("1.30.2", 2, ["1337x"], ["7020"])
+    prowlarr_api["indexers"] = INDEXERS[1:]
+    assert client.post("/api/settings/test-prowlarr").json()["ebook_indexers"] == []
+    assert prowlarr.offers(INDEXERS[0], ["7000"]) and not prowlarr.offers(INDEXERS[1], ["7020"])
+
+
+def test_the_prowlarr_tab_searches_ebooks(client, prowlarr_api):
+    prowlarr_api["releases"] = [{"guid": "https://1337x.example/t/1", "title": "Frank Herbert - Dune [EPUB]",
+                                 "protocol": "torrent", "indexer": "1337x", "seeders": 40,
+                                 "magnetUrl": "magnet:?xt=urn:btih:" + "a" * 40}]
+    r = client.get("/api/discover", params={"q": "dune", "source": "prowlarr", "kind": "ebook"}).json()
+    assert prowlarr_api["searched"] == [["7020"]]
+    assert [(i["format"], i["indexer"]) for i in r["items"]] == [("EPUB", "1337x")] and "note" not in r
+    client.get("/api/discover", params={"q": "dune", "source": "prowlarr"})
+    assert prowlarr_api["searched"][-1] == ["3030"]  # audiobooks, as before
+
+    # Nothing found, and no indexer has ebooks at all: say so, instead of "nothing found".
+    prowlarr_api["releases"], prowlarr_api["indexers"] = [], INDEXERS[1:]
+    empty = client.get("/api/discover", params={"q": "hyperion", "source": "prowlarr", "kind": "ebook"}).json()
+    assert empty["items"] == [] and "None of your Prowlarr indexers offer ebooks (category 7020)" in empty["note"]
+
+
+def test_releases_from_the_ebook_search_join_the_library_as_ebooks(client, prowlarr_api):
+    prowlarr_api["releases"] = [
+        {"guid": "https://1337x.example/t/1", "title": "Frank Herbert - Dune", "protocol": "torrent",
+         "indexer": "1337x", "magnetUrl": "magnet:?xt=urn:btih:" + "a" * 40},
+        {"guid": "https://1337x.example/t/2", "title": "Dan Simmons - Hyperion (retail) [MOBI]", "protocol": "torrent",
+         "indexer": "1337x", "magnetUrl": "magnet:?xt=urn:btih:" + "b" * 40},
+    ]
+    client.get("/api/discover", params={"q": "books", "source": "prowlarr", "kind": "ebook"})
+    dune = client.post("/api/library", json={"url": "https://1337x.example/t/1", "source": "prowlarr",
+                                             "download": False, "format": "ebook"}).json()
+    hyperion = client.post("/api/library", json={"url": "https://1337x.example/t/2", "source": "prowlarr",
+                                                 "download": False}).json()
+    assert dune["kind"] == "ebook"  # no format in its name, but it came from the ebook search
+    assert hyperion["kind"] == "ebook"  # a MOBI is an ebook whichever way it was found
+
+
+async def test_a_wanted_ebook_says_when_no_indexer_has_ebooks(prowlarr_api):
+    prowlarr_api["indexers"] = INDEXERS[1:]
+    book = wanted.add_wanted(DUNE, "ebook")
+    assert await wanted.search_and_grab(book) is None
+    assert "None of your Prowlarr indexers offer ebooks" in db.get(book["id"])["search_note"]
+    prowlarr_api["indexers"] = list(INDEXERS)
+    prowlarr._offering.clear()
+    await wanted.search_and_grab(db.get(book["id"]))
+    assert db.get(book["id"])["search_note"] == "Nothing found yet."

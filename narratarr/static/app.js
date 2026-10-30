@@ -42,7 +42,7 @@ const state = {
   sources: [],
   library: [],
   libraryKey: "",
-  discover: { q: "", category: "", page: 0, total: 1, items: [], loading: false, error: "", token: 0, dym: "", lang: "", fmt: "", sort: "", source: lastSource() },
+  discover: { q: "", category: "", page: 0, total: 1, items: [], loading: false, error: "", token: 0, dym: "", lang: "", fmt: "", sort: "", note: "", source: lastSource(), kind: lastKind() },
   libFilter: "all",
   libFormat: "",
   libSearch: "",
@@ -123,6 +123,11 @@ function modal({ title, body, confirm = "Confirm", danger = false, extra = "" })
   });
 }
 
+// What the Prowlarr tab searches for: "audiobook" or "ebook".
+function lastKind() {
+  try { return localStorage.getItem("narratarr.discoverKind") === "ebook" ? "ebook" : "audiobook"; } catch { return "audiobook"; }
+}
+
 function lastSource() {
   try { return localStorage.getItem("narratarr.source") || localStorage.getItem("audiobookeer.source") || "librivox"; } catch { return "librivox"; }
 }
@@ -157,8 +162,9 @@ function phasesFor(b) {
 // ---------------------------------------------------------------------------
 // library actions (shared by every view)
 
-async function addBook(url, { cover = "", title = "", source = "audiobookbay", protocol = "", format = formatFor(source) } = {}) {
+async function addBook(url, { cover = "", title = "", source = "audiobookbay", protocol = "", format } = {}) {
   if (isCatalog(source)) {
+    format ||= formatFor(source);
     // A catalog only describes the book: it goes to Wanted and Narratarr looks for a release.
     const book = await api("/api/library", { method: "POST", body: { url, download: true, source, format } });
     await refreshLibrary();
@@ -169,7 +175,7 @@ async function addBook(url, { cover = "", title = "", source = "audiobookbay", p
   // Free sources download directly; torrents and Usenet releases need a download client.
   const missing = missingClient(source, protocol);
   const download = !missing;
-  const book = await api("/api/library", { method: "POST", body: { url, download, source } });
+  const book = await api("/api/library", { method: "POST", body: { url, download, source, ...(format === "ebook" ? { format } : {}) } });
   await refreshLibrary();
   toast(
     download ? `${book.title || title} is on its way` : `Saved ${book.title || title} to Wanted. Connect ${missing} in Settings to download.`,
@@ -317,6 +323,8 @@ function Discover(root) {
   const st = state.settings;
   const needsClient = st && (src.delivery === "torrent" ? !st.torrent_configured
     : src.delivery === "indexer" ? !st.torrent_configured && !st.usenet_configured : false);
+  const ebooksHere = src.name === "prowlarr" ? d.kind === "ebook" : isCatalog(d.source) && formatFor(d.source) === "ebook";
+  const defaultLabel = src.name === "prowlarr" && d.kind === "ebook" ? "Latest ebooks from your indexers" : src.default_label || "Fresh arrivals";
   const greeting = (() => {
     const h = new Date().getHours();
     return h < 5 ? "Late night listening" : h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening";
@@ -326,7 +334,7 @@ function Discover(root) {
     <header class="hero">
       <div>
         <div class="eyebrow">${greeting}</div>
-        <h1 class="page-title">What are we <em>${isCatalog(d.source) && formatFor(d.source) === "ebook" ? "reading" : "listening"}</em> to next?</h1>
+        <h1 class="page-title">What are we <em>${ebooksHere ? "reading" : "listening"}</em> to next?</h1>
       </div>
       <div class="sources" id="sources" role="tablist" aria-label="Where to look">
         ${state.sources.map((s) => `
@@ -337,14 +345,19 @@ function Discover(root) {
       <div class="search-wrap">
         <form class="search" id="search-form" role="search">
           ${I.search}
-          <input id="q" type="search" placeholder="Search titles, authors, narrators… typos are fine" autocomplete="off" value="${esc(d.q)}" aria-label="Search audiobooks" aria-autocomplete="list" aria-controls="suggest" />
+          <input id="q" type="search" placeholder="${ebooksHere ? "Search titles and authors… typos are fine" : "Search titles, authors, narrators… typos are fine"}" autocomplete="off" value="${esc(d.q)}" aria-label="Search audiobooks" aria-autocomplete="list" aria-controls="suggest" />
           <kbd>/</kbd>
           <button class="btn primary" type="submit">Search</button>
         </form>
         <div class="suggest" id="suggest" role="listbox" hidden></div>
       </div>
       <div class="chips" id="chips">
-        <button class="chip ${!d.q && !d.category ? "on" : ""}" data-cat="">${esc(src.default_label || "Fresh arrivals")}</button>
+        ${src.name === "prowlarr" ? `
+        <div class="segmented kinds" role="radiogroup" aria-label="Search for">
+          ${[["audiobook", I.headphones, "Audiobooks"], ["ebook", I.book, "Ebooks"]].map(([k, icon, label]) => `
+            <button type="button" role="radio" aria-checked="${d.kind === k}" class="${d.kind === k ? "on" : ""}" data-kind="${k}">${icon}${label}</button>`).join("")}
+        </div>` : ""}
+        <button class="chip ${!d.q && !d.category ? "on" : ""}" data-cat="">${esc(defaultLabel)}</button>
         ${src.categories.map((c) => `<button class="chip ${!d.q && d.category === c.slug ? "on" : ""}" data-cat="${esc(c.slug)}">${esc(c.name)}</button>`).join("")}
       </div>
     </header>
@@ -367,8 +380,8 @@ function Discover(root) {
   function heading() {
     const cat = src.categories.find((c) => c.slug === d.category);
     $("#disc-title", root).innerHTML = d.q
-      ? `Results for <em style="font-style:italic">“${esc(d.q)}”</em> <span class="in-src">in ${esc(src.label)}</span>`
-      : esc(cat ? cat.name : src.default_label || "Fresh arrivals");
+      ? `Results for <em style="font-style:italic">“${esc(d.q)}”</em> <span class="in-src">in ${esc(src.label)}${src.name === "prowlarr" && d.kind === "ebook" ? " · ebooks" : ""}</span>`
+      : esc(cat ? cat.name : defaultLabel);
     $("#dym", root).innerHTML = d.dym
       ? `<p class="dym">Including results for <em>${esc(d.dym)}</em> · <button data-literal>Show only close matches for “${esc(d.q)}”</button></p>`
       : "";
@@ -417,7 +430,7 @@ function Discover(root) {
       grid.innerHTML = `<div class="empty" style="grid-column:1/-1">
         <div class="art">${d.error ? I.alert : I.search}</div>
         <h3>${d.error ? "Couldn’t load books" : filtered ? "Nothing matches those filters" : "Nothing found"}</h3>
-        <p>${esc(d.error || (filtered ? "Try another language or format." : "Try searching by author, or just part of the title."))}</p>
+        <p>${esc(d.error || (filtered ? "Try another language or format." : d.note || "Try searching by author, or just part of the title."))}</p>
         ${d.error ? '<button class="btn" data-retry>Try again</button>' : ""}
       </div>`;
     }
@@ -432,7 +445,7 @@ function Discover(root) {
   async function load(reset) {
     if (d.loading && !reset) return;
     const token = ++d.token;
-    if (reset) { d.items = []; d.page = 0; d.total = 1; d.error = ""; d.dym = ""; grid.innerHTML = skeletons(12); }
+    if (reset) { d.items = []; d.page = 0; d.total = 1; d.error = ""; d.dym = ""; d.note = ""; grid.innerHTML = skeletons(12); }
     d.loading = true;
     heading();
     footer();
@@ -443,13 +456,14 @@ function Discover(root) {
     }, 6000);
     try {
       const params = new URLSearchParams({ q: d.q, category: d.category, page: d.page + 1, source: d.source });
+      if (src.name === "prowlarr") params.set("kind", d.kind);
       const res = await api(`/api/discover?${params}`);
       if (token !== d.token) return;
       const seen = new Set(d.items.map((i) => i.url));
       d.items.push(...res.items.filter((i) => !seen.has(i.url)));
       d.page = res.page;
       d.total = res.total_pages;
-      if (reset) d.dym = res.did_you_mean || "";
+      if (reset) { d.dym = res.did_you_mean || ""; d.note = res.note || ""; }
     } catch (e) {
       if (token !== d.token) return;
       d.error = e.message;
@@ -543,6 +557,17 @@ function Discover(root) {
   };
 
   $("#chips", root).onclick = (e) => {
+    const kind = e.target.closest("[data-kind]");
+    if (kind) {
+      if (kind.dataset.kind === d.kind) return;
+      d.kind = kind.dataset.kind;
+      try { localStorage.setItem("narratarr.discoverKind", d.kind); } catch { /* private mode */ }
+      d.items = [];
+      d.lang = d.fmt = d.sort = "";
+      d.token++;
+      d.loading = false;
+      return route(); // the same search, now for the other format
+    }
     const chip = e.target.closest(".chip");
     if (!chip) return;
     d.category = chip.dataset.cat;
@@ -572,15 +597,19 @@ function Discover(root) {
     if (e.target.closest("[data-quick]")) {
       const btn = e.target.closest("[data-quick]");
       spinBtn(btn, true);
-      try { await addBook(item.url, { cover: item.cover_url, title: item.title, source: d.source, protocol: item.protocol }); }
+      try { await addBook(item.url, { cover: item.cover_url, title: item.title, source: d.source, protocol: item.protocol, format: kindOf(item) }); }
       catch (err) { toast(err.message, { kind: "err" }); spinBtn(btn, false); }
       return;
     }
-    openDrawer({ url: item.url, preview: item, source: d.source });
+    openDrawer({ url: item.url, preview: item, source: d.source, format: kindOf(item) });
   };
   root.onkeydown = (e) => {
     if (e.key === "Enter" && e.target.matches(".card")) e.target.click();
   };
+  // A Prowlarr release found while searching for ebooks is an ebook (catalog books pick their own format).
+  function kindOf(item) {
+    return item.source === "prowlarr" && d.kind === "ebook" ? "ebook" : undefined;
+  }
 
   const io = new IntersectionObserver((entries) => {
     if (entries[0].isIntersecting && !d.loading && d.page && d.page < d.total && !d.error) load(false);
@@ -1778,7 +1807,13 @@ function Settings(root) {
       spinBtn(btn, false);
     };
   };
-  tester("prowlarr", (r) => `Connected to Prowlarr ${esc(r.version)} · <b>${r.indexers}</b> indexer${r.indexers === 1 ? "" : "s"} enabled`);
+  tester("prowlarr", (r) => {
+    const cats = (r.ebook_categories || []).join(", ");
+    const ebooks = r.ebook_indexers?.length
+      ? `<br><small>Ebooks from <b>${r.ebook_indexers.map(esc).join(", ")}</b></small>`
+      : `<br><small class="warn">None of them offer ebooks (category ${esc(cats)}). Add an indexer that does in Prowlarr to find ebooks.</small>`;
+    return `Connected to Prowlarr ${esc(r.version)} · <b>${r.indexers}</b> indexer${r.indexers === 1 ? "" : "s"} enabled${ebooks}`;
+  });
   $$("[data-test-client]", root).forEach((btn) => {
     btn.onclick = async () => {
       const name = btn.dataset.testClient;
@@ -2327,8 +2362,8 @@ function paintDrawer(b, loading) {
   if (!loading) updateDrawerLive();
 }
 
-async function openDrawer({ url, bookId, preview, source }) {
-  state.drawer = { url, bookId, source, protocol: preview?.protocol || "" };
+async function openDrawer({ url, bookId, preview, source, format }) {
+  state.drawer = { url, bookId, source, format, protocol: preview?.protocol || "" };
   drawer.classList.add("open");
   scrim.classList.add("open");
   document.body.style.overflow = "hidden";
@@ -2406,11 +2441,11 @@ drawer.onclick = async (e) => {
     if (act === "add" || act === "want") {
       const url = state.drawer.url;
       if (act === "want") {
-        await api("/api/library", { method: "POST", body: { url, download: false, source: state.drawer.source } });
+        await api("/api/library", { method: "POST", body: { url, download: false, source: state.drawer.source, ...(state.drawer.format ? { format: state.drawer.format } : {}) } });
         await refreshLibrary();
         toast("Saved to Wanted", { kind: "ok" });
       } else {
-        await addBook(url, { cover: $(".hero-cover img:not(.blur)", drawer)?.src, source: state.drawer.source, protocol: state.drawer.protocol });
+        await addBook(url, { cover: $(".hero-cover img:not(.blur)", drawer)?.src, source: state.drawer.source, protocol: state.drawer.protocol, format: state.drawer.format });
       }
     } else if (act === "other-format") {
       const lib = drawerBook();

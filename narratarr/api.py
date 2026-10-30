@@ -30,7 +30,7 @@ from . import (apiv1, audible, audiobookshelf, auth, brave, config, db, download
 from .audiobookshelf import Audiobookshelf, AudiobookshelfError
 from .downloaders import ClientError
 from .realdebrid import RealDebrid, RealDebridError
-from .sources import CATALOGS, ORDER, Prowlarr, ProwlarrError, all_sources, get_source, source_for_url
+from .sources import CATALOGS, ORDER, Prowlarr, ProwlarrError, all_sources, ebook_indexers, get_source, source_for_url
 from .worker import Worker, has_files, readable_error, safe_name, tmp_dir
 
 STATIC = Path(__file__).parent / "static"
@@ -197,11 +197,14 @@ async def sources():
 
 
 @app.get("/api/discover")
-async def discover(q: str = "", category: str = "", page: int = 1, source: str = "librivox"):
+async def discover(q: str = "", category: str = "", page: int = 1, source: str = "librivox",
+                   kind: Literal["audiobook", "ebook"] = "audiobook"):
     try:
         src = get_source(source)
     except ValueError:
         raise HTTPException(400, "Unknown source.")
+    if src.name == "prowlarr" and kind == "ebook":
+        src = ebook_indexers()  # the same indexers, searched in their ebook categories
     settings = config.load()
     use_brave = src.name == "audiobookbay" and settings.search_provider == "brave" and settings.brave_api_key
     try:
@@ -231,7 +234,18 @@ async def discover(q: str = "", category: str = "", page: int = 1, source: str =
         b, e = owned.get(item["url"]), owned.get(wanted.url_for(item["url"], "ebook"))
         item["source"] = src.name
         item["library"] = {"id": (b or e)["id"], "status": (b or e)["status"]} if b or e else None
+    if src.name == "prowlarr" and kind == "ebook" and not data["items"]:
+        data["note"] = await _no_ebook_indexers(src)
     return data
+
+
+async def _no_ebook_indexers(src: Prowlarr) -> str:
+    """Why an ebook search came back empty, when the reason is that no indexer has ebooks at all."""
+    names = await src.offering()
+    if names == []:
+        return (f"None of your Prowlarr indexers offer ebooks (category {', '.join(src.cats)}). "
+                "Add one that does in Prowlarr, or change the ebook categories in Settings.")
+    return ""
 
 
 @app.get("/api/suggest")
@@ -266,7 +280,7 @@ class AddBook(BaseModel):
     url: str
     download: bool = True
     source: str | None = None
-    format: Literal["audiobook", "ebook", "both"] = "audiobook"  # catalog books only; releases are what they are
+    format: Literal["audiobook", "ebook", "both"] = "audiobook"  # catalog books; or "ebook" for an ebook release
 
 
 @app.get("/api/library")
@@ -302,8 +316,11 @@ async def add_book(body: AddBook, request: Request):
         raise HTTPException(410, str(e))
     except httpx.HTTPError as e:
         raise _source_error(e, source.label)
+    # A release found in the ebook categories, or one whose files are an ebook format, is an ebook.
+    ebook = source.name == "prowlarr" and (body.format == "ebook" or wanted.release_kind(d.to_dict()) == "ebook")
     book = db.insert(
         {
+            "kind": "ebook" if ebook else "audiobook",
             "source": source.name,
             "source_url": d.url,
             "title": d.title,
@@ -925,7 +942,7 @@ async def test_brave():
 async def test_prowlarr():
     s = config.load()
     try:
-        return await Prowlarr(s.prowlarr_url, s.prowlarr_api_key).status()
+        return await Prowlarr(s.prowlarr_url, s.prowlarr_api_key).status(s.prowlarr_ebook_categories)
     except ProwlarrError as e:
         raise HTTPException(400, str(e))
 

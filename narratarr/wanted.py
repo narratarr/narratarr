@@ -159,6 +159,11 @@ async def search_and_grab(book: dict) -> dict | None:
             "Found matches, but none your download clients can fetch." if close
             else f"Nothing that matches yet ({len(found)} near misses)." if found else "Nothing found yet."
         )
+        if not found and kind_of(book) == "ebook" and (s := config.load()).prowlarr_url and s.prowlarr_api_key:
+            indexers = ebook_indexers()
+            if await indexers.offering() == []:  # say why, rather than "nothing found" forever
+                note = (f"None of your Prowlarr indexers offer ebooks (category {', '.join(indexers.cats)}). "
+                        "Add one that does in Prowlarr.")
         db.update(book["id"], search_note=note)
         return None
     await grab(book["id"], pick["url"], pick["source"])
