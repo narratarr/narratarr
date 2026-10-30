@@ -21,7 +21,8 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import audible, audiobookshelf, auth, brave, config, db, downloaders, importer, media, search, updates, users, wanted
+from . import (apiv1, audible, audiobookshelf, auth, brave, config, db, downloaders, importer, media, search, tokens,
+               updates, users, wanted)
 from .audiobookshelf import Audiobookshelf, AudiobookshelfError
 from .downloaders import ClientError
 from .realdebrid import RealDebrid, RealDebridError
@@ -44,8 +45,10 @@ async def lifespan(app: FastAPI):
     await worker.stop()
 
 
-app = FastAPI(title="Narratarr", lifespan=lifespan)
+# The internal API is the web UI's and changes freely, so it isn't published; apps use /api/v1.
+app = FastAPI(title="Narratarr", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
+app.mount("/api/v1", apiv1.v1)
 
 
 @app.middleware("http")
@@ -117,7 +120,7 @@ async def same_site_only(request, call_next):
 async def require_sign_in(request, call_next):
     """Every API call needs a signed-in user (see auth.py for the exceptions); some need an admin."""
     path = request.url.path
-    if not path.startswith("/api/") or path in auth.OPEN:
+    if not path.startswith("/api/") or path in auth.OPEN or path == "/api/v1" or path.startswith("/api/v1/"):
         return await call_next(request)
     user = auth.current_user(request)
     if user is None:
@@ -271,10 +274,11 @@ async def stats():
 
 
 @app.post("/api/library")
-async def add_book(body: AddBook):
+async def add_book(body: AddBook, request: Request):
     source = _resolve(body.url, body.source)
+    me = getattr(request.state, "user", None)
     if source.name == "audible":
-        return await _add_wanted(body.url, body.download)
+        return await _add_wanted(body.url, body.download, me["id"] if me else None)
     existing = db.get_by_url(body.url)
     if existing:
         if body.download and existing["status"] in ("wanted", "failed"):
@@ -310,6 +314,7 @@ async def add_book(body: AddBook):
             "release": d.release,
             "download_url": d.download_url,
             "status": "queued" if body.download else "wanted",
+            "requested_by": me["id"] if me else None,
         }
     )
     if body.download:
@@ -317,7 +322,7 @@ async def add_book(body: AddBook):
     return book
 
 
-async def _add_wanted(url: str, search_now: bool) -> dict:
+async def _add_wanted(url: str, search_now: bool, user_id: int | None = None) -> dict:
     """An Audible book goes to Wanted; Narratarr then looks for a release for it."""
     asin = audible.asin_from_url(url)
     try:
@@ -326,7 +331,11 @@ async def _add_wanted(url: str, search_now: bool) -> dict:
         raise HTTPException(502, str(e))
     if not b:
         raise HTTPException(404, "Audible doesn't have that book any more.")
-    book = wanted.add_wanted(b) or wanted.in_library(asin, b["title"], b["author"]) or db.get_by_url(b["url"])
+    added = wanted.add_wanted(b)
+    if added and user_id:
+        db.update(added["id"], requested_by=user_id)
+        added = db.get(added["id"])
+    book = added or wanted.in_library(asin, b["title"], b["author"]) or db.get_by_url(b["url"])
     if search_now and book["status"] == "wanted" and book["source"] == "audible":
         _background(_search_in_background(book["id"]))
     return book
@@ -989,12 +998,13 @@ async def auth_setup(body: Credentials, request: Request):
 
 @app.post("/api/auth/login")
 async def auth_login(body: Credentials, request: Request):
-    if auth.too_many_tries(request):
+    ticket = auth.start_try(request, body.username)
+    if ticket is None:
         raise HTTPException(429, "Too many tries. Wait ten minutes and try again.")
     user = await asyncio.to_thread(users.authenticate, body.username, body.password)
     if not user:
-        auth.failed_try(request)
         raise HTTPException(401, "That username and password don't match.")
+    auth.forgive(ticket)
     return _signed_in(request, user)
 
 
@@ -1006,6 +1016,28 @@ async def auth_logout(request: Request):
     return resp
 
 
+def _signed_in_with_password(request: Request) -> dict:
+    """Managing apps needs a real sign-in: the home-network shortcut would let anyone on the
+    network see and sign out the owner's apps."""
+    me = users.session_user(request.cookies.get(auth.COOKIE, ""))
+    if me is None:
+        raise HTTPException(403, "Sign in with your password to manage apps.")
+    return me
+
+
+@app.get("/api/auth/apps")
+async def my_apps(request: Request):
+    """Apps signed in to this account through the API (see tokens.py)."""
+    return tokens.grants(_signed_in_with_password(request)["id"])
+
+
+@app.delete("/api/auth/apps/{grant_id}")
+async def revoke_app(grant_id: int, request: Request):
+    if not tokens.revoke(grant_id, _signed_in_with_password(request)["id"]):
+        raise HTTPException(404, "That app isn't signed in to your account.")
+    return {"ok": True}
+
+
 class NewPassword(BaseModel):
     current: str
     password: str
@@ -1014,8 +1046,12 @@ class NewPassword(BaseModel):
 @app.put("/api/auth/password")
 async def change_own_password(body: NewPassword, request: Request):
     me = request.state.user
+    ticket = auth.start_try(request, me["username"])  # a stolen session mustn't mean unlimited guesses
+    if ticket is None:
+        raise HTTPException(429, "Too many tries. Wait ten minutes and try again.")
     if not await asyncio.to_thread(users.authenticate, me["username"], body.current):
         raise HTTPException(400, "Your current password isn't right.")
+    auth.forgive(ticket)
     try:
         users.set_password(me["id"], body.password)  # signs out everywhere, so sign this browser back in
     except users.UserError as e:

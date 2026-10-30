@@ -86,6 +86,7 @@ def to_book(p: dict, r: str | None = None) -> dict:
         "description": _plain(p.get("publisher_summary") or ""),
         "released": p.get("release_date") or "",
         "length": _runtime(p.get("runtime_length_min")),
+        "minutes": int(p.get("runtime_length_min") or 0),
         "language": (p.get("language") or "").title(),
         "series": series,
         "kind": p.get("content_delivery_type") or "",
@@ -148,10 +149,13 @@ def _keep(books: list[dict], r: str) -> list[dict]:
     return out
 
 
+# Audible numbers result pages from 0; Narratarr's pages start at 1, so every request sends page - 1.
+
+
 async def search_books(query: str, page: int = 1, client=None) -> tuple[list[dict], int]:
     r = region()
     params = {
-        "keywords": query, "num_results": 40, "page": page, "products_sort_by": "Relevance", "response_groups": GROUPS,
+        "keywords": query, "num_results": 40, "page": page - 1, "products_sort_by": "Relevance", "response_groups": GROUPS,
     }
     data = await _get(f"{api_base(r)}/products", params, client) or {}
     total = int(data.get("total_results") or 0)
@@ -209,7 +213,7 @@ async def author_books(asin: str, name: str, client=None, pages: int = 4) -> lis
     found: list[dict] = []
     for page in range(1, pages + 1):
         params = {
-            "author": name, "num_results": 50, "page": page, "products_sort_by": "-ReleaseDate",
+            "author": name, "num_results": 50, "page": page - 1, "products_sort_by": "-ReleaseDate",
             "response_groups": GROUPS,
         }
         data = await _get(f"{api_base(r)}/products", params, client) or {}

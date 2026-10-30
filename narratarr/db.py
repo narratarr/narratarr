@@ -69,6 +69,7 @@ MIGRATIONS = {
     "released": "TEXT NOT NULL DEFAULT ''",
     "last_searched": "REAL",
     "search_note": "TEXT NOT NULL DEFAULT ''",
+    "requested_by": "INTEGER",  # the user who added it, when known
 }
 
 JSON_COLUMNS = ("narrators", "categories", "trackers", "files", "series")
@@ -101,6 +102,28 @@ CREATE TABLE IF NOT EXISTS sessions (
     created_at REAL NOT NULL,
     expires_at REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS app_grants (         -- an app someone signed in to with their account (API v1)
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id      INTEGER NOT NULL,
+    name         TEXT NOT NULL,               -- what the app called itself, e.g. "Fable Frog on iPhone"
+    created_at   REAL NOT NULL,
+    last_used_at REAL NOT NULL,
+    last_ip      TEXT NOT NULL DEFAULT '',
+    expires_at   REAL NOT NULL                -- when it stops working unless refreshed again
+);
+CREATE TABLE IF NOT EXISTS app_tokens (
+    token_hash TEXT PRIMARY KEY,                -- SHA-256 of the token; the token itself isn't stored
+    grant_id   INTEGER NOT NULL,
+    kind       TEXT NOT NULL,                   -- "access" or "refresh"
+    created_at REAL NOT NULL,
+    expires_at REAL NOT NULL,
+    used_at    REAL,                            -- refresh: when it was traded in (each works once); access: first use
+    parent     TEXT NOT NULL DEFAULT '',        -- the refresh token's hash this one was issued for
+    superseded INTEGER NOT NULL DEFAULT 0       -- replaced by a retry: whoever presents it is signed out
+);
+CREATE INDEX IF NOT EXISTS app_tokens_grant ON app_tokens (grant_id);
+CREATE INDEX IF NOT EXISTS app_tokens_parent ON app_tokens (parent);
+CREATE INDEX IF NOT EXISTS app_tokens_expiry ON app_tokens (expires_at);
 CREATE TABLE IF NOT EXISTS progress (           -- each person's place in each book
     user_id     INTEGER NOT NULL,
     book_id     INTEGER NOT NULL,
@@ -135,6 +158,8 @@ def connect():
 def init() -> None:
     with connect() as conn:
         conn.executescript(SCHEMA + FOLLOWS + ACCOUNTS)
+        if "superseded" not in {r["name"] for r in conn.execute("PRAGMA table_info(app_tokens)")}:  # pre-release 0.6.0
+            conn.execute("ALTER TABLE app_tokens ADD COLUMN superseded INTEGER NOT NULL DEFAULT 0")
         existing = {r["name"] for r in conn.execute("PRAGMA table_info(books)")}
         for col, ddl in MIGRATIONS.items():
             if col not in existing:

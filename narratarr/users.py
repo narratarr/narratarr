@@ -17,6 +17,7 @@ import hmac
 import re
 import secrets
 import sqlite3
+import threading
 import time
 
 from . import db
@@ -27,6 +28,8 @@ MIN_PASSWORD = 8
 _USERNAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._@-]{0,31}")
 # scrypt at n=2^15 takes ~50 ms and 32 MB: slow for anyone guessing, fine for a sign-in.
 _N, _R, _P = 2**15, 8, 1
+# At most two at once, so a flood of sign-ins queues up instead of using a gigabyte of memory.
+_HASHING = threading.BoundedSemaphore(2)
 
 
 class UserError(ValueError):
@@ -35,7 +38,8 @@ class UserError(ValueError):
 
 def hash_password(password: str) -> str:
     salt = secrets.token_bytes(16)
-    key = hashlib.scrypt(password.encode(), salt=salt, n=_N, r=_R, p=_P, maxmem=64 << 20)
+    with _HASHING:
+        key = hashlib.scrypt(password.encode(), salt=salt, n=_N, r=_R, p=_P, maxmem=64 << 20)
     b64 = base64.b64encode
     return f"scrypt${_N}${_R}${_P}${b64(salt).decode()}${b64(key).decode()}"
 
@@ -43,8 +47,9 @@ def hash_password(password: str) -> str:
 def check_password(password: str, stored: str) -> bool:
     try:
         _, n, r, p, salt, key = stored.split("$")
-        got = hashlib.scrypt(password.encode(), salt=base64.b64decode(salt), n=int(n), r=int(r), p=int(p),
-                             maxmem=64 << 20)
+        with _HASHING:
+            got = hashlib.scrypt(password.encode(), salt=base64.b64decode(salt), n=int(n), r=int(r), p=int(p),
+                                 maxmem=64 << 20)
     except (ValueError, TypeError):
         return False
     return hmac.compare_digest(got, base64.b64decode(key))
@@ -133,11 +138,12 @@ def authenticate(username: str, password: str) -> dict | None:
 
 
 def set_password(user_id: int, password: str) -> None:
-    """Change a password and sign that person out everywhere."""
+    """Change a password and sign that person out everywhere, apps included."""
     _valid_password(password)
     with db.connect() as conn:
         conn.execute("UPDATE users SET password_hash=? WHERE id=?", (hash_password(password), user_id))
         conn.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
+        _revoke_apps(conn, user_id)
 
 
 def set_role(user_id: int, role: str) -> None:
@@ -156,8 +162,16 @@ def delete(user_id: int) -> None:
         raise UserError("That's the only admin, so it can't be removed.")
     with db.connect() as conn:
         conn.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
+        _revoke_apps(conn, user_id)
         conn.execute("DELETE FROM progress WHERE user_id=?", (user_id,))
+        conn.execute("UPDATE books SET requested_by=NULL WHERE requested_by=?", (user_id,))
         conn.execute("DELETE FROM users WHERE id=?", (user_id,))
+
+
+def _revoke_apps(conn: sqlite3.Connection, user_id: int) -> None:
+    """Sign every app out of this account (see tokens.py)."""
+    conn.execute("DELETE FROM app_tokens WHERE grant_id IN (SELECT id FROM app_grants WHERE user_id=?)", (user_id,))
+    conn.execute("DELETE FROM app_grants WHERE user_id=?", (user_id,))
 
 
 # ---- sessions --------------------------------------------------------------------------

@@ -223,3 +223,20 @@ async def test_follow_author_adds_only_upcoming_books(monkeypatch):
     assert await wanted.refresh(db.get_follow(f["id"])) == 0
     counts = wanted.follow_counts(db.get_follow(f["id"]), db.list_books())
     assert counts == {"in_library": 0, "wanted": 2}
+
+
+async def test_audible_pages_count_from_zero():
+    """Audible's first page is page 0. Asking for page 1 first skipped the best 40 matches."""
+    import httpx
+
+    seen = []
+
+    def handler(request):
+        seen.append((request.url.params.get("page"), request.url.params.get("keywords") or request.url.params.get("author")))
+        return httpx.Response(200, json={"products": [], "total_results": 0})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        await audible.search_books("zero-based paging check", 1, client)
+        await audible.search_books("zero-based paging check", 2, client)
+        await audible.author_books("B000AQ0842", "Zero Based Author", client, pages=1)
+    assert seen == [("0", "zero-based paging check"), ("1", "zero-based paging check"), ("0", "Zero Based Author")]

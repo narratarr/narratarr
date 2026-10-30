@@ -318,6 +318,7 @@ A few things are set with environment variables instead:
 | `NARRATARR_LIBRARY` | `~/Audiobooks` (`/audiobooks` in Docker) | Default library folder for new installs |
 | `NARRATARR_PASSWORD` | *(none)* | Before 0.5.5 this was a single shared password. If it's set when you upgrade, it becomes the password of an admin account called `admin`; after that it's ignored |
 | `NARRATARR_HOSTS` | *(none)* | Extra hostnames Narratarr should answer to, comma-separated (`books.example.com, *.home.example`). IP addresses, plain machine names and `.local` / `.lan` / `.home` / `.internal` / `.ts.net` names always work; anything else is refused to block DNS-rebinding attacks |
+| `NARRATARR_TRUSTED_PROXIES` | *(none)* | Your reverse proxy's address or range (`172.18.0.0/16`), comma-separated. Narratarr then takes the visitor's address from the proxy's `X-Forwarded-For`, so sign-in limits apply per visitor rather than to everyone at once. That header is ignored from anyone else |
 | `PUID` / `PGID` | `1000` | Docker only: the user and group files are written as |
 
 ### Accounts
@@ -339,6 +340,12 @@ docker exec -it -u "$(id -u):$(id -g)" narratarr narratarr users passwd <name>  
 ```
 
 `narratarr users` also has `add`, `list`, `role` and `remove`.
+
+### Requesting from other apps (API)
+
+Apps can request books for you without opening Narratarr. They sign in with your account once, get tokens of their own, and can then search Audible's catalog, request a book and follow it until it's in your library. Every app signed in to your account is listed under the account button, where you can disconnect it. Changing your password disconnects them all.
+
+App tokens only reach this API, never settings or users. The API is versioned and only ever grows, so apps built on it keep working. For developers: [docs/api.md](docs/api.md), plus a live reference at `/api/v1/docs`.
 
 ### Listening on your phone
 

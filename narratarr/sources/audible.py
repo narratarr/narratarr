@@ -62,7 +62,7 @@ class AudibleCatalog:
 
     async def latest(self, page: int = 1, category: str | None = None) -> Page:
         params = {
-            "num_results": 40, "page": page, "response_groups": catalog.GROUPS,
+            "num_results": 40, "page": page - 1, "response_groups": catalog.GROUPS,  # Audible counts from 0
             "products_sort_by": "-ReleaseDate" if category == "new" else "BestSellers",
         }
         if category and category != "new":

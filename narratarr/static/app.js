@@ -2414,7 +2414,12 @@ function openAccount() {
     body: u.role === "admin"
       ? "Admin: runs settings, downloads and who can sign in."
       : "Listener: browses, requests and listens. Your place in every book is your own.",
-    fields: `<h4 style="margin:22px 0 0;font-size:14px">Change your password</h4>${passwordFields(true)}`,
+    fields: `<div class="apps-block" id="my-apps" hidden>
+        <h4>Apps signed in</h4>
+        <div class="app-list" id="app-list"></div>
+        <span class="hint">Apps like Fable Frog sign in with your account to request books. Disconnecting one stops it at once; changing your password disconnects them all.</span>
+      </div>
+      <h4 style="margin:22px 0 0;font-size:14px">Change your password</h4>${passwordFields(true)}`,
     confirm: "Change password",
     extra: `<button class="btn ghost danger" type="button" id="sign-out" style="margin-right:auto">Sign out</button>`,
     onSubmit: async (f) => {
@@ -2427,6 +2432,35 @@ function openAccount() {
     await api("/api/auth/logout", { method: "POST" }).catch(() => {});
     location.reload();
   };
+  renderApps(form);
+}
+
+// Apps signed in to this account through the API: what they are, when they were last used, and a way out.
+async function renderApps(form) {
+  const block = $("#my-apps", form);
+  let apps;
+  try { apps = await api("/api/auth/apps"); } catch { return; }
+  if (!block.isConnected) return;
+  block.hidden = !apps.length;
+  $("#app-list", form).innerHTML = apps.map((a) => `
+    <div class="app-row" title="Signed in ${esc(new Date(a.created_at * 1000).toLocaleString())}">
+      <span class="app-icon">${I.headphones}</span>
+      <span class="app-who"><b>${esc(a.name)}</b><small>Used ${esc(ago(a.last_used_at))}${a.last_ip ? ` from ${esc(a.last_ip)}` : ""}</small></span>
+      <button class="btn sm ghost danger" type="button" data-revoke="${a.id}">Disconnect</button>
+    </div>`).join("");
+  $$("[data-revoke]", form).forEach((b) => {
+    b.onclick = async () => {
+      spinBtn(b, true);
+      try {
+        await api(`/api/auth/apps/${b.dataset.revoke}`, { method: "DELETE" });
+        toast("Disconnected. That app has to sign in again to use your account.", { kind: "ok" });
+        renderApps(form);
+      } catch (e) {
+        toast(e.message, { kind: "err" });
+        spinBtn(b, false);
+      }
+    };
+  });
 }
 
 window.addEventListener("narratarr:signed-out", () => {

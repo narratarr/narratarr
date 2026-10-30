@@ -2,6 +2,17 @@
 
 All notable changes to Narratarr. The app shows this under **Settings → Updates**.
 
+## 0.6.0 — 2026-10-29
+
+- **An API for apps: request books without opening Narratarr.** Apps such as audiobook players can sign in with your account and then search Audible's catalog, request a book, and follow it from Wanted to in your library. It's versioned (`/api/v1`) and only ever grows, so apps built on it keep working across releases. Developers: see `docs/api.md`, or `/api/v1/docs` on your server.
+- **Apps signed in** appear under the account button, with when and where each was last used, and you can disconnect any of them. Changing your password, or an admin removing your account, disconnects every app too.
+- Apps only need your password once, to sign in; after that they use tokens of their own. Those tokens only work on the API, so they can't touch settings or users. Tokens are stored only as hashes. A stolen refresh token gets the app signed out the moment it's used. Sign-ins, searches and requests have limits.
+- **Harder to guess passwords.** Every sign-in attempt now counts before the password is checked, so a burst of simultaneous guesses can't slip past the limit. Attempts are limited per account as well as per address, and IPv6 addresses count by network. Your home network, and networks you've signed in from before, are never held back by the account limit, so nobody can lock you out just by knowing your username. Password checks run two at a time, so a flood of sign-ins can't exhaust memory, and checking your current password when changing it has the same limits.
+- `NARRATARR_TRUSTED_PROXIES`: behind a reverse proxy, sign-in limits apply to each visitor rather than to everyone at once.
+- **Audible searches find the best matches again.** Audible numbers its result pages from 0, and Narratarr was asking for page 1 first. Searches skipped the 40 most relevant results, Bestsellers and New releases started on their second page, and following an author missed their 50 newest books.
+- Narratarr now remembers who requested each book.
+- The web UI's internal API is no longer published at `/docs`.
+
 ## 0.5.6 — 2026-10-29
 
 - **Audiobookshelf setup guide.** Settings → Audiobookshelf → *Setup guide* asks where Audiobookshelf runs (this machine or another) and how it's installed (Docker or directly), guesses both from what Narratarr can see, and shows the exact steps with your own folders filled in and a Copy button on every command. It ends with **Check now**, which asks Audiobookshelf to rescan and tells you how many of your books it can see, and which are missing.

@@ -18,6 +18,7 @@ AWAY = ("8.8.4.4", 50000)  # somewhere on the internet
 @pytest.fixture(autouse=True)
 def fresh(monkeypatch):
     auth._failures.clear()
+    auth._known.clear()
     monkeypatch.setattr(auth, "_setup_code", "")
     monkeypatch.delenv("NARRATARR_PASSWORD", raising=False)
     monkeypatch.setattr(users, "_N", 2**10)  # fast hashing in tests; real installs use 2^15
@@ -224,3 +225,13 @@ def test_cli(monkeypatch, capsys):
     assert run_cli(monkeypatch, "remove", "desmond") == 0
     assert run_cli(monkeypatch, "add", "x", "--password-stdin", stdin="short\n") == 1
     assert "at least 8" in capsys.readouterr().err
+
+
+def test_a_database_from_before_the_superseded_column_is_upgraded():
+    with db.connect() as conn:
+        conn.execute("DROP TABLE app_tokens")
+        conn.execute("CREATE TABLE app_tokens (token_hash TEXT PRIMARY KEY, grant_id INTEGER NOT NULL, kind TEXT NOT NULL, "
+                     "created_at REAL NOT NULL, expires_at REAL NOT NULL, used_at REAL, parent TEXT NOT NULL DEFAULT '')")
+    db.init()
+    with db.connect() as conn:
+        assert "superseded" in {r["name"] for r in conn.execute("PRAGMA table_info(app_tokens)")}
