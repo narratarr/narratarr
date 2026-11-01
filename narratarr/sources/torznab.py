@@ -28,7 +28,7 @@ import httpx
 
 from ..cache import Cache
 from .base import Category, Details, Page
-from .prowlarr import _BITRATE_RE, _FORMAT_RE, _fmt_size, fetch as prowlarr_fetch, parse_magnet, tidy_title
+from .prowlarr import ProwlarrError, _BITRATE_RE, _FORMAT_RE, _fmt_size, fetch as prowlarr_fetch, parse_magnet, tidy_title
 
 NS = "{http://torznab.com/schemas/2015/feed}"
 TIMEOUT = httpx.Timeout(90, connect=8)  # a Jackett "all indexers" search waits for every one
@@ -39,8 +39,8 @@ _releases: OrderedDict[str, dict] = OrderedDict()
 _search_cache: Cache[list[dict]] = Cache(CACHE_SECONDS, 200)
 
 
-class TorznabError(Exception):
-    pass
+class TorznabError(ProwlarrError):
+    """An indexer error, so everything that already handles Prowlarr's handles Torznab's too."""
 
 
 def strip_key(url: str) -> str:

@@ -1101,7 +1101,7 @@ function Authors(root, param) {
       <h1 class="page-title">Authors &amp; <em>series</em></h1>
       <p class="lede">Follow an author or a series and their new books go straight to Wanted, then download as soon as they turn up on your indexers.</p>
     </header>
-    ${!st.prowlarr_configured ? `
+    ${!st.indexer_configured ? `
       <div class="banner">
         <div class="ico">${I.key}</div>
         <div><strong>Connect Prowlarr or a Torznab indexer so Narratarr can find these books</strong><p>You can follow authors now. Their books will wait in Wanted until Prowlarr or a Torznab indexer is set up.</p></div>
@@ -1396,7 +1396,10 @@ function settingsStatus(key, users) {
   const st = state.settings || {};
   const u = state.updates;
   if (key === "general") return [st.library_dir || "", ""];
-  if (key === "search") return st.prowlarr_configured ? ["Prowlarr connected", "ok"] : ["Prowlarr not connected", ""];
+  if (key === "search") {
+    const on = [st.prowlarr_configured && "Prowlarr", st.torznab_configured && "Torznab"].filter(Boolean);
+    return on.length ? [`${on.join(" · ")} connected`, "ok"] : ["No indexer connected", ""];
+  }
   if (key === "downloads") {
     const ready = [st.torrent_configured && CLIENTS[st.torrent_client], st.usenet_configured && CLIENTS[st.usenet_client]].filter(Boolean);
     return ready.length ? [ready.join(" · "), "ok"] : ["Set up a download client", "warn"];
@@ -1538,22 +1541,37 @@ function Settings(root, page) {
       </section>
 
       <section class="panel" data-page="search">
-        <div class="ph"><h3>Torznab</h3><p class="desc">Optional. Any indexer that speaks Torznab: <b>Jackett</b>, Prowlarr’s own Torznab endpoint, or a standalone indexer. Use this instead of Prowlarr when Jackett is what you run. Results download through your Usenet or torrent client below.</p></div>
+        <div class="ph ph-row">
+          <div><h3>Torznab</h3><p class="desc">Optional. Any indexer that speaks Torznab: <b>Jackett</b>, Prowlarr’s own Torznab endpoint, or a standalone indexer. Searched alongside Prowlarr, for Discover and for your Wanted list.</p></div>
+          <span class="state-chip ok" id="torznab-chip" ${s.torznab_configured ? "" : "hidden"}><i class="dot ok"></i>Connected</span>
+        </div>
         <div class="body">
-          <div class="field"><label for="torznab_url">Torznab address</label><input class="input mono" id="torznab_url" name="torznab_url" placeholder="http://localhost:9117/api/v2.0/indexers/all/results/torznab/api" value="${esc(s.torznab_url)}" /><span class="hint">The full address ending in <code>/torznab/api</code>, not the Jackett dashboard.</span></div>
-          <div class="field">
-            <label for="torznab_api_key">API key</label>
-            <div class="input-row">
-              <input class="input mono" id="torznab_api_key" name="torznab_api_key" type="password" placeholder="Jackett → the key at the top of its dashboard" value="${esc(s.torznab_api_key)}" />
-              <button class="btn" type="button" id="test-torznab">Test</button>
+          <div class="set-grid">
+            <div class="field"><label for="torznab_url">Address</label><input class="input mono" id="torznab_url" name="torznab_url" placeholder="http://localhost:9117/api/v2.0/indexers/all/results/torznab/api" value="${esc(s.torznab_url)}" /><span class="hint">The full address ending in <code>/torznab/api</code>, not the Jackett dashboard.</span></div>
+            <div class="field">
+              <label for="torznab_api_key">API key</label>
+              <div class="input-row">
+                <input class="input mono" id="torznab_api_key" name="torznab_api_key" type="password" placeholder="Jackett → the key at the top of its dashboard" value="${esc(s.torznab_api_key)}" />
+                <button class="btn" type="button" id="test-torznab">Test</button>
+              </div>
             </div>
-            <div id="torznab-result"></div>
           </div>
-          <div class="field">
-            <label for="torznab_categories">Categories</label>
-            <input class="input mono" id="torznab_categories" name="torznab_categories" value="${esc(s.torznab_categories)}" style="max-width:220px" />
-            <span class="hint"><code>3030</code> is Audio › Audiobook. Separate several with commas.</span>
-          </div>
+          <div id="torznab-result"></div>
+          <details class="set-more">
+            <summary>Categories</summary>
+            <div class="set-grid">
+              <div class="field">
+                <label for="torznab_categories">Audiobooks</label>
+                <input class="input mono" id="torznab_categories" name="torznab_categories" value="${esc(s.torznab_categories)}" />
+                <span class="hint"><code>3030</code> is Audio › Audiobook. Separate several with commas.</span>
+              </div>
+              <div class="field">
+                <label for="torznab_ebook_categories">Ebooks</label>
+                <input class="input mono" id="torznab_ebook_categories" name="torznab_ebook_categories" value="${esc(s.torznab_ebook_categories)}" />
+                <span class="hint"><code>7020</code> is Books › EBook.</span>
+              </div>
+            </div>
+          </details>
         </div>
       </section>
 
@@ -1987,6 +2005,7 @@ function Settings(root, page) {
     updateRdPill();
     if (absConnected() === $("#abs-connected", root).hidden) absShow(); // a pasted API key just connected it
     $("#prowlarr-chip", root).hidden = !state.settings.prowlarr_configured;
+    $("#torznab-chip", root).hidden = !state.settings.torznab_configured;
     saved = snapshot();
     dirty();
     statuses();
@@ -2453,7 +2472,7 @@ function wantedNote(lib) {
   const st = state.settings || {};
   const out = Date.parse(lib.released || "");
   if (out > Date.now()) return `Comes out ${releaseLabel(lib.released, true).replace(/^Out /, "")}. Narratarr will start looking then.`;
-  if (!st.prowlarr_configured && !st.torznab_configured) return "Connect Prowlarr or a Torznab indexer in Settings so Narratarr can look for this book.";
+  if (!st.indexer_configured) return "Connect Prowlarr or a Torznab indexer in Settings so Narratarr can look for this book.";
   const last = lib.last_searched ? `Last looked ${ago(lib.last_searched)}. ${lib.search_note || ""}` : "";
   const next = st.auto_search ? `Narratarr looks again every ${st.auto_search_hours} hours.` : "Automatic search is off.";
   return `${last} ${next}`.trim();

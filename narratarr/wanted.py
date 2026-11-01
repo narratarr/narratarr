@@ -21,7 +21,7 @@ from rapidfuzz import fuzz
 
 from . import audible, config, db, downloaders, ebooks
 from .search import clean_title, normalize
-from .sources import CATALOGS, ProwlarrError, ebook_indexers, get_source
+from .sources import CATALOGS, ProwlarrError, TorznabError, ebook_indexers, ebook_torznab, get_source
 
 log = logging.getLogger("narratarr.wanted")
 
@@ -98,13 +98,15 @@ async def find_releases(book: dict) -> list[dict]:
         jobs["librivox"] = get_source("librivox").find(title, author)
     if s.prowlarr_url and s.prowlarr_api_key:
         jobs["prowlarr"] = (ebook_indexers() if kind == "ebook" else get_source("prowlarr")).search(query)
+    if s.torznab_url and s.torznab_api_key:
+        jobs["torznab"] = (ebook_torznab() if kind == "ebook" else get_source("torznab")).search(query)
     if not jobs:
         return []
     results = await asyncio.gather(*jobs.values(), return_exceptions=True)
     found, errors = [], []
     for name, res in zip(jobs, results):
         if isinstance(res, BaseException):
-            errors.append(str(res) if isinstance(res, ProwlarrError) else f"Couldn't search {name}.")
+            errors.append(str(res) if isinstance(res, (ProwlarrError, TorznabError)) else f"Couldn't search {name}.")
             continue
         for listing in res.items:
             item = {**listing.to_dict(), "source": name}
@@ -192,7 +194,7 @@ def due_for_search() -> list[dict]:
 async def auto_search() -> int:
     """One round of automatic searching. Returns how many books were grabbed."""
     s = config.load()
-    if not (s.auto_search and s.prowlarr_url and s.prowlarr_api_key):
+    if not (s.auto_search and ((s.prowlarr_url and s.prowlarr_api_key) or (s.torznab_url and s.torznab_api_key))):
         return 0
     grabbed = 0
     for b in due_for_search():

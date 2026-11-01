@@ -41,6 +41,7 @@ class Settings:
     torznab_url: str = ""
     torznab_api_key: str = ""
     torznab_categories: str = "3030"  # Newznab/Torznab "Audio/Audiobook"
+    torznab_ebook_categories: str = "7020"  # "Books/EBook"
     sabnzbd_url: str = ""
     sabnzbd_api_key: str = ""
     sabnzbd_category: str = ""
@@ -85,6 +86,7 @@ class Settings:
         d["brave_configured"] = bool(self.brave_api_key)
         d["prowlarr_configured"] = bool(self.prowlarr_url and self.prowlarr_api_key)
         d["torznab_configured"] = bool(self.torznab_url and self.torznab_api_key)
+        d["indexer_configured"] = d["prowlarr_configured"] or d["torznab_configured"]
         d["sabnzbd_configured"] = bool(self.sabnzbd_url and self.sabnzbd_api_key)
         d["nzbget_configured"] = bool(self.nzbget_url)
         d["qbittorrent_configured"] = bool(self.qbittorrent_url)

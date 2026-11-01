@@ -30,6 +30,12 @@ def ebook_indexers() -> Prowlarr:
     return Prowlarr(s.prowlarr_url, s.prowlarr_api_key, s.prowlarr_ebook_categories, fallback="7020")
 
 
+def ebook_torznab() -> Torznab:
+    """The Torznab indexer, searching the ebook categories instead of the audiobook ones."""
+    s = config.load()
+    return Torznab(s.torznab_url, s.torznab_api_key, s.torznab_ebook_categories or "7020")
+
+
 def get_source(name: str = "audiobookbay") -> Source:
     sources = all_sources()
     if name not in sources:
@@ -47,5 +53,5 @@ def source_for_url(url: str) -> Source | None:
 
 __all__ = [
     "CATALOGS", "ArchiveSource", "AudibleCatalog", "AudiobookBay", "Category", "Details", "Listing", "OpenLibrary", "Page",
-    "Prowlarr", "ProwlarrError", "Source", "Torznab", "TorznabError", "all_sources", "ebook_indexers", "get_source", "source_for_url",
+    "Prowlarr", "ProwlarrError", "Source", "Torznab", "TorznabError", "all_sources", "ebook_indexers", "ebook_torznab", "get_source", "source_for_url",
 ]

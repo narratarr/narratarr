@@ -4,7 +4,8 @@ All notable changes to Narratarr. The app shows this under **Settings → Update
 
 ## Unreleased
 
-- **Torznab** as a search source: Jackett, Prowlarr's Torznab endpoint, or any indexer that speaks the protocol. Written against the protocol, not one vendor; the API key is stripped from every stored link whichever parameter name the indexer uses.
+- **Torznab, for Jackett users.** Settings → Search & sources has a **Torznab** section for Jackett, Prowlarr's Torznab endpoint, or any indexer that speaks Torznab. It's searched alongside Prowlarr, or on its own: it gets a tab on Discover, Wanted books are looked for on it (in its ebook categories for ebooks), and the Audible and Open Library tabs appear with it alone. Its API key is kept out of every saved link, whatever name the indexer gives it. Contributed by curator8888.
+- If an indexer can't be reached while you search Discover, Narratarr now says so instead of showing no results.
 
 ## 0.7.4 — 2026-10-31
 

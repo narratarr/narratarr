@@ -145,8 +145,10 @@ async def _search_pages(source: Source, query: str, first: int, count: int) -> t
         *(source.search(query, p) for p in range(first, first + count)), return_exceptions=True
     )
     errors = [p for p in pages if isinstance(p, BaseException)]
-    if errors and len(errors) == len(pages):
-        raise errors[0]  # the source is unreachable; let the caller report it
+    if errors and (len(errors) == len(pages) or (first == 1 and isinstance(pages[0], BaseException))):
+        # The source is unreachable: let the caller report it. Page 1 failing counts even when later
+        # pages "succeed", since a source that answers in one page (Torznab) returns those empty.
+        raise errors[0] if len(errors) == len(pages) else pages[0]
     items, total = [], 0
     for p in pages:
         if isinstance(p, BaseException):

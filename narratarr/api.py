@@ -184,12 +184,15 @@ async def health():
 async def sources():
     found = all_sources()
     settings = config.load().public()
-    # Indexer sources appear once they have an address and a key; the catalogs are offered alongside Prowlarr.
+    # Indexer sources appear once they have an address and a key. The catalogs need one of them,
+    # since their books are found on your indexers.
     visible = set(ORDER) - {"prowlarr", "torznab", *CATALOGS}
     if settings["prowlarr_configured"]:
-        visible |= {"prowlarr", *CATALOGS}
+        visible.add("prowlarr")
     if settings["torznab_configured"]:
         visible.add("torznab")
+    if settings["indexer_configured"]:
+        visible |= set(CATALOGS)
     return [
         {
             "name": name,
@@ -942,7 +945,7 @@ async def apply_update(body: Update):
 
 # What listeners see of the settings: enough for the app to know what's set up, no addresses or keys.
 LISTENER_SETTINGS = (
-    "rd_configured", "ad_configured", "brave_configured", "prowlarr_configured", "torznab_configured",
+    "rd_configured", "ad_configured", "brave_configured", "prowlarr_configured", "torznab_configured", "indexer_configured",
     "usenet_configured", "torrent_configured",
     "usenet_client", "torrent_client", "smart_search", "search_provider", "audible_region", "check_updates",
     "auto_search", "auto_search_hours",
