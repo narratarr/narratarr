@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import hmac
+import logging
 import ipaddress
 import os
 import platform
@@ -31,9 +32,15 @@ from .audiobookshelf import Audiobookshelf, AudiobookshelfError
 from .downloaders import ClientError
 from . import alldebrid, notify
 from .alldebrid import AllDebrid, AllDebridError
+from . import torbox
+from .premiumize import Premiumize, PremiumizeError
+from .torbox import TorBox, TorBoxError
 from .realdebrid import RealDebrid, RealDebridError
 from .sources import CATALOGS, ORDER, Prowlarr, ProwlarrError, Torznab, TorznabError, all_sources, ebook_indexers, get_source, source_for_url
 from .worker import Worker, has_files, readable_error, safe_name, tmp_dir
+
+log = logging.getLogger("narratarr.api")
+
 
 STATIC = Path(__file__).parent / "static"
 COVER_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".gif": "image/gif"}
@@ -298,8 +305,10 @@ class AddBook(BaseModel):
 async def library():
     books = db.list_books()
     pairs = wanted.companions(books)
+    names = {u["id"]: u["username"] for u in users.all_users()}
     for b in books:
         b["companion_id"] = pairs[b["id"]]["id"] if b["id"] in pairs else None  # the same book in its other format
+        b["requested_by_name"] = names.get(b.get("requested_by"), "")
     return books
 
 
@@ -308,16 +317,33 @@ async def stats():
     return db.stats()
 
 
+def _needs_approval(me: dict | None) -> bool:
+    """A listener's request waits for an admin, unless the admin turned that off."""
+    return bool(me) and me["role"] != "admin" and config.load().listener_approval
+
+
+def _hold_for_approval(book: dict, me: dict) -> dict:
+    """Park a book until an admin approves it, and let the admins know."""
+    if book["status"] != "requested":
+        db.update(book["id"], status="requested", error="", requested_by=book.get("requested_by") or me["id"])
+        book = db.get(book["id"])
+        notify.emit("wanted", book, me["username"])
+    return book
+
+
 @app.post("/api/library")
 async def add_book(body: AddBook, request: Request):
     source = _resolve(body.url, body.source)
     me = getattr(request.state, "user", None)
+    hold = _needs_approval(me)
     if source.name in CATALOGS:
         kinds = ("audiobook", "ebook") if body.format == "both" else (body.format,)
-        return await _add_wanted(body.url, body.download, me["id"] if me else None, source.name, kinds)
+        return await _add_wanted(body.url, body.download, me["id"] if me else None, source.name, kinds, hold)
     existing = db.get_by_url(body.url)
     if existing:
-        if body.download and existing["status"] in ("wanted", "failed"):
+        if body.download and existing["status"] in ("wanted", "failed", "requested"):
+            if hold:
+                return _hold_for_approval(existing, me)
             db.update(existing["id"], status="queued", error="")
             _worker().poke()
         return db.get(existing["id"])
@@ -352,13 +378,13 @@ async def add_book(body: AddBook, request: Request):
             "indexer": d.indexer,
             "release": d.release,
             "download_url": d.download_url,
-            "status": "queued" if body.download else "wanted",
+            "status": "requested" if hold else "queued" if body.download else "wanted",
             "requested_by": me["id"] if me else None,
         }
     )
-    if body.download:
+    if book["status"] == "queued":
         _worker().poke()
-    elif me:
+    if me and (not body.download or me["role"] != "admin"):  # a listener's pick is announced as a request too
         notify.emit("wanted", book, me["username"])
     return book
 
@@ -382,14 +408,15 @@ async def _catalog_book(url: str, source: str) -> dict:
 
 
 async def _add_wanted(url: str, search_now: bool, user_id: int | None = None, source: str = "audible",
-                      kinds: tuple[str, ...] = ("audiobook",)) -> dict:
+                      kinds: tuple[str, ...] = ("audiobook",), hold: bool = False) -> dict:
     """A catalog book goes to Wanted, in each format asked for; Narratarr then looks for releases.
+    Held for approval (status "requested"), nothing is looked for until an admin says yes.
 
     Returns the first format's library row (the audiobook, when both were asked for)."""
     b = await _catalog_book(url, source)
     rows = []
     for kind in kinds:
-        added = wanted.add_wanted(b, kind, source)
+        added = wanted.add_wanted(b, kind, source, "requested" if hold else "wanted")
         if added and user_id:
             db.update(added["id"], requested_by=user_id)
             added = db.get(added["id"])
@@ -425,10 +452,13 @@ def _get_or_404(book_id: int) -> dict:
 
 
 @app.post("/api/library/{book_id}/download")
-async def download(book_id: int):
+async def download(book_id: int, request: Request):
     book = _get_or_404(book_id)
-    if book["status"] in db.ACTIVE:
+    if book["status"] in db.ACTIVE or book["status"] == "completed":
         return book
+    me = getattr(request.state, "user", None)
+    if _needs_approval(me):
+        return _hold_for_approval(book, me)
     if book["source"] in CATALOGS:  # no release picked yet: look for one now
         try:
             pick = await wanted.search_and_grab(book)
@@ -500,6 +530,17 @@ async def edit_book(book_id: int, body: BookEdit):
 
 
 @app.delete("/api/library/{book_id}")
+async def remove_book(book_id: int, request: Request, delete_files: bool = False):
+    """Admins remove anything. A listener can take back their own request, as long as it isn't in the library yet."""
+    book = _get_or_404(book_id)
+    me = request.state.user
+    if me["role"] != "admin":
+        if book.get("requested_by") != me["id"] or book["status"] == "completed":
+            raise HTTPException(403, "You can remove the books you asked for, until they're in the library.")
+        delete_files = False
+    return await remove(book_id, delete_files)
+
+
 async def remove(book_id: int, delete_files: bool = False):
     book = _get_or_404(book_id)
     await _worker().cancel_and_wait(book_id)
@@ -692,14 +733,16 @@ async def read_page(book_id: int, member: str):
 async def other_format(book_id: int, request: Request):
     """Want the same book in the other format: the ebook of an audiobook, or the audiobook of an ebook."""
     book = _get_or_404(book_id)
-    other, new = wanted.want_other_format(book)
+    me = getattr(request.state, "user", None)
+    hold = _needs_approval(me)
+    other, new = wanted.want_other_format(book, "requested" if hold else "wanted")
     if not new:
         return other
-    me = getattr(request.state, "user", None)
     if me:
         db.update(other["id"], requested_by=me["id"])
         notify.emit("wanted", db.get(other["id"]), me["username"])
-    _background(_search_in_background(other["id"]))
+    if not hold:
+        _background(_search_in_background(other["id"]))
     return db.get(other["id"])
 
 
@@ -736,19 +779,43 @@ class Grab(BaseModel):
 
 
 @app.post("/api/library/{book_id}/grab")
-async def grab(book_id: int, body: Grab):
+async def grab(book_id: int, body: Grab, request: Request):
     book = _get_or_404(book_id)
     if book["status"] in db.ACTIVE:
         raise HTTPException(409, "This book is already downloading.")
     _resolve(body.url, body.source)
-    try:
-        book = await wanted.grab(book_id, body.url, body.source)
+    me = getattr(request.state, "user", None)
+    hold = _needs_approval(me)
+    was = book["status"]
+    try:  # held for approval, the listener's pick is kept: approving it downloads exactly that release
+        book = await wanted.grab(book_id, body.url, body.source, "requested" if hold else "queued")
     except ProwlarrError as e:
         raise HTTPException(410, str(e))
     except httpx.HTTPError as e:
         raise _source_error(e, body.source)
+    if hold:
+        if was != "requested":
+            db.update(book_id, requested_by=book.get("requested_by") or me["id"])
+            notify.emit("wanted", db.get(book_id), me["username"])
+        return db.get(book_id)
     _worker().poke()
     return book
+
+
+@app.post("/api/library/{book_id}/approve")
+async def approve(book_id: int):
+    """An admin says yes to a listener's request: download the release they picked, or start looking for one."""
+    book = _get_or_404(book_id)
+    if book["status"] != "requested":
+        return book
+    if book["source"] in CATALOGS:  # no release picked yet
+        db.update(book_id, status="wanted", error="", search_note="")
+        _background(_search_in_background(book_id))
+    else:
+        db.update(book_id, status="queued", error="", progress=0, detail="")
+        _worker().poke()
+    log.info("Approved %s (book %s)", book["title"], book_id)
+    return db.get(book_id)
 
 
 # ---- import ---------------------------------------------------------------------
@@ -846,8 +913,16 @@ class Follow(BaseModel):
     add_existing: bool = False
 
 
+def _follows_allowed(request: Request) -> None:
+    """Following adds books on its own, so while requests need approval, only admins follow."""
+    if _needs_approval(getattr(request.state, "user", None)):
+        raise HTTPException(403, "Ask an admin to follow this. Following adds books by itself, and your requests "
+                                 "need approval.")
+
+
 @app.post("/api/follows")
-async def add_follow(body: Follow):
+async def add_follow(body: Follow, request: Request):
+    _follows_allowed(request)
     if body.kind not in ("author", "series"):
         raise HTTPException(400, "You can follow an author or a series.")
     try:
@@ -895,7 +970,8 @@ async def follow_detail(follow_id: int):
 
 
 @app.post("/api/follows/{follow_id}/want-all")
-async def want_all(follow_id: int):
+async def want_all(follow_id: int, request: Request):
+    _follows_allowed(request)
     f = _follow_or_404(follow_id)
     detail = await follow_detail(follow_id)
     added = sum(1 for b in detail["books"] if not b["library"] and wanted.add_wanted(b))
@@ -905,7 +981,8 @@ async def want_all(follow_id: int):
 
 
 @app.delete("/api/follows/{follow_id}")
-async def unfollow(follow_id: int, remove_wanted: bool = False):
+async def unfollow(follow_id: int, request: Request, remove_wanted: bool = False):
+    _follows_allowed(request)
     f = _follow_or_404(follow_id)
     if remove_wanted:
         books = db.list_books()
@@ -949,10 +1026,10 @@ async def apply_update(body: Update):
 
 # What listeners see of the settings: enough for the app to know what's set up, no addresses or keys.
 LISTENER_SETTINGS = (
-    "rd_configured", "ad_configured", "brave_configured", "prowlarr_configured", "torznab_configured", "indexer_configured",
+    "rd_configured", "ad_configured", "tb_configured", "pm_configured", "brave_configured", "prowlarr_configured", "torznab_configured", "indexer_configured",
     "usenet_configured", "torrent_configured",
     "usenet_client", "torrent_client", "smart_search", "search_provider", "audible_region", "check_updates",
-    "auto_search", "auto_search_hours",
+    "auto_search", "auto_search_hours", "listener_approval",
 )
 
 
@@ -1102,6 +1179,90 @@ async def ad_pin_check(body: PinCheck):
         # Connected, but the key can't be used from here yet (e.g. AllDebrid wants this location approved).
         user = {"warning": str(e) if isinstance(e, AllDebridError) else "Couldn't reach AllDebrid to check the account."}
     return {"connected": True, **user, "settings": config.load().public()}
+
+
+# ---- TorBox and Premiumize ----------------------------------------------------------
+
+
+def _tb_user(user: dict) -> dict:
+    plans = {0: "Free", 1: "Essential", 2: "Pro", 3: "Standard"}
+    until = str(user.get("premium_expires_at") or "")
+    return {
+        "email": user.get("email"),
+        "plan": plans.get(user.get("plan"), "") if isinstance(user.get("plan"), int) else "",
+        "premium": bool(user.get("is_subscribed")) or user.get("plan") not in (0, None),
+        "premium_until": until[:10] or None,  # a date, like 2026-12-31
+    }
+
+
+@app.post("/api/settings/test-tb")
+async def test_tb():
+    try:
+        async with TorBox(config.load().tb_api_key) as tb:
+            return _tb_user(await tb.user())
+    except TorBoxError as e:
+        raise HTTPException(400, str(e))
+    except httpx.HTTPError:
+        raise HTTPException(502, "Couldn't reach TorBox.")
+
+
+# Connecting TorBox with a short code, like AllDebrid's: the device code stays here, the browser only sees the code.
+_tb_code: dict = {}
+
+
+@app.post("/api/settings/torbox/code")
+async def tb_code_start():
+    try:
+        code = await torbox.device_start()
+    except TorBoxError as e:
+        raise HTTPException(400, str(e))
+    except httpx.HTTPError:
+        raise HTTPException(502, "Couldn't reach TorBox.")
+    _tb_code.clear()
+    _tb_code.update(code, expires=time.time() + code["expires_in"])
+    return {"code": code["code"], "user_url": code["url"], "expires_in": code["expires_in"], "interval": code["interval"]}
+
+
+class CodeCheck(BaseModel):
+    code: str
+
+
+@app.post("/api/settings/torbox/code/check")
+async def tb_code_check(body: CodeCheck):
+    if not _tb_code or body.code != _tb_code["code"]:
+        raise HTTPException(400, "That code isn't the latest one. Choose Connect TorBox again.")
+    if time.time() > _tb_code["expires"]:
+        _tb_code.clear()
+        raise HTTPException(400, "That code has expired. Choose Connect TorBox to get a new one.")
+    try:
+        key = await torbox.device_check(_tb_code["device_code"])
+    except TorBoxError as e:
+        if e.code == "EXPIRED":
+            _tb_code.clear()
+        raise HTTPException(400, str(e))
+    except httpx.HTTPError:
+        return {"connected": False}  # a blip; the page keeps asking
+    if not key:
+        return {"connected": False}
+    _tb_code.clear()
+    config.update({"tb_api_key": key, "torrent_client": "torbox"})  # connecting it is choosing it
+    try:
+        async with TorBox(key) as tb:
+            user = _tb_user(await tb.user())
+    except (TorBoxError, httpx.HTTPError) as e:
+        user = {"warning": str(e) if isinstance(e, TorBoxError) else "Couldn't reach TorBox to check the account."}
+    return {"connected": True, **user, "settings": config.load().public()}
+
+
+@app.post("/api/settings/test-pm")
+async def test_pm():
+    try:
+        async with Premiumize(config.load().pm_api_key) as pm:
+            return await pm.user()
+    except PremiumizeError as e:
+        raise HTTPException(400, str(e))
+    except httpx.HTTPError:
+        raise HTTPException(502, "Couldn't reach Premiumize.")
 
 
 # ---- notifications ------------------------------------------------------------

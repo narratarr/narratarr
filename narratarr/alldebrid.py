@@ -129,6 +129,7 @@ def file_names(paths: list[tuple[str, ...]]) -> list[str]:
 class AllDebrid:
     label = "AllDebrid"
     prefix = "ad:"  # how its job ids are told apart from Real-Debrid's in the database
+    delete_setting = "delete_from_ad_after"
 
     def __init__(self, api_key: str, transport: httpx.AsyncBaseTransport | None = None):
         if not api_key:

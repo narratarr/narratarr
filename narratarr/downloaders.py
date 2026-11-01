@@ -29,9 +29,10 @@ class ClientError(Exception):
 
 
 USENET_CLIENTS = {"sabnzbd": "SABnzbd", "nzbget": "NZBGet"}
-DEBRID = ("realdebrid", "alldebrid")  # cloud services: they fetch the torrent, we download the files
+DEBRID = ("realdebrid", "alldebrid", "torbox", "premiumize")  # cloud services: they fetch the torrent, we download the files
 TORRENT_CLIENTS = {
-    "realdebrid": "Real-Debrid", "alldebrid": "AllDebrid", "qbittorrent": "qBittorrent", "transmission": "Transmission", "deluge": "Deluge",
+    "realdebrid": "Real-Debrid", "alldebrid": "AllDebrid", "torbox": "TorBox", "premiumize": "Premiumize",
+    "qbittorrent": "qBittorrent", "transmission": "Transmission", "deluge": "Deluge",
 }
 
 
@@ -52,6 +53,10 @@ def torrent_configured(s: config.Settings, name: str | None = None) -> bool:
         return bool(s.deluge_url)
     if name == "alldebrid":
         return bool(s.ad_api_key)
+    if name == "torbox":
+        return bool(s.tb_api_key)
+    if name == "premiumize":
+        return bool(s.pm_api_key)
     return bool(s.rd_api_key)
 
 
@@ -84,11 +89,19 @@ def torrent_client(s: config.Settings, transport: httpx.AsyncBaseTransport | Non
 
 
 def debrid_client(s: config.Settings, transport: httpx.AsyncBaseTransport | None = None):
-    """The cloud service torrents go through: AllDebrid if chosen, otherwise Real-Debrid."""
+    """The cloud service torrents go through: the one chosen, or Real-Debrid."""
     if s.torrent_client == "alldebrid":
         from .alldebrid import AllDebrid
 
         return AllDebrid(s.ad_api_key, transport=transport)
+    if s.torrent_client == "torbox":
+        from .torbox import TorBox
+
+        return TorBox(s.tb_api_key, transport=transport)
+    if s.torrent_client == "premiumize":
+        from .premiumize import Premiumize
+
+        return Premiumize(s.pm_api_key, transport=transport)
     from .realdebrid import RealDebrid
 
     return RealDebrid(s.rd_api_key, transport=transport)

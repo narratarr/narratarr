@@ -292,9 +292,10 @@ img { display: block; }
 .status-tag i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 .s-completed { color: var(--ok); }
 .s-wanted { color: var(--text-2); }
+.s-requested { color: var(--accent); }
 .s-failed { color: var(--err); }
 .s-queued, .s-resolving, .s-caching, .s-downloading, .s-organizing { color: var(--info); }
-.status-tag.s-completed i, .status-tag.s-failed i, .status-tag.s-wanted i { background: currentColor; }
+.status-tag.s-completed i, .status-tag.s-failed i, .status-tag.s-wanted i, .status-tag.s-requested i { background: currentColor; }
 .status-tag:is(.s-queued, .s-resolving, .s-caching, .s-downloading, .s-organizing) i { animation: blink 1.4s infinite; }
 @keyframes blink { 50% { opacity: 0.3; } }
 
@@ -565,6 +566,12 @@ body.has-player .save-float { bottom: 104px; }
 .rd-result b { font-weight: 600; }
 .preview-path { font: 12.5px var(--mono); color: var(--text-2); padding: 10px 12px; border-radius: 10px; background: var(--surface-2); word-break: break-all; }
 .preview-path b { color: var(--accent); font-weight: 500; }
+.preview-path > div + div { margin-top: 4px; }
+.preview-path span { display: inline-block; min-width: 86px; margin-right: 6px; font: 11px var(--sans); letter-spacing: .02em; text-transform: uppercase; color: var(--text-3); }
+.preview-path span:empty { display: none; }
+.layout-vars { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.layout-vars .fill-in { padding: 3px 8px; margin: 0; }
+@media (max-width: 640px) { .preview-path span { display: block; margin: 0 0 2px; } }
 
 /* ---- modal & toasts ----------------------------------------------------- */
 
@@ -924,8 +931,11 @@ body.has-player .save-float { bottom: 104px; }
 
 /* Drawer: wanted state, follow buttons, release picker */
 .drawer .cta-note { text-align: center; color: var(--text-3); font-size: 13px; margin: 12px auto 0; max-width: 40ch; }
-.drawer .state.wanted .top span:first-child { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; color: var(--accent); }
-.drawer .state.wanted svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linejoin: round; }
+.drawer .state.requested { border-color: color-mix(in oklab, var(--accent) 35%, var(--border)); background: color-mix(in oklab, var(--accent) 6%, var(--surface)); }
+.drawer .state.requested p { margin: 8px 0 0; font-size: 13.5px; color: var(--text-2); }
+.drawer .state.requested p b { color: var(--text); font-weight: 600; word-break: break-word; }
+.drawer .state.requested .top span:first-child, .drawer .state.wanted .top span:first-child { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; color: var(--accent); }
+.drawer .state:is(.wanted, .requested) svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linejoin: round; }
 .drawer .state.wanted p { margin: 8px 0 0; color: var(--text-2); font-size: 13.5px; line-height: 1.55; }
 .follow-row { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
 .follow-row:empty { display: none; }
@@ -1037,7 +1047,11 @@ body.has-player .save-float { bottom: 104px; }
 
 /* Listeners browse, request and listen; running the place is for admins. */
 body.listener [data-nav="settings"], body.listener #update-pill, body.listener #rd-pill,
-body.listener #import-btn, body.listener [data-import], body.listener [data-act="remove"], body.listener [data-act="edit"] { display: none !important; }
+body.listener #import-btn, body.listener [data-import], body.listener [data-act="remove"]:not([data-mine]), body.listener [data-act="edit"] { display: none !important; }
+/* While requests need approval, following (which adds books by itself) is an admin's job. */
+body.asks-first .follow-search, body.asks-first [data-act="want-all"], body.asks-first [data-act="unfollow"] { display: none !important; }
+.asks-note { display: none; }
+body.asks-first .asks-note { display: block; }
 
 .account { display: flex; align-items: center; gap: 11px; width: 100%; padding: 8px 10px 8px 8px; border: 1px solid transparent; border-radius: 14px; background: none; text-align: left; cursor: pointer; transition: background 0.2s, border-color 0.2s; }
 .account:hover { background: var(--surface-2); border-color: var(--border); }

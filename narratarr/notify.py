@@ -104,7 +104,8 @@ def context(event: str, book: dict, username: str = "", error: str = "") -> dict
     by = f" by {author}" if author else ""
     what = f"{title}{by}" + (" (ebook)" if ebook else "")
     message = {
-        "wanted": f"{username or 'Someone'} wants {what}",
+        "wanted": f"{username or 'Someone'} wants {what}"
+                  + (". It's waiting for your approval" if book.get("status") == "requested" else ""),
         "grabbed": f"Downloading {what}" + (f", for {username}" if username else ""),
         "completed": f"{what} is in your library" + (f", for {username}" if username else ""),
         "failed": f"{what} couldn't download: {error or 'unknown error'}",

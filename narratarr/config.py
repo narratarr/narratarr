@@ -9,6 +9,8 @@ from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from urllib.parse import urlparse
 
+from . import layout
+
 DATA_DIR = Path(os.environ.get("NARRATARR_DATA", Path.home() / ".narratarr"))
 SETTINGS_FILE = DATA_DIR / "settings.json"
 
@@ -28,6 +30,10 @@ class Settings:
     delete_from_rd_after: bool = True
     ad_api_key: str = ""  # AllDebrid
     delete_from_ad_after: bool = True
+    tb_api_key: str = ""  # TorBox
+    delete_from_tb_after: bool = True
+    pm_api_key: str = ""  # Premiumize
+    delete_from_pm_after: bool = True
     smart_search: bool = True
     search_provider: str = "audiobookbay"  # or "brave"
     brave_api_key: str = ""
@@ -50,7 +56,7 @@ class Settings:
     nzbget_username: str = ""
     nzbget_password: str = ""
     nzbget_category: str = ""
-    torrent_client: str = "realdebrid"  # or "alldebrid" / "qbittorrent" / "transmission" / "deluge"
+    torrent_client: str = "realdebrid"  # or "alldebrid" / "torbox" / "premiumize" / "qbittorrent" / "transmission" / "deluge"
     qbittorrent_url: str = ""
     qbittorrent_username: str = ""
     qbittorrent_password: str = ""
@@ -75,6 +81,7 @@ class Settings:
     audible_region: str = "us"
     check_updates: bool = True  # one request a day to GitHub's releases API
     auth_local_bypass: bool = False  # skip sign-in for requests from this machine and the home network
+    listener_approval: bool = True  # a listener's request waits for an admin before anything is searched or downloaded
 
     def public(self) -> dict:
         """Settings safe to send to the browser (secrets masked)."""
@@ -83,6 +90,8 @@ class Settings:
             d[key] = _mask(d[key], key)
         d["rd_configured"] = bool(self.rd_api_key)
         d["ad_configured"] = bool(self.ad_api_key)
+        d["tb_configured"] = bool(self.tb_api_key)
+        d["pm_configured"] = bool(self.pm_api_key)
         d["brave_configured"] = bool(self.brave_api_key)
         d["prowlarr_configured"] = bool(self.prowlarr_url and self.prowlarr_api_key)
         d["torznab_configured"] = bool(self.torznab_url and self.torznab_api_key)
@@ -93,19 +102,20 @@ class Settings:
         d["transmission_configured"] = bool(self.transmission_url)
         d["deluge_configured"] = bool(self.deluge_url)
         d["usenet_configured"] = d[f"{self.usenet_client}_configured"]
-        short = {"realdebrid": "rd", "alldebrid": "ad"}.get(self.torrent_client, self.torrent_client)
+        short = {"realdebrid": "rd", "alldebrid": "ad", "torbox": "tb", "premiumize": "pm"}.get(self.torrent_client,
+                                                                                                 self.torrent_client)
         d["torrent_configured"] = d[f"{short}_configured"]
         return d
 
 
 SECRETS = (
-    "rd_api_key", "ad_api_key", "audiobookshelf_token", "brave_api_key", "prowlarr_api_key", "sabnzbd_api_key",
+    "rd_api_key", "ad_api_key", "tb_api_key", "pm_api_key", "audiobookshelf_token", "brave_api_key", "prowlarr_api_key", "sabnzbd_api_key",
     "nzbget_password", "qbittorrent_password", "transmission_password", "deluge_password", "torznab_api_key",
 )
 CHOICES = {
     "search_provider": ("audiobookbay", "brave"),
     "usenet_client": ("sabnzbd", "nzbget"),
-    "torrent_client": ("realdebrid", "alldebrid", "qbittorrent", "transmission", "deluge"),
+    "torrent_client": ("realdebrid", "alldebrid", "torbox", "premiumize", "qbittorrent", "transmission", "deluge"),
     "audible_region": ("us", "uk", "ca", "au", "in", "de", "fr", "it", "es", "jp"),
 }
 # Each service's secrets. Changing the service's address to a different host clears them, so a
@@ -182,6 +192,13 @@ def update(changes: dict) -> Settings:
                 v = str(v).strip().rstrip("/")
             elif isinstance(v, str):
                 v = v.strip()
+            if k == "folder_template":
+                v = v.strip("/") or "{author}/{title}"
+                if bad := layout.unknown(v):
+                    names = ", ".join("{" + n + "}" for n in layout.VARIABLES)
+                    raise ValueError(f"The folder layout can't use {{{bad[0]}}}. You can use {names}.")
+                if ".." in v.split("/"):
+                    raise ValueError("The folder layout has to stay inside the library folder.")
             setattr(s, k, v)
         if s.import_folder:
             lib, imp = Path(s.library_dir).expanduser().resolve(), Path(s.import_folder).expanduser().resolve()

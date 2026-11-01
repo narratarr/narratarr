@@ -783,3 +783,10 @@ def test_an_idle_app_hears_expired_not_invalid(app, people, monkeypatch):
     r = app.get("/api/v1/me", headers=bearer(idle["access_token"]))
     assert r.status_code == 401 and err(r) == "token_expired"
     assert app.post("/api/v1/auth/refresh", json={"refresh_token": idle["refresh_token"]}).status_code == 200
+
+
+def test_an_apps_listener_request_waits_for_approval(app, kid):
+    req = app.post("/api/v1/requests", json={"asin": "B002V1OF70"}, headers=kid).json()
+    assert db.get(req["id"])["status"] == "requested"
+    # To an app it's still "wanted" (the API's statuses don't change), with a message saying why.
+    assert req["status"] == "wanted" and req["message"] == "Waiting for an admin to approve it."

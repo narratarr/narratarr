@@ -8,6 +8,7 @@ import { reader } from "./reader.js";
 
 const ACTIVE = ["queued", "resolving", "caching", "downloading", "organizing"];
 const STATUS = {
+  requested: "Awaiting approval",
   wanted: "Wanted",
   queued: "Queued",
   resolving: "Resolving",
@@ -23,10 +24,11 @@ const PHASES = [
   ["downloading", "Download"],
   ["organizing", "Organize"],
 ];
-const CLIENTS = { sabnzbd: "SABnzbd", nzbget: "NZBGet", realdebrid: "Real-Debrid", alldebrid: "AllDebrid", qbittorrent: "qBittorrent", transmission: "Transmission", deluge: "Deluge" };
+const CLIENTS = { sabnzbd: "SABnzbd", nzbget: "NZBGet", realdebrid: "Real-Debrid", alldebrid: "AllDebrid", torbox: "TorBox", premiumize: "Premiumize", qbittorrent: "qBittorrent", transmission: "Transmission", deluge: "Deluge" };
 // Cloud services fetch torrents for us; then we download the files from them.
-const DEBRID = ["realdebrid", "alldebrid"];
-const cloudName = () => (state.settings?.torrent_client === "alldebrid" ? "AllDebrid" : "Real-Debrid");
+const DEBRID = ["realdebrid", "alldebrid", "torbox", "premiumize"];
+const SHORT = { realdebrid: "rd", alldebrid: "ad", torbox: "tb", premiumize: "pm" }; // their settings' prefixes
+const cloudName = () => (DEBRID.includes(state.settings?.torrent_client) ? CLIENTS[state.settings.torrent_client] : "Real-Debrid");
 // Catalogs are where book details come from; the book itself is then found on your indexers.
 const CATALOGS = ["audible", "openlibrary"];
 const isCatalog = (name) => CATALOGS.includes(name);
@@ -81,6 +83,11 @@ const formatFor = (source) => state.format || (source === "openlibrary" ? "ebook
 function statusTag(status) {
   return `<span class="status-tag s-${status}"><i></i>${esc(STATUS[status] || status)}</span>`;
 }
+
+const isAdmin = () => state.user?.role === "admin";
+const mine = (b) => !!b && b.requested_by === state.user?.id;
+// A listener's request waits for an admin while that's turned on (Settings → Users).
+const asksFirst = () => !isAdmin() && state.settings?.listener_approval !== false;
 
 function spinBtn(btn, on) {
   if (on) {
@@ -171,7 +178,8 @@ async function addBook(url, { cover = "", title = "", source = "audiobookbay", p
     // A catalog only describes the book: it goes to Wanted and Narratarr looks for a release.
     const book = await api("/api/library", { method: "POST", body: { url, download: true, source, format } });
     await refreshLibrary();
-    toast(book.status === "wanted" ? `${book.title} is on your Wanted list${FORMATS[format].wanted}. Looking for it now…` : `${book.title} is already in your library`,
+    toast(book.status === "requested" ? `Asked for ${book.title}. It’ll be looked for once an admin approves it.`
+      : book.status === "wanted" ? `${book.title} is on your Wanted list${FORMATS[format].wanted}. Looking for it now…` : `${book.title} is already in your library`,
       { kind: "ok", cover: cover || book.cover_url });
     return book;
   }
@@ -181,7 +189,8 @@ async function addBook(url, { cover = "", title = "", source = "audiobookbay", p
   const book = await api("/api/library", { method: "POST", body: { url, download, source, ...(format === "ebook" ? { format } : {}) } });
   await refreshLibrary();
   toast(
-    download ? `${book.title || title} is on its way` : `Saved ${book.title || title} to Wanted. Connect ${missing} in Settings to download.`,
+    book.status === "requested" ? `Asked for ${book.title || title}. It’ll download once an admin approves it.`
+    : download ? `${book.title || title} is on its way` : `Saved ${book.title || title} to Wanted. Connect ${missing} in Settings to download.`,
     { kind: "ok", cover: cover || book.cover_url }
   );
   return book;
@@ -190,19 +199,27 @@ async function addBook(url, { cover = "", title = "", source = "audiobookbay", p
 async function bookAction(id, action) {
   if (action === "remove") {
     const book = state.library.find((b) => b.id === id);
+    const takeBack = !isAdmin();
+    const decline = isAdmin() && book?.status === "requested";
     const res = await modal({
-      title: "Remove from library?",
-      body: `“${book?.title}” will be removed from Narratarr.`,
-      confirm: "Remove",
+      title: takeBack ? "Take back your request?" : decline ? "Decline this request?" : "Remove from library?",
+      body: takeBack ? `“${book?.title}” won’t be looked for or downloaded.`
+        : decline ? `“${book?.title}” won’t be downloaded${book.requested_by_name ? ` for ${esc(book.requested_by_name)}` : ""}.`
+        : `“${book?.title}” will be removed from Narratarr.`,
+      confirm: takeBack ? "Take it back" : decline ? "Decline" : "Remove",
       danger: true,
-      extra: book?.path
+      extra: book?.path && !takeBack
         ? `<label class="switch"><input type="checkbox" name="files"><i></i>Also delete its files on disk${book.source === "local" ? " (the ones you imported)" : ""}</label>`
         : "",
     });
     if (!res) return false;
     if (player.book?.id === id) player.close();
     const out = await api(`/api/library/${id}?delete_files=${!!res.files}`, { method: "DELETE" });
-    toast(out?.kept ? `Removed. Its files were kept at ${out.kept}` : "Removed from library", out?.kept ? { kind: "ok" } : {});
+    toast(out?.kept ? `Removed. Its files were kept at ${out.kept}` : takeBack ? "Request taken back" : decline ? "Request declined" : "Removed from library",
+      out?.kept ? { kind: "ok" } : {});
+  } else if (action === "approve") {
+    const book = await api(`/api/library/${id}/approve`, { method: "POST" });
+    toast(book.status === "queued" ? `Approved. ${book.title} is downloading` : `Approved. Looking for ${book.title} now`, { kind: "ok", cover: book.cover_url });
   } else {
     const book = state.library.find((b) => b.id === id);
     const missing = action === "download" && book && missingClient(book.source, book.protocol);
@@ -210,7 +227,8 @@ async function bookAction(id, action) {
       toast(`Connect ${missing} in Settings first.`, { kind: "err" });
       return false;
     }
-    await api(`/api/library/${id}/${action}`, { method: "POST" });
+    const out = await api(`/api/library/${id}/${action}`, { method: "POST" });
+    if (out?.status === "requested") toast("Asked an admin to approve it", { kind: "ok" });
   }
   await refreshLibrary();
   return true;
@@ -219,16 +237,24 @@ async function bookAction(id, action) {
 // ---------------------------------------------------------------------------
 // polling
 
+function updateBadges() {
+  const active = state.library.filter((b) => ACTIVE.includes(b.status)).length;
+  const badge = $("#activity-badge");
+  badge.hidden = !active;
+  badge.textContent = active;
+  const waiting = isAdmin() ? state.library.filter((b) => b.status === "requested").length : 0;
+  const req = $("#requests-badge");
+  req.hidden = !waiting;
+  req.textContent = waiting;
+}
+
 async function refreshLibrary() {
   try {
     state.library = await api("/api/library");
   } catch {
     return;
   }
-  const active = state.library.filter((b) => ACTIVE.includes(b.status)).length;
-  const badge = $("#activity-badge");
-  badge.hidden = !active;
-  badge.textContent = active;
+  updateBadges();
 
   const key = state.library.map((b) => `${b.id}:${b.status}`).join("|");
   const structural = key !== state.libraryKey;
@@ -374,8 +400,8 @@ function Discover(root) {
       <div class="banner">
         <div class="ico">${I.key}</div>
         <div><strong>Connect a download client to start downloading</strong><p>${src.delivery === "indexer"
-          ? "Usenet results go to SABnzbd or NZBGet, torrents to Real-Debrid, AllDebrid, qBittorrent, Transmission or Deluge. You can save books to Wanted until then."
-          : "Use Real-Debrid, AllDebrid, qBittorrent, Transmission or Deluge. You can browse and save books to Wanted until then."}</p></div>
+          ? "Usenet results go to SABnzbd or NZBGet, torrents to Real-Debrid, AllDebrid, TorBox, Premiumize, qBittorrent, Transmission or Deluge. You can save books to Wanted until then."
+          : "Use Real-Debrid, AllDebrid, TorBox, Premiumize, qBittorrent, Transmission or Deluge. You can browse and save books to Wanted until then."}</p></div>
         <a class="btn" href="#/settings">Open Settings</a>
       </div>` : ""}
     <div class="section-head"><h2 id="disc-title"></h2><div class="refine" id="refine"></div></div>
@@ -722,6 +748,7 @@ function Library(root) {
     ["all", "All", () => true],
     ["completed", "Downloaded", (b) => b.status === "completed"],
     ["active", "In progress", (b) => ACTIVE.includes(b.status)],
+    ["requested", "Awaiting approval", (b) => b.status === "requested"],
     ["wanted", "Wanted", (b) => b.status === "wanted"],
     ["failed", "Failed", (b) => b.status === "failed"],
   ];
@@ -734,6 +761,7 @@ function Library(root) {
       </div>
       <button class="btn" id="import-btn">${I.down} Import books</button>
     </header>
+    <div id="requests-banner"></div>
     <div id="shelf"></div>
     <div class="stats" id="stats"></div>
     <div class="toolbar">
@@ -748,6 +776,13 @@ function Library(root) {
   function render() {
     const lib = state.library;
     const count = (fn) => lib.filter(fn).length;
+    const waiting = isAdmin() ? count((b) => b.status === "requested") : 0;
+    $("#requests-banner", root).innerHTML = waiting && state.libFilter !== "requested" ? `
+      <div class="banner">
+        <div class="ico">${I.bell}</div>
+        <div><strong>${waiting === 1 ? "A request is" : `${waiting} requests are`} waiting for you</strong><p>Listeners asked for ${waiting === 1 ? "a book" : "these books"}. Nothing downloads until you approve.</p></div>
+        <button class="btn" type="button" data-f="requested">Review</button>
+      </div>` : "";
     $("#shelf", root).innerHTML = continueListening();
     $("#stats", root).innerHTML = [
       [lib.length, "Books in library"],
@@ -756,7 +791,7 @@ function Library(root) {
       [count((b) => b.status === "wanted"), "Wanted"],
     ].map(([n, l]) => `<div class="stat"><b>${n}</b><span>${l}</span></div>`).join("");
 
-    $("#filters", root).innerHTML = filters.map(([k, label, fn]) =>
+    $("#filters", root).innerHTML = filters.filter(([k, , fn]) => k !== "requested" || count(fn) || state.libFilter === k).map(([k, label, fn]) =>
       `<button class="${state.libFilter === k ? "on" : ""}" data-f="${k}">${label} <small>${count(fn)}</small></button>`).join("");
 
     // Audiobooks and ebooks side by side, or one at a time once there are ebooks to tell apart.
@@ -787,7 +822,7 @@ function Library(root) {
     }
   }
 
-  $("#filters", root).onclick = (e) => {
+  $("#filters", root).onclick = $("#requests-banner", root).onclick = (e) => {
     const b = e.target.closest("[data-f]");
     if (!b) return;
     state.libFilter = b.dataset.f;
@@ -1100,6 +1135,7 @@ function Authors(root, param) {
       <div class="eyebrow">Following</div>
       <h1 class="page-title">Authors &amp; <em>series</em></h1>
       <p class="lede">Follow an author or a series and their new books go straight to Wanted, then download as soon as they turn up on your indexers.</p>
+      <p class="lede asks-note">Ask an admin to follow someone new. You can still ask for any of their books.</p>
     </header>
     ${!st.indexer_configured ? `
       <div class="banner">
@@ -1378,6 +1414,47 @@ function Activity(root) {
 
 // Settings: six short pages (#/settings/<page>) instead of one long one. Every field still lives in
 // one form, so moving between pages keeps unsaved changes, and one Save covers them all.
+// The folder layout's variables, and the same fill-in rules as narratarr/layout.py, for the live preview.
+const LAYOUT_VARS = [
+  ["author", "The author"], ["title", "The book's title"], ["narrator", "The narrator (up to two)"],
+  ["series", "The series name"], ["series_number", "The book's number in its series, like 1 or 2.5"], ["year", "The year it came out"],
+];
+const LAYOUT_SAMPLE = { author: "Frank Herbert", title: "Dune", narrator: "Scott Brick", series: "Dune Chronicles", series_number: "1", year: "1965" };
+const LAYOUT_SAMPLE_SOLO = { author: "Andy Weir", title: "Project Hail Mary", narrator: "Ray Porter", series: "", series_number: "", year: "2021" };
+const LAYOUT_EDGES = /^[\s\-–—_.,;:#~]+|[\s\-–—_.,;:#~]+$/g;
+
+function layoutClean(part) {
+  return String(part).replace(/[<>:"/\\|?*\x00-\x1f]/g, "").trim().replace(/^\.+|\.+$/g, "").split(/\s+/).filter(Boolean).join(" ").slice(0, 150);
+}
+
+function layoutFolders(template, book) {
+  const fallback = { author: "Unknown Author", title: "Untitled", narrator: "Unknown Narrator" };
+  const out = [];
+  for (const part of template.split("/")) {
+    if (!part.trim()) continue;
+    const bits = part.split(/\{([^{}]*)\}/);
+    const literals = bits.filter((_, i) => i % 2 === 0);
+    const vals = bits.filter((_, i) => i % 2 === 1).map((n) => layoutClean(book[n] || "") || fallback[n] || "");
+    let text = part;
+    if (vals.length) {
+      const keep = literals.map(() => true);
+      for (let i = 0; i < vals.length;) {
+        if (vals[i]) { i++; continue; }
+        let j = i;
+        while (j < vals.length && !vals[j]) j++;
+        for (let k = i; k <= j; k++) keep[k] = false;
+        if (i > 0 && j < vals.length) keep[j] = true;
+        i = j;
+      }
+      text = literals.map((l, k) => (keep[k] ? l : "") + (k < vals.length ? vals[k] : "")).join("");
+      if (vals.some((v) => !v)) text = text.replace(LAYOUT_EDGES, "");
+    }
+    const name = layoutClean(text);
+    if (name) out.push(name);
+  }
+  return out;
+}
+
 const SETTINGS_PAGES = [
   ["general", "General", "Where your books live, how their folders are named, and what comes in by itself.",
     '<svg viewBox="0 0 24 24"><path d="M3 7.5 12 3l9 4.5M5 9.5V19h14V9.5M9 19v-6h6v6"/></svg>'],
@@ -1419,10 +1496,35 @@ function settingsStatus(key, users, notifiers) {
   return ["", ""];
 }
 
+// Signing in to a cloud service with a short code: AllDebrid's PIN, TorBox's device code.
+function codeCardHTML(p, name, where, url) {
+  return `<div class="pin-card" id="${p}-pin-card">
+    <div class="pin-start" id="${p}-pin-start">
+      <div><b id="${p}-pin-title"></b><p class="desc" id="${p}-pin-desc"></p></div>
+      <div class="pin-actions">
+        <button class="btn" type="button" data-${p}-test>Test</button>
+        <button class="btn" type="button" id="${p}-pin">Connect ${name}</button>
+      </div>
+    </div>
+    <div class="pin-wait" id="${p}-pin-wait" hidden>
+      <span class="pin-code" id="${p}-pin-code" aria-label="Your code"></span>
+      <div class="pin-steps">
+        <b>Enter this code on ${name}</b>
+        <p class="desc">Open the page below wherever you’re signed in to ${name}, even on your phone. This page carries on by itself once you have.</p>
+        <div class="pin-actions">
+          <a class="btn" id="${p}-pin-link" href="${url}" target="_blank" rel="noopener noreferrer">Open ${where}</a>
+          <button class="btn ghost" type="button" id="${p}-pin-cancel">Cancel</button>
+        </div>
+        <small class="pin-status"><span class="spinner" aria-hidden="true"></span><span id="${p}-pin-left">Waiting for the code…</span></small>
+      </div>
+    </div>
+  </div>`;
+}
+
 function Settings(root, page) {
   const s = state.settings || {};
   const tile = (client, label, where) => {
-    const ready = s[`${{ realdebrid: "rd", alldebrid: "ad" }[client] || client}_configured`];
+    const ready = s[`${SHORT[client] || client}_configured`];
     return `<button type="button" role="radio" data-v="${client}"><b>${label}</b><small>${ready ? `<i class="dot ok"></i>Ready` : where}</small></button>`;
   };
   root.innerHTML = `
@@ -1454,7 +1556,10 @@ function Settings(root, page) {
             <label for="folder_template">Folder layout</label>
             <input class="input mono" id="folder_template" name="folder_template" value="${esc(s.folder_template)}" />
             <div class="preview-path" id="path-preview"></div>
-            <span class="hint">Use <code>{author}</code>, <code>{title}</code> and <code>{narrator}</code>, with <code>/</code> between folders. Ebooks go into the same folder as their audiobook.</span>
+            <div class="layout-vars" role="group" aria-label="Add a variable">
+              ${LAYOUT_VARS.map(([v, tip]) => `<button type="button" class="fill-in" data-var="${v}" title="${esc(tip)}">{${v}}</button>`).join("")}
+            </div>
+            <span class="hint">Put <code>/</code> between folders. If a book has no series or year, that part is left out, along with the words around it. Ebooks go into the same folder as their audiobook.</span>
           </div>
           <div class="set-row">
             <label for="max_concurrent"><b>Downloads at once</b><small>More finish sooner, but share your bandwidth.</small></label>
@@ -1493,6 +1598,15 @@ function Settings(root, page) {
         <div class="body">
           <div class="user-list" id="user-list"><span class="spinner"></span></div>
           <div><button class="btn" type="button" id="add-user">${I.plus} Add someone</button></div>
+        </div>
+      </section>
+      <section class="panel" data-page="users">
+        <div class="ph"><h3>Requests</h3></div>
+        <div class="body">
+          <div class="field">
+            <label class="switch"><input type="checkbox" name="listener_approval" ${s.listener_approval ? "checked" : ""}><i></i>Approve what listeners ask for</label>
+            <span class="hint">A listener’s request waits under Library → Awaiting approval until an admin approves it, and nothing is searched for or downloaded before then. If they picked a release, approving downloads exactly that one. While this is on, only admins follow authors and series. Turn it off to let listeners download straight away.</span>
+          </div>
         </div>
       </section>
       <section class="panel" data-page="users">
@@ -1591,11 +1705,11 @@ function Settings(root, page) {
       </section>
 
       <section class="panel" data-page="downloads">
-        <div class="ph"><h3>Torrents</h3><p class="desc">Real-Debrid and AllDebrid fetch them for you, so nothing is shared from your computer. qBittorrent, Transmission and Deluge download on your own machine and keep seeding, which shows your IP address to other peers; many people run them behind a VPN.</p></div>
+        <div class="ph"><h3>Torrents</h3><p class="desc">Real-Debrid, AllDebrid, TorBox and Premiumize fetch them for you, so nothing is shared from your computer. qBittorrent, Transmission and Deluge download on your own machine and keep seeding, which shows your IP address to other peers; many people run them behind a VPN.</p></div>
         <div class="body">
           <div class="tile-groups" data-choice="torrent_client" role="radiogroup" aria-label="Download torrents with">
             <div class="tile-group"><span class="tile-label" aria-hidden="true">In the cloud</span>
-              <div class="choice-tiles">${tile("realdebrid", "Real-Debrid", "Premium account")}${tile("alldebrid", "AllDebrid", "Premium account")}</div></div>
+              <div class="choice-tiles">${tile("realdebrid", "Real-Debrid", "Premium account")}${tile("alldebrid", "AllDebrid", "Premium account")}${tile("torbox", "TorBox", "TorBox account")}${tile("premiumize", "Premiumize", "Premium account")}</div></div>
             <div class="tile-group"><span class="tile-label" aria-hidden="true">On this machine</span>
               <div class="choice-tiles">${tile("qbittorrent", "qBittorrent", "Seeds from here")}${tile("transmission", "Transmission", "Seeds from here")}${tile("deluge", "Deluge", "Seeds from here")}</div></div>
           </div>
@@ -1613,27 +1727,7 @@ function Settings(root, page) {
             <label class="switch"><input type="checkbox" name="delete_from_rd_after" ${s.delete_from_rd_after ? "checked" : ""}><i></i>Remove torrents from Real-Debrid after downloading</label>
           </div>
           <div class="client-fields" data-for="torrent_client:alldebrid">
-            <div class="pin-card" id="ad-pin-card">
-              <div class="pin-start" id="ad-pin-start">
-                <div><b id="ad-pin-title"></b><p class="desc" id="ad-pin-desc"></p></div>
-                <div class="pin-actions">
-                  <button class="btn" type="button" data-ad-test>Test</button>
-                  <button class="btn" type="button" id="ad-pin">Connect AllDebrid</button>
-                </div>
-              </div>
-              <div class="pin-wait" id="ad-pin-wait" hidden>
-                <span class="pin-code" id="ad-pin-code" aria-label="Your code"></span>
-                <div class="pin-steps">
-                  <b>Enter this code on AllDebrid</b>
-                  <p class="desc">Open the page below wherever you're signed in to AllDebrid, even on your phone. This page carries on by itself once you have.</p>
-                  <div class="pin-actions">
-                    <a class="btn" id="ad-pin-link" href="https://alldebrid.com/pin/" target="_blank" rel="noopener noreferrer">Open alldebrid.com/pin</a>
-                    <button class="btn ghost" type="button" id="ad-pin-cancel">Cancel</button>
-                  </div>
-                  <small class="pin-status"><span class="spinner" aria-hidden="true"></span><span id="ad-pin-left">Waiting for the code…</span></small>
-                </div>
-              </div>
-            </div>
+            ${codeCardHTML("ad", "AllDebrid", "alldebrid.com/pin", "https://alldebrid.com/pin/")}
             <div id="ad-result"></div>
             <details class="set-more">
               <summary>Use an API key instead</summary>
@@ -1647,6 +1741,34 @@ function Settings(root, page) {
               </div>
             </details>
             <label class="switch"><input type="checkbox" name="delete_from_ad_after" ${s.delete_from_ad_after ? "checked" : ""}><i></i>Remove torrents from AllDebrid after downloading</label>
+          </div>
+          <div class="client-fields" data-for="torrent_client:torbox">
+            ${codeCardHTML("tb", "TorBox", "TorBox’s sign-in page", "https://torbox.app/")}
+            <div id="tb-result"></div>
+            <details class="set-more">
+              <summary>Use an API key instead</summary>
+              <div class="field">
+                <label for="tb_api_key">TorBox API key</label>
+                <div class="input-row">
+                  <input class="input mono" id="tb_api_key" name="tb_api_key" type="password" placeholder="Paste an API key" value="${esc(s.tb_api_key)}" />
+                  <button class="btn" type="button" data-tb-test>Test</button>
+                </div>
+                <span class="hint">Find it in TorBox under <a href="https://torbox.app/settings" target="_blank" rel="noopener" style="color:var(--accent)">Settings → API key</a>.</span>
+              </div>
+            </details>
+            <label class="switch"><input type="checkbox" name="delete_from_tb_after" ${s.delete_from_tb_after ? "checked" : ""}><i></i>Remove torrents from TorBox after downloading</label>
+          </div>
+          <div class="client-fields" data-for="torrent_client:premiumize">
+            <div class="field">
+              <label for="pm_api_key">Premiumize API key</label>
+              <div class="input-row">
+                <input class="input mono" id="pm_api_key" name="pm_api_key" type="password" placeholder="Paste your API key" value="${esc(s.pm_api_key)}" />
+                <button class="btn" type="button" id="test-pm">Test</button>
+              </div>
+              <span class="hint">Find it at <a href="https://www.premiumize.me/account" target="_blank" rel="noopener" style="color:var(--accent)">premiumize.me/account</a>.</span>
+            </div>
+            <div id="pm-result"></div>
+            <label class="switch"><input type="checkbox" name="delete_from_pm_after" ${s.delete_from_pm_after ? "checked" : ""}><i></i>Remove torrents and their files from Premiumize after downloading</label>
           </div>
           <div class="client-fields" data-for="torrent_client:qbittorrent">
             <div class="field">
@@ -1941,10 +2063,23 @@ function Settings(root, page) {
 
   const preview = () => {
     const dir = form.library_dir.value.replace(/\/+$/, "");
-    const sample = { author: "Frank Herbert", title: "Dune", narrator: "Scott Brick" };
-    const rel = (form.folder_template.value || "{author}/{title}").replace(/\{(\w+)\}/g, (_, k) => sample[k] ?? `{${k}}`);
-    $("#path-preview", root).innerHTML = `${esc(dir)}/<b>${esc(rel)}</b>`;
+    const template = form.folder_template.value || "{author}/{title}";
+    const row = (label, book) => `<div><span>${label}</span>${esc(dir)}/<b>${esc(layoutFolders(template, book).join("/"))}</b></div>`;
+    const usesSeries = /\{(series|series_number|year)\}/.test(template);
+    $("#path-preview", root).innerHTML = usesSeries
+      ? row("In a series", LAYOUT_SAMPLE) + row("On its own", LAYOUT_SAMPLE_SOLO)
+      : row("", LAYOUT_SAMPLE);
   };
+  $$(".layout-vars [data-var]", root).forEach((b) => b.addEventListener("click", () => {
+    const input = form.folder_template;
+    const at = input.selectionStart ?? input.value.length;
+    const end = input.selectionEnd ?? at;
+    const text = `{${b.dataset.var}}`;
+    input.value = input.value.slice(0, at) + text + input.value.slice(end);
+    input.focus();
+    input.setSelectionRange(at + text.length, at + text.length);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  }));
   form.folder_template.oninput = preview;
   form.library_dir.oninput = preview;
   preview();
@@ -1997,10 +2132,13 @@ function Settings(root, page) {
     const data = Object.fromEntries(new FormData(form));
     data.delete_from_rd_after = form.delete_from_rd_after.checked;
     data.delete_from_ad_after = form.delete_from_ad_after.checked;
+    data.delete_from_tb_after = form.delete_from_tb_after.checked;
+    data.delete_from_pm_after = form.delete_from_pm_after.checked;
     data.smart_search = form.smart_search.checked;
     data.auto_search = form.auto_search.checked;
     data.check_updates = form.check_updates.checked;
     data.auth_local_bypass = form.auth_local_bypass.checked;
+    data.listener_approval = form.listener_approval.checked;
     data.max_concurrent = Number(data.max_concurrent) || 1;
     data.auto_search_hours = Number(data.auto_search_hours) || 12;
     // A bare address ("abs.example.com") is something to Find, not a setting to save yet.
@@ -2012,6 +2150,8 @@ function Settings(root, page) {
     state.settings = await api("/api/settings", { method: "PUT", body: collect() });
     form.rd_api_key.value = state.settings.rd_api_key;
     form.ad_api_key.value = state.settings.ad_api_key;
+    form.tb_api_key.value = state.settings.tb_api_key;
+    form.pm_api_key.value = state.settings.pm_api_key;
     form.audiobookshelf_token.value = state.settings.audiobookshelf_token;
     form.brave_api_key.value = state.settings.brave_api_key;
     for (const key of ["prowlarr_api_key", "torznab_api_key", "sabnzbd_api_key", "nzbget_password", "qbittorrent_password", "transmission_password", "deluge_password"]) {
@@ -2324,105 +2464,137 @@ function Settings(root, page) {
   };
   renderNotifiers();
 
-  // AllDebrid: connect with a short code the user enters on alldebrid.com, or with a pasted key.
-  const adCard = () => {
-    const on = Boolean(state.settings.ad_configured);
-    $("#ad-pin-title", root).textContent = on ? "AllDebrid is connected" : "Connect with a code";
-    $("#ad-pin-desc", root).textContent = on
-      ? "Test checks the account. To use a different one, connect again."
-      : "Narratarr shows a short code, you enter it on alldebrid.com, and you’re connected. There’s no key to copy, and your password never comes here.";
-    $("#ad-pin", root).textContent = on ? "Connect again" : "Connect AllDebrid";
-    $("#ad-pin", root).classList.toggle("primary", !on);
-    $("#ad-pin-start [data-ad-test]", root).hidden = !on;
-    const tileNote = $('[data-v="alldebrid"] small', root);
-    if (on) tileNote.innerHTML = `<i class="dot ok"></i>Ready`;
-  };
-  const adLine = (u) => {
-    if (u.warning) return `<div class="rd-result bad">${esc(u.warning)}</div>`;
-    if (!u.premium && !u.trial) return `<div class="rd-result bad">Connected as ${esc(u.username)}, but the account isn’t premium. AllDebrid needs premium for torrents.</div>`;
-    const until = u.premium_until ? new Date(u.premium_until * 1000).toLocaleDateString(undefined, { dateStyle: "medium" }) : "";
-    return okLine(`Connected as <b>${esc(u.username)}</b> · ${u.trial ? "free trial" : "premium"}${until ? ` until ${esc(until)}` : ""}`);
-  };
-  adCard();
-  $$("[data-ad-test]", root).forEach((btn) => {
-    btn.onclick = async () => {
-      const out = $("#ad-result", root);
-      spinBtn(btn, true);
-      try {
-        await save(true);
-        adCard();
-        out.innerHTML = adLine(await api("/api/settings/test-ad", { method: "POST" }));
-      } catch (err) {
-        out.innerHTML = `<div class="rd-result bad">${esc(err.message)}</div>`;
-      }
-      spinBtn(btn, false);
+  // AllDebrid and TorBox: connect with a short code the user enters on their site, or with a pasted key.
+  const codeConnect = ({ p, name, client, site, start, check, line }) => {
+    const out = () => $(`#${p}-result`, root);
+    const card = () => {
+      const on = Boolean(state.settings[`${p}_configured`]);
+      $(`#${p}-pin-title`, root).textContent = on ? `${name} is connected` : "Connect with a code";
+      $(`#${p}-pin-desc`, root).textContent = on
+        ? "Test checks the account. To use a different one, connect again."
+        : `Narratarr shows a short code, you enter it on ${site}, and you’re connected. There’s no key to copy, and your password never comes here.`;
+      $(`#${p}-pin`, root).textContent = on ? "Connect again" : `Connect ${name}`;
+      $(`#${p}-pin`, root).classList.toggle("primary", !on);
+      $(`#${p}-pin-start [data-${p}-test]`, root).hidden = !on;
+      if (on) $(`[data-v="${client}"] small`, root).innerHTML = `<i class="dot ok"></i>Ready`;
     };
-  });
-  let pinTimer = 0;
-  const pinStop = () => {
-    clearTimeout(pinTimer);
-    $("#ad-pin-wait", root).hidden = true;
-    $("#ad-pin-start", root).hidden = false;
-  };
-  $("#ad-pin-cancel", root).onclick = pinStop;
-  $("#ad-pin", root).onclick = async (e) => {
-    const btn = e.currentTarget;
-    const out = $("#ad-result", root);
-    const wait = $("#ad-pin-wait", root);
-    out.innerHTML = "";
-    spinBtn(btn, true);
-    let pin;
-    try {
-      pin = await api("/api/settings/alldebrid/pin", { method: "POST" });
-    } catch (err) {
-      out.innerHTML = `<div class="rd-result bad">${esc(err.message)}</div>`;
-      spinBtn(btn, false);
-      return;
-    }
-    spinBtn(btn, false);
-    $("#ad-pin-code", root).textContent = pin.pin;
-    $("#ad-pin-link", root).href = pin.user_url;
-    $("#ad-pin-start", root).hidden = true;
-    wait.hidden = false;
-    const ends = Date.now() + pin.expires_in * 1000;
-    const tick = async () => {
-      if (!wait.isConnected || wait.hidden) return; // cancelled, or left Settings
-      const left = Math.ceil((ends - Date.now()) / 60000);
-      if (left <= 0) {
-        pinStop();
-        out.innerHTML = `<div class="rd-result bad">That code has expired. Choose Connect AllDebrid to get a new one.</div>`;
+    card();
+    $$(`[data-${p}-test]`, root).forEach((btn) => {
+      btn.onclick = async () => {
+        spinBtn(btn, true);
+        try {
+          await save(true);
+          card();
+          out().innerHTML = line(await api(`/api/settings/test-${p}`, { method: "POST" }));
+        } catch (err) {
+          out().innerHTML = badLine(err.message);
+        }
+        spinBtn(btn, false);
+      };
+    });
+    let timer = 0;
+    const stop = () => {
+      clearTimeout(timer);
+      $(`#${p}-pin-wait`, root).hidden = true;
+      $(`#${p}-pin-start`, root).hidden = false;
+    };
+    $(`#${p}-pin-cancel`, root).onclick = stop;
+    $(`#${p}-pin`, root).onclick = async (e) => {
+      const btn = e.currentTarget;
+      const wait = $(`#${p}-pin-wait`, root);
+      out().innerHTML = "";
+      spinBtn(btn, true);
+      let got;
+      try {
+        got = await api(start, { method: "POST" });
+      } catch (err) {
+        out().innerHTML = badLine(err.message);
+        spinBtn(btn, false);
         return;
       }
-      $("#ad-pin-left", root).textContent = `Waiting for the code · expires in ${left} min`;
-      try {
-        const r = await api("/api/settings/alldebrid/pin/check", { method: "POST", body: { pin: pin.pin } });
-        if (!wait.isConnected || wait.hidden) return;
-        if (r.connected) {
-          // The server saved the key and chose AllDebrid; keep anything else typed here as it was.
-          const { ad_api_key, ad_configured, torrent_client, torrent_configured } = r.settings;
-          Object.assign(state.settings, { ad_api_key, ad_configured, torrent_client, torrent_configured });
-          form.ad_api_key.value = ad_api_key;
-          if (saved) Object.assign(saved, { ad_api_key, torrent_client });
-          choose("torrent_client", torrent_client);
-          pinStop();
-          adCard();
-          updateRdPill();
-          statuses();
-          out.innerHTML = adLine(r);
+      spinBtn(btn, false);
+      const code = got.pin || got.code;
+      $(`#${p}-pin-code`, root).textContent = code;
+      $(`#${p}-pin-link`, root).href = got.user_url;
+      $(`#${p}-pin-start`, root).hidden = true;
+      wait.hidden = false;
+      const ends = Date.now() + got.expires_in * 1000;
+      const every = Math.max(3, got.interval || 3) * 1000;
+      const tick = async () => {
+        if (!wait.isConnected || wait.hidden) return; // cancelled, or left Settings
+        const left = Math.ceil((ends - Date.now()) / 60000);
+        if (left <= 0) {
+          stop();
+          out().innerHTML = badLine(`That code has expired. Choose Connect ${name} to get a new one.`);
           return;
         }
-      } catch (err) {
-        pinStop();
-        out.innerHTML = `<div class="rd-result bad">${esc(err.message)}</div>`;
-        return;
-      }
-      pinTimer = setTimeout(tick, 3000);
+        $(`#${p}-pin-left`, root).textContent = `Waiting for the code · expires in ${left} min`;
+        try {
+          const r = await api(check, { method: "POST", body: got.pin ? { pin: code } : { code } });
+          if (!wait.isConnected || wait.hidden) return;
+          if (r.connected) {
+            // The server saved the key and chose this service; keep anything else typed here as it was.
+            const key = `${p}_api_key`;
+            const { torrent_client, torrent_configured } = r.settings;
+            Object.assign(state.settings, { [key]: r.settings[key], [`${p}_configured`]: true, torrent_client, torrent_configured });
+            form[key].value = r.settings[key];
+            if (saved) Object.assign(saved, { [key]: r.settings[key], torrent_client });
+            choose("torrent_client", torrent_client);
+            stop();
+            card();
+            updateRdPill();
+            statuses();
+            out().innerHTML = line(r);
+            return;
+          }
+        } catch (err) {
+          stop();
+          out().innerHTML = badLine(err.message);
+          return;
+        }
+        timer = setTimeout(tick, every);
+      };
+      timer = setTimeout(tick, every);
     };
-    pinTimer = setTimeout(tick, 3000);
+  };
+  const badLine = (text) => `<div class="rd-result bad">${esc(text)}</div>`;
+  codeConnect({
+    p: "ad", name: "AllDebrid", client: "alldebrid", site: "alldebrid.com",
+    start: "/api/settings/alldebrid/pin", check: "/api/settings/alldebrid/pin/check",
+    line: (u) => {
+      if (u.warning) return badLine(u.warning);
+      if (!u.premium && !u.trial) return badLine(`Connected as ${u.username}, but the account isn’t premium. AllDebrid needs premium for torrents.`);
+      const until = u.premium_until ? new Date(u.premium_until * 1000).toLocaleDateString(undefined, { dateStyle: "medium" }) : "";
+      return okLine(`Connected as <b>${esc(u.username)}</b> · ${u.trial ? "free trial" : "premium"}${until ? ` until ${esc(until)}` : ""}`);
+    },
+  });
+  codeConnect({
+    p: "tb", name: "TorBox", client: "torbox", site: "TorBox",
+    start: "/api/settings/torbox/code", check: "/api/settings/torbox/code/check",
+    line: (u) => {
+      if (u.warning) return badLine(u.warning);
+      const until = u.premium_until ? new Date(u.premium_until).toLocaleDateString(undefined, { dateStyle: "medium" }) : "";
+      return okLine(`Connected${u.email ? ` as <b>${esc(u.email)}</b>` : ""}${u.plan ? ` · ${esc(u.plan)} plan` : ""}${until ? ` until ${esc(until)}` : ""}`);
+    },
+  });
+  $("#test-pm", root).onclick = async (e) => {
+    const btn = e.currentTarget;
+    const out = $("#pm-result", root);
+    spinBtn(btn, true);
+    try {
+      await save(true);
+      const u = await api("/api/settings/test-pm", { method: "POST" });
+      const until = u.premium_until ? new Date(u.premium_until * 1000).toLocaleDateString(undefined, { dateStyle: "medium" }) : "";
+      out.innerHTML = u.premium ? okLine(`Connected · premium${until ? ` until ${esc(until)}` : ""}`)
+        : badLine("Connected, but the account isn’t premium. Premiumize needs premium for torrents.");
+      if (u.premium) $('[data-v="premiumize"] small', root).innerHTML = `<i class="dot ok"></i>Ready`;
+    } catch (err) {
+      out.innerHTML = badLine(err.message);
+    }
+    spinBtn(btn, false);
   };
 
   // Audiobookshelf: find the server, sign in once (which creates an API key), pick a library.
-  const badLine = (text) => `<div class="rd-result bad">${esc(text)}</div>`;
   let absServer = null; // what Find last found: {url, version, ready, password_login, insecure}
   const absConnected = () => Boolean(state.settings.audiobookshelf_url && state.settings.audiobookshelf_token);
   const absShow = async (libs) => {
@@ -2733,10 +2905,35 @@ function liveHTML(lib) {
 
 function libraryLiveHTML(lib) {
   if (!lib) {
+    if (asksFirst()) {
+      return `<div class="cta"><button class="btn primary" data-act="add">${I.bell} Ask for it</button></div>
+        <p class="cta-note">An admin approves requests before anything downloads.</p>`;
+    }
     return `<div class="cta">
       <button class="btn primary" data-act="add">${I.down} Download</button>
       <button class="btn" data-act="want">${I.bookmark} Add to Wanted</button>
     </div>`;
+  }
+  if (lib.status === "requested") {
+    const who = lib.requested_by_name ? esc(lib.requested_by_name) : "A listener";
+    const picked = !isCatalog(lib.source) && (lib.release || lib.title);
+    if (isAdmin()) {
+      return `<div class="state requested">
+          <div class="top"><span>${I.bell} ${who} asked for this</span><span>${esc(ago(lib.updated_at || lib.added_at))}</span></div>
+          <p>${picked ? `They picked <b>${esc(picked)}</b>${lib.size ? ` (${esc(lib.size)})` : ""}. Approve it to download that release, or pick another.`
+            : "Approve it and Narratarr starts looking for a release, or pick one yourself."}</p>
+        </div>
+        <div class="cta">
+          <button class="btn primary" data-act="approve">${I.check} Approve</button>
+          <button class="btn" data-act="releases">${I.list} ${picked ? "Pick another" : "Pick a release"}</button>
+          <button class="btn ghost danger" data-act="remove">${I.trash} Decline</button>
+        </div>`;
+    }
+    return `<div class="state requested">
+        <div class="top"><span>${I.bell} Awaiting approval</span><span>${esc(ago(lib.updated_at || lib.added_at))}</span></div>
+        <p>${mine(lib) ? "You asked for this" : `${who} asked for this`}${picked ? `, as <b>${esc(picked)}</b>` : ""}. It’ll download once an admin approves it.</p>
+      </div>
+      ${mine(lib) ? `<div class="cta"><button class="btn ghost danger" data-act="remove" data-mine>${I.trash} Take back request</button></div>` : ""}`;
   }
   if (lib.status === "wanted" && isCatalog(lib.source)) {
     return `<div class="state wanted">
@@ -2744,9 +2941,9 @@ function libraryLiveHTML(lib) {
         <p>${esc(wantedNote(lib))}</p>
       </div>
       <div class="cta">
-        <button class="btn primary" data-act="download">${I.search} Search now</button>
+        <button class="btn primary" data-act="download">${asksFirst() ? `${I.bell} Ask for it now` : `${I.search} Search now`}</button>
         <button class="btn" data-act="releases">${I.list} Pick a release</button>
-        <button class="btn ghost danger" data-act="remove">${I.trash} Remove</button>
+        <button class="btn ghost danger" data-act="remove" ${mine(lib) ? "data-mine" : ""}>${I.trash} ${isAdmin() ? "Remove" : "Take back request"}</button>
       </div>`;
   }
   if (ACTIVE.includes(lib.status)) {
@@ -2756,7 +2953,8 @@ function libraryLiveHTML(lib) {
         <div class="progress ${measurable ? "" : "indeterminate"}"><i style="width:${lib.progress || 0}%"></i></div>
         <div class="top" style="margin-top:10px"><span style="color:var(--text-3);font-size:12.5px">${esc(lib.status === "queued" ? "Waiting for a free slot…" : lib.detail)}</span></div>
       </div>
-      <div class="cta"><button class="btn" data-act="stop">${I.stop} Stop</button></div>`;
+      <div class="cta"><button class="btn" data-act="stop">${I.stop} Stop</button>
+        ${!isAdmin() && mine(lib) ? `<button class="btn ghost danger" data-act="remove" data-mine>${I.trash} Take back request</button>` : ""}</div>`;
   }
   if (lib.status === "completed" && isEbook(lib)) {
     const local = lib.source === "local";
@@ -2798,15 +2996,15 @@ function libraryLiveHTML(lib) {
   if (lib.status === "failed") {
     return `<div class="state failed">${esc(lib.error || "Something went wrong.")}</div>
       <div class="cta">
-        <button class="btn primary" data-act="download">${I.retry} Try again</button>
+        <button class="btn primary" data-act="download">${I.retry} ${asksFirst() ? "Ask to try again" : "Try again"}</button>
         ${lib.source !== "local" ? `<button class="btn" data-act="releases">${I.list} Pick another release</button>` : ""}
-        <button class="btn ghost danger" data-act="remove">${I.trash} Remove</button>
+        <button class="btn ghost danger" data-act="remove" ${mine(lib) ? "data-mine" : ""}>${I.trash} ${isAdmin() ? "Remove" : "Take back request"}</button>
       </div>`;
   }
   return `<div class="cta">
-      <button class="btn primary" data-act="download">${I.down} Download now</button>
+      <button class="btn primary" data-act="download">${asksFirst() ? `${I.bell} Ask for it` : `${I.down} Download now`}</button>
       <button class="btn" data-act="releases">${I.list} Other releases</button>
-      <button class="btn ghost danger" data-act="remove">${I.trash} Remove</button>
+      <button class="btn ghost danger" data-act="remove" ${mine(lib) ? "data-mine" : ""}>${I.trash} ${isAdmin() ? "Remove" : "Take back request"}</button>
     </div>`;
 }
 
@@ -2905,7 +3103,7 @@ function editDetails(lib) {
 // ---- following from the drawer ----
 
 function followHTML(b) {
-  if (!(b.source === "audible" || b.asin)) return "";
+  if (!(b.source === "audible" || b.asin) || asksFirst()) return "";
   const series = (b.series || [])[0];
   const author = (b.author || "").split(",")[0].trim();
   const followed = (kind, key) => state.follows.find((f) => f.kind === kind && (kind === "series" ? f.asin === key : f.name === key));
@@ -3064,10 +3262,11 @@ drawer.onclick = async (e) => {
     const lib = drawerBook();
     spinBtn(grabBtn, true);
     try {
-      await api(`/api/library/${lib.id}/grab`, { method: "POST", body: { url: r.url, source: r.source } });
+      const got = await api(`/api/library/${lib.id}/grab`, { method: "POST", body: { url: r.url, source: r.source } });
       $("#drawer-releases").innerHTML = "";
       await refreshLibrary();
-      toast(`Grabbed ${r.release || r.title}`, { kind: "ok", cover: lib.cover_url });
+      toast(got.status === "requested" ? `Asked for ${r.release || r.title}. It’ll download once an admin approves it.`
+        : `Grabbed ${r.release || r.title}`, { kind: "ok", cover: lib.cover_url });
     } catch (err) {
       toast(err.message, { kind: "err" });
       spinBtn(grabBtn, false);
@@ -3092,9 +3291,9 @@ drawer.onclick = async (e) => {
     if (act === "add" || act === "want") {
       const url = state.drawer.url;
       if (act === "want") {
-        await api("/api/library", { method: "POST", body: { url, download: false, source: state.drawer.source, ...(state.drawer.format ? { format: state.drawer.format } : {}) } });
+        const saved = await api("/api/library", { method: "POST", body: { url, download: false, source: state.drawer.source, ...(state.drawer.format ? { format: state.drawer.format } : {}) } });
         await refreshLibrary();
-        toast("Saved to Wanted", { kind: "ok" });
+        toast(saved.status === "requested" ? "Asked an admin to approve it" : "Saved to Wanted", { kind: "ok" });
       } else {
         await addBook(url, { cover: $(".hero-cover img:not(.blur)", drawer)?.src, source: state.drawer.source, protocol: state.drawer.protocol, format: state.drawer.format });
       }
@@ -3102,7 +3301,8 @@ drawer.onclick = async (e) => {
       const lib = drawerBook();
       const other = await api(`/api/library/${lib.id}/other-format`, { method: "POST" });
       await refreshLibrary();
-      toast(`Looking for the ${isEbook(other) ? "ebook" : "audiobook"} of ${other.title} too`, { kind: "ok", cover: other.cover_url });
+      toast(other.status === "requested" ? `Asked for the ${isEbook(other) ? "ebook" : "audiobook"} of ${other.title} too`
+        : `Looking for the ${isEbook(other) ? "ebook" : "audiobook"} of ${other.title} too`, { kind: "ok", cover: other.cover_url });
     } else if (act === "follow-author" || act === "follow-series") {
       spinBtn(btn, false);
       if (await followFromDrawer(act.slice(7), btn)) {
@@ -3337,6 +3537,8 @@ async function boot() {
     toast(`Couldn’t reach Narratarr: ${e.message}`, { kind: "err" });
   }
   state.libraryKey = state.library.map((b) => `${b.id}:${b.status}`).join("|");
+  document.body.classList.toggle("asks-first", asksFirst());
+  updateBadges();
   updateRdPill();
   window.addEventListener("hashchange", route);
   route();

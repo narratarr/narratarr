@@ -14,7 +14,7 @@ from . import config
 # Lifecycle of a book:
 #   wanted -> queued -> resolving -> caching -> downloading -> organizing -> completed
 #                                     any step can land in -> failed
-STATUSES = ("wanted", "queued", "resolving", "caching", "downloading", "organizing", "completed", "failed")
+STATUSES = ("requested", "wanted", "queued", "resolving", "caching", "downloading", "organizing", "completed", "failed")
 ACTIVE = ("queued", "resolving", "caching", "downloading", "organizing")
 
 SCHEMA = """
@@ -293,6 +293,7 @@ def stats() -> dict:
         "completed": counts["completed"],
         "active": sum(counts[s] for s in ACTIVE),
         "wanted": counts["wanted"],
+        "requested": counts["requested"],
         "failed": counts["failed"],
     }
 

@@ -2,6 +2,14 @@
 
 All notable changes to Narratarr. The app shows this under **Settings → Updates**.
 
+## Unreleased
+
+- **Approve what listeners ask for.** A listener's request now waits under **Library → Awaiting approval** until an admin approves it. Nothing is searched for or downloaded before then. If the listener picked a release, approving downloads exactly that one; otherwise Narratarr starts looking. Admins see a badge on Library, and the **Added to Wanted** notification goes out for every listener request, including a release they picked themselves, saying it's waiting. Requests made through the app API wait too, and still show as `wanted` to apps. This is on by default; turn it off under **Settings → Users → Requests**. While it's on, only admins follow authors and series, since following adds books by itself.
+- **Listeners can take back their own requests**, until the book is in the library. Other people's requests, and books already downloaded, stay an admin's to remove.
+- **TorBox and Premiumize** for torrents, alongside Real-Debrid and AllDebrid. TorBox connects with a short code, like AllDebrid, or an API key; Premiumize with its API key. Either can remove the torrent (and, for Premiumize, its files in your cloud) once Narratarr has the book. Narratarr only ever removes the folder a transfer made, never the folder it was put in.
+- **More folder layout variables:** `{series}`, `{series_number}` and `{year}`, next to `{author}`, `{title}` and `{narrator}`. When a book doesn't have one, that part is left out along with the words around it, so `{author}/{series}/Vol. {series_number} - {title}` files a book that isn't in a series as just `Author/Title`. Settings has a button for each variable and previews a book with and without a series. Imports read series and year from the files' tags. The README lists every variable.
+- Saving a folder layout with a variable Narratarr doesn't know, or one that would step outside the library folder, now explains what's wrong instead of quietly using the default.
+
 ## 0.8.0 — 2026-11-01
 
 - **Notifications.** A new **Settings → Notifications** page sends word to **ntfy**, **Gotify**, **Discord** or any **webhook** when someone adds a book to Wanted (with who asked for it), and when a download starts, finishes or fails. Choose the events for each destination, and press **Test** to send one straight away. A webhook can carry headers (such as `Authorization: Bearer …`) and a JSON body of your own, with fill-ins like `{title}`, `{author}`, `{cover}`, `{username}` and `{event}`. AudioBookRequest's `{bookTitle}`, `{bookAuthors}` and `{bookCover}` work too.

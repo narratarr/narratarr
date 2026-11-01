@@ -20,6 +20,7 @@ class RealDebridError(Exception):
 class RealDebrid:
     label = "Real-Debrid"
     prefix = ""  # its job ids are stored as they are (AllDebrid's carry "ad:")
+    delete_setting = "delete_from_rd_after"
 
     def __init__(self, api_key: str, transport: httpx.AsyncBaseTransport | None = None):
         if not api_key:

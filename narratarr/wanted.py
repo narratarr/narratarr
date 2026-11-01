@@ -129,8 +129,8 @@ def best(found: list[dict]) -> dict | None:
     return None
 
 
-async def grab(book_id: int, url: str, source_name: str) -> dict:
-    """Attach a release to a Wanted book and queue it, keeping the book's own metadata."""
+async def grab(book_id: int, url: str, source_name: str, status: str = "queued") -> dict:
+    """Attach a release to a Wanted book and queue it (or hold it for approval), keeping the book's own metadata."""
     book = db.get(book_id)
     src = get_source(source_name)
     d = await src.details(url)
@@ -140,7 +140,7 @@ async def grab(book_id: int, url: str, source_name: str) -> dict:
         trackers=d.trackers, files=d.files, format=d.format or book["format"], bitrate=d.bitrate,
         size=d.size or book["size"], indexer=d.indexer, release=d.release or d.title,
         description=book["description"] or d.description, cover_url=book["cover_url"] or d.cover_url,
-        status="queued", error="", detail="", progress=0, client_job_id="", download_client="", rd_torrent_id="",
+        status=status, error="", detail="", progress=0, client_job_id="", download_client="", rd_torrent_id="",
         search_note="",
     )
     return db.get(book_id)
@@ -283,7 +283,7 @@ def url_for(url: str, kind: str) -> str:
     return url if kind == "audiobook" else f"{url}#ebook"
 
 
-def add_wanted(b: dict, kind: str = "audiobook", source: str = "audible") -> dict | None:
+def add_wanted(b: dict, kind: str = "audiobook", source: str = "audible", status: str = "wanted") -> dict | None:
     """Add a catalog book to Wanted in one format, unless the library already has it in that format."""
     url = url_for(b["url"], kind)
     if in_library(b.get("asin") or "", b["title"], b["author"], kind=kind) or db.get_by_url(url):
@@ -293,13 +293,13 @@ def add_wanted(b: dict, kind: str = "audiobook", source: str = "audible") -> dic
         "source": source, "source_url": url, "asin": b.get("asin") or "", "title": b["title"], "author": b["author"],
         "narrators": b.get("narrators") or [] if audio else [], "cover_url": b.get("cover_url") or "",
         "description": b.get("description") or "", "language": b.get("language") or "",
-        "series": b.get("series") or [], "released": b.get("released") or "", "status": "wanted", "kind": kind,
+        "series": b.get("series") or [], "released": b.get("released") or "", "status": status, "kind": kind,
         # Audible's runtime is the audiobook's; Open Library's page count is the book's.
         "length": b.get("length") or "" if audio == (source == "audible") else "",
     })
 
 
-def want_other_format(book: dict) -> tuple[dict, bool]:
+def want_other_format(book: dict, status: str = "wanted") -> tuple[dict, bool]:
     """Add the other format of a library book to Wanted. Returns (that row, whether it's new)."""
     kind = "ebook" if kind_of(book) == "audiobook" else "audiobook"
     have = companion(book)
@@ -312,7 +312,8 @@ def want_other_format(book: dict) -> tuple[dict, bool]:
     else:  # a book from a release or your own files: Open Library stands in as its catalog
         source, url = "openlibrary", "https://openlibrary.org/search?" + urlencode(
             {"title": main_title(book["title"]), "author": first_author(book["author"])})
-    added = add_wanted({**book, "url": url, "length": book["length"] if kind_of(book) == kind else ""}, kind, source)
+    added = add_wanted({**book, "url": url, "length": book["length"] if kind_of(book) == kind else ""}, kind, source,
+                       status)
     if added:
         return added, True
     # Already there: under this link, or as the same book in a form in_library recognises.

@@ -98,5 +98,6 @@ def test_edit_needs_a_title_and_a_book(client):
 
 def test_only_admins_edit():
     assert auth.admin_only("PATCH", "/api/library/3")
-    assert auth.admin_only("DELETE", "/api/library/3")
+    assert not auth.admin_only("DELETE", "/api/library/3")  # checked in the route: listeners cancel their own
+    assert auth.admin_only("POST", "/api/library/3/approve")
     assert not auth.admin_only("PUT", "/api/library/3/progress")

@@ -173,6 +173,8 @@ def _series(series: list[dict]) -> list[dict]:
 
 
 def public_status(status: str) -> str:
+    if status == "requested":  # waiting for an admin: to an app, it's still wanted
+        return "wanted"
     if status in ("wanted", "failed"):
         return status
     return "available" if status == "completed" else "downloading"
@@ -194,7 +196,8 @@ def request_out(b: dict, names: dict[int, str]) -> dict:
         "status": status,
         "stage": STAGES.get(b["status"]) if status == "downloading" else None,
         "progress": round(float(b.get("progress") or 0), 1) if status == "downloading" else None,
-        "message": (b.get("error") if status == "failed" else b.get("search_note") if status == "wanted"
+        "message": ("Waiting for an admin to approve it." if b["status"] == "requested"
+                    else b.get("error") if status == "failed" else b.get("search_note") if status == "wanted"
                     else b.get("detail")) or None,
         "requested_by": {"id": by, "username": names[by]} if by in names else None,
         "requested_at": _iso(b["added_at"]),
@@ -540,8 +543,11 @@ async def create_request(body: NewRequest, me: Caller, response: Response):
     have = wanted.in_library(body.asin, b["title"], b["author"], kind=kind)
     if have:  # the same book from another source, or another edition of it
         return request_out(have, _usernames())
+    from . import api as core  # here, not at the top: api.py mounts this module
+
+    hold = core._needs_approval(me)
     try:
-        added = wanted.add_wanted(b, kind)
+        added = wanted.add_wanted(b, kind, status="requested" if hold else "wanted")
     except sqlite3.IntegrityError:  # requested twice at the same moment
         added = None
     if added is None:
@@ -553,9 +559,8 @@ async def create_request(body: NewRequest, me: Caller, response: Response):
     db.update(added["id"], requested_by=me["id"])
     log.info("%s requested %s (%s, %s) through an app", me["username"], b["title"], body.asin, kind)
     notify.emit("wanted", db.get(added["id"]), me["username"])
-    from . import api as core  # here, not at the top: api.py mounts this module
-
-    core._background(core._search_in_background(added["id"]))
+    if not hold:
+        core._background(core._search_in_background(added["id"]))
     response.status_code = 201
     response.headers["Location"] = f"/api/v1/requests/{added['id']}"
     return request_out(db.get(added["id"]), _usernames())

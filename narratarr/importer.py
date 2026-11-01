@@ -112,25 +112,40 @@ def read_ebook_meta(book: Path, root: Path) -> dict:
 
 # Tags made for the narrator: Audible's ©nrt in M4B files, and the custom NARRATOR tag many taggers write.
 _NARRATOR_KEYS = ("©nrt", "----:com.apple.iTunes:NARRATOR", "TXXX:NARRATOR", "narrator")
+# Where Audiobookshelf and the common taggers keep the series and the book's number in it.
+_SERIES_KEYS = ("----:com.apple.iTunes:SERIES", "TXXX:SERIES", "series", "©mvn", "MVNM")
+_SERIES_PART_KEYS = ("----:com.apple.iTunes:SERIES-PART", "TXXX:SERIES-PART", "series-part", "©mvi", "MVIN")
 
 
-def _narrator_tag(f: Path) -> str:
+def _raw_tags(f: Path, *key_sets: tuple[str, ...]) -> list[str]:
+    """The first value found for each set of tag names (case doesn't matter), as text."""
     try:
         audio = mutagen.File(f)
     except Exception:
-        return ""
+        audio = None
     if not audio or not audio.tags:
-        return ""
-    wanted = {k.lower() for k in _NARRATOR_KEYS}
-    for key in audio.tags.keys():
-        if str(key).lower() in wanted:
-            value = audio.tags[key]
+        return ["" for _ in key_sets]
+    keys = {str(k).lower(): k for k in audio.tags.keys()}
+    found = []
+    for names in key_sets:
+        text = ""
+        for name in names:
+            if name.lower() not in keys:
+                continue
+            value = audio.tags[keys[name.lower()]]
             value = getattr(value, "text", value)  # an ID3 frame holds its text in .text
             value = value[0] if isinstance(value, list) and value else value
             if isinstance(value, bytes):  # MP4 freeform tags are raw bytes
                 value = value.decode("utf-8", errors="ignore")
-            return str(value).strip()
-    return ""
+            text = str(value).strip()
+            if text:
+                break
+        found.append(text)
+    return found
+
+
+def _narrator_tag(f: Path) -> str:
+    return _raw_tags(f, _NARRATOR_KEYS)[0]
 
 
 def _tags(f: Path) -> dict:
@@ -141,13 +156,17 @@ def _tags(f: Path) -> dict:
     if not audio or not audio.tags:
         return {}
     first = lambda k: (audio.tags.get(k) or [""])[0].strip()  # noqa: E731
+    narrator, series, part = _raw_tags(f, _NARRATOR_KEYS, _SERIES_KEYS, _SERIES_PART_KEYS)
     return {
         "album": first("album"),
         "title": first("title"),
         "albumartist": first("albumartist"),
         "artist": first("artist"),
         "composer": first("composer"),  # Audible exports and many taggers put the narrator here
-        "narrator": _narrator_tag(f),
+        "narrator": narrator,
+        "series": series,
+        "series_part": part,
+        "date": first("date"),
     }
 
 
@@ -187,7 +206,8 @@ def _readable(tag: str) -> str:
 
 def read_meta(book: Path, root: Path) -> dict:
     files = [book] if book.is_file() else audio_files(book)
-    tags = {k: _readable(v) for k, v in (_tags(files[0]) if files else {}).items()}
+    raw = _tags(files[0]) if files else {}
+    tags = {k: _readable(v) for k, v in raw.items()}
     name = book.stem if book.is_file() else book.name
     title = tags.get("album") or (tags.get("title") if len(files) == 1 else "") or ""
     author, narrator = pick_people(
@@ -219,6 +239,8 @@ def read_meta(book: Path, root: Path) -> dict:
         "format": (files[0].suffix.lstrip(".").upper() if files else ""),
         "single_file": book.is_file(),
         "kind": "audiobook",
+        "series": [{"asin": "", "title": raw["series"], "sequence": raw.get("series_part", "")}] if raw.get("series") else [],
+        "released": raw.get("date", "")[:10],
     }
 
 
@@ -252,6 +274,8 @@ def as_book(found: dict, mode: str, status: str) -> dict:
         "import_mode": mode,
         "status": status,
         "kind": found.get("kind", "audiobook"),
+        "series": found.get("series") or [],
+        "released": found.get("released", ""),
     }
     if mode == "inplace":
         book.update(path=str(path), progress=100, completed_at=time.time())

@@ -32,9 +32,11 @@ from pathlib import Path
 
 import httpx
 
-from . import audiobookshelf, config, db, downloaders, ebooks, importer, media, notify, wanted
+from . import audiobookshelf, config, db, downloaders, ebooks, importer, layout, media, notify, wanted
 from .downloaders import ClientError, debrid_client
-from .alldebrid import AllDebrid, AllDebridError
+from .alldebrid import AllDebridError
+from .premiumize import PremiumizeError
+from .torbox import TorBoxError
 from .realdebrid import RealDebrid, RealDebridError
 from .sources import Details, ProwlarrError, get_source
 from .sources.prowlarr import fetch
@@ -58,16 +60,8 @@ def safe_name(part: str, fallback: str = "Unknown") -> str:
 
 def destination(book: dict, settings: config.Settings) -> Path:
     root = Path(settings.library_dir).expanduser().resolve()
-    values = {
-        "author": safe_name(book["author"], "Unknown Author"),
-        "title": safe_name(book["title"], "Untitled"),
-        "narrator": safe_name(", ".join(book["narrators"][:2]), "Unknown Narrator"),
-    }
-    template = settings.folder_template or "{author}/{title}"
-    try:
-        parts = [safe_name(p.format(**values)) for p in template.split("/") if p.strip()]
-    except (KeyError, IndexError, ValueError):
-        parts = [values["author"], values["title"]]
+    parts = layout.folders(settings.folder_template, book) or [
+        safe_name(book["author"], "Unknown Author"), safe_name(book["title"], "Untitled")]
     dest = root.joinpath(*parts).resolve()
     if root not in dest.parents:
         raise ValueError("Folder template points outside the library folder")
@@ -347,7 +341,7 @@ class Worker:
         except asyncio.CancelledError:
             raise
         except (
-            RealDebridError, AllDebridError, ClientError, ProwlarrError, httpx.HTTPError, ValueError, OSError, zipfile.BadZipFile
+            RealDebridError, AllDebridError, TorBoxError, PremiumizeError, ClientError, ProwlarrError, httpx.HTTPError, ValueError, OSError, zipfile.BadZipFile
         ) as e:
             log.warning("Book %s failed: %s", book_id, readable_error(e))
             db.update(book_id, status="failed", error=readable_error(e), speed=0, detail="")
@@ -420,7 +414,8 @@ class Worker:
         await self._finish(book, tmp, settings)
 
     async def _process_torrent(self, book: dict, source) -> None:
-        """Torrents through a cloud service (Real-Debrid or AllDebrid): it fetches them, we download the files."""
+        """Torrents through a cloud service (Real-Debrid, AllDebrid, TorBox or Premiumize): it fetches them, we download
+        the files."""
         settings = config.load()
         book_id = book["id"]
         async with debrid_client(settings, self._transport) as cloud:
@@ -443,11 +438,11 @@ class Worker:
             tmp = self._fresh_tmp(book, settings)
             await self._download(book_id, direct, tmp)
 
-            remove = settings.delete_from_ad_after if isinstance(cloud, AllDebrid) else settings.delete_from_rd_after
+            remove = getattr(settings, cloud.delete_setting)
             if remove:
                 try:
                     await cloud.remove(job_id)
-                except (RealDebridError, AllDebridError, httpx.HTTPError):
+                except (RealDebridError, AllDebridError, TorBoxError, PremiumizeError, httpx.HTTPError):
                     log.info("Couldn't remove torrent %s from %s", job_id, cloud.label)
 
         await self._finish(book, tmp, settings, rd_torrent_id="" if remove else cloud.prefix + job_id)
