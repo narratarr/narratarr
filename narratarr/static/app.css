@@ -481,6 +481,10 @@ img { display: block; }
 .tile-group + .tile-group { flex: 3 1 360px; }
 .tile-group .choice-tiles { grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)); }
 .tile-label { display: block; margin: 0 0 8px 2px; font-size: 11.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-3); }
+.meta-edit { display: grid; gap: 14px; margin: 4px 0 8px; padding: 18px; border-radius: 16px; background: var(--surface-2); text-align: left; }
+.meta-edit h4 { margin: 0; font: 500 18px var(--serif); }
+.meta-edit .hint, .meta-edit .cta { margin: 0; }
+.meta-edit > p.hint { font-size: 12.5px; line-height: 1.5; color: var(--text-3); }
 .pin-card { padding: 16px 18px; border-radius: 16px; background: var(--surface-2); }
 .pin-start { display: flex; align-items: center; justify-content: space-between; gap: 14px 16px; flex-wrap: wrap; }
 .pin-start > div:first-child { flex: 1 1 260px; display: grid; gap: 4px; }
@@ -1033,7 +1037,7 @@ body.has-player .save-float { bottom: 104px; }
 
 /* Listeners browse, request and listen; running the place is for admins. */
 body.listener [data-nav="settings"], body.listener #update-pill, body.listener #rd-pill,
-body.listener #import-btn, body.listener [data-import], body.listener [data-act="remove"] { display: none !important; }
+body.listener #import-btn, body.listener [data-import], body.listener [data-act="remove"], body.listener [data-act="edit"] { display: none !important; }
 
 .account { display: flex; align-items: center; gap: 11px; width: 100%; padding: 8px 10px 8px 8px; border: 1px solid transparent; border-radius: 14px; background: none; text-align: left; cursor: pointer; transition: background 0.2s, border-color 0.2s; }
 .account:hover { background: var(--surface-2); border-color: var(--border); }

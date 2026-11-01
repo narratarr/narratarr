@@ -51,11 +51,15 @@ class Settings:
     qbittorrent_username: str = ""
     qbittorrent_password: str = ""
     qbittorrent_category: str = "audiobooks"
+    qbittorrent_folder: str = ""  # where it saves, as qBittorrent sees it ("" = its own default)
     transmission_url: str = ""
     transmission_username: str = ""
     transmission_password: str = ""
+    transmission_label: str = "audiobooks"
+    transmission_folder: str = ""
     deluge_url: str = ""
     deluge_password: str = ""
+    deluge_folder: str = ""
     # When a download client sees its downloads under a different path (e.g. another container).
     path_remote: str = ""
     path_local: str = ""

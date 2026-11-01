@@ -110,6 +110,29 @@ def read_ebook_meta(book: Path, root: Path) -> dict:
     }
 
 
+# Tags made for the narrator: Audible's ©nrt in M4B files, and the custom NARRATOR tag many taggers write.
+_NARRATOR_KEYS = ("©nrt", "----:com.apple.iTunes:NARRATOR", "TXXX:NARRATOR", "narrator")
+
+
+def _narrator_tag(f: Path) -> str:
+    try:
+        audio = mutagen.File(f)
+    except Exception:
+        return ""
+    if not audio or not audio.tags:
+        return ""
+    wanted = {k.lower() for k in _NARRATOR_KEYS}
+    for key in audio.tags.keys():
+        if str(key).lower() in wanted:
+            value = audio.tags[key]
+            value = getattr(value, "text", value)  # an ID3 frame holds its text in .text
+            value = value[0] if isinstance(value, list) and value else value
+            if isinstance(value, bytes):  # MP4 freeform tags are raw bytes
+                value = value.decode("utf-8", errors="ignore")
+            return str(value).strip()
+    return ""
+
+
 def _tags(f: Path) -> dict:
     try:
         audio = mutagen.File(f, easy=True)
@@ -124,7 +147,37 @@ def _tags(f: Path) -> dict:
         "albumartist": first("albumartist"),
         "artist": first("artist"),
         "composer": first("composer"),  # Audible exports and many taggers put the narrator here
+        "narrator": _narrator_tag(f),
     }
+
+
+_READ_BY = re.compile(r"\s*(?:[,;(\[-]\s*)?\b(?:read|narrated|performed)\s+by\b\s*(.+?)[)\]]?\s*$", re.I)
+
+
+def _names(value: str) -> list[str]:
+    return [n.strip() for n in re.split(r"[,;&/]| and ", value) if n.strip()]
+
+
+def pick_people(artist: str, albumartist: str, narrator: str) -> tuple[str, str]:
+    """(author, narrator) from a file's tags.
+
+    Audiobookshelf reads the author from Artist, then Album artist, and so do we, so both apps agree.
+    Many files put the narrator in one of those, so a value that's only the narrator never counts
+    as the author, and "Author, read by Narrator" is split in two.
+    """
+    for value in (artist, albumartist):
+        if m := _READ_BY.search(value or ""):
+            narrator = narrator or m.group(1).strip()
+    artist, albumartist = (_READ_BY.sub("", v or "").strip() for v in (artist, albumartist))
+    readers = {n.lower() for n in _names(narrator)}
+    for value in (artist, albumartist):
+        names = _names(value)
+        if not names:
+            continue
+        kept = [n for n in names if n.lower() not in readers]
+        if kept:
+            return (value if len(kept) == len(names) else ", ".join(kept)), narrator
+    return artist or albumartist, narrator  # only the narrator's name anywhere: a book read by its author
 
 
 def _readable(tag: str) -> str:
@@ -137,8 +190,9 @@ def read_meta(book: Path, root: Path) -> dict:
     tags = {k: _readable(v) for k, v in (_tags(files[0]) if files else {}).items()}
     name = book.stem if book.is_file() else book.name
     title = tags.get("album") or (tags.get("title") if len(files) == 1 else "") or ""
-    author = tags.get("albumartist") or tags.get("artist") or ""
-    narrator = tags.get("composer") or ""
+    author, narrator = pick_people(
+        tags.get("artist", ""), tags.get("albumartist", ""), tags.get("narrator") or tags.get("composer") or ""
+    )
     if not title or not author:
         guess_author, guess_title = "", name
         if " - " in name:

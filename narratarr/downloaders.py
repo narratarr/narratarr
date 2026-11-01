@@ -95,4 +95,13 @@ def debrid_client(s: config.Settings, transport: httpx.AsyncBaseTransport | None
 
 
 def category_for(s: config.Settings, name: str) -> str:
-    return {"sabnzbd": s.sabnzbd_category, "nzbget": s.nzbget_category, "qbittorrent": s.qbittorrent_category}.get(name, "")
+    """The category (or label) a client files Narratarr's downloads under."""
+    return {
+        "sabnzbd": s.sabnzbd_category, "nzbget": s.nzbget_category,
+        "qbittorrent": s.qbittorrent_category, "transmission": s.transmission_label,
+    }.get(name, "")
+
+
+def folder_for(s: config.Settings, name: str) -> str:
+    """Where a torrent client should save Narratarr's downloads, as the client sees it ("" = its default)."""
+    return {"qbittorrent": s.qbittorrent_folder, "transmission": s.transmission_folder, "deluge": s.deluge_folder}.get(name, "")

@@ -68,12 +68,17 @@ class Transmission:
     async def version(self) -> str:
         return str((await self._call("session-get")).get("version", "")).split(" ")[0]
 
-    async def add(self, kind: str, payload: str | bytes, tag: str = "", category: str = "") -> str:
+    async def add(self, kind: str, payload: str | bytes, tag: str = "", category: str = "", folder: str = "") -> str:
+        """category is the user's label for Narratarr's torrents; folder is where to save, as Transmission sees it."""
         args = {"filename": payload} if kind == "magnet" else {"metainfo": base64.b64encode(payload).decode()}
+        if folder:
+            args["download-dir"] = folder
         res = await self._call("torrent-add", args)
         added = res.get("torrent-added")
         if added:  # label it so we know it's ours, and may delete its files if the user stops it
-            await self._call("torrent-set", {"ids": [added["id"]], "labels": [tag or "narratarr"]})
+            label = category.replace(",", " ").strip()  # Transmission labels can't hold commas
+            labels = [tag or "narratarr", *([label] if label and label != tag else [])]
+            await self._call("torrent-set", {"ids": [added["id"]], "labels": labels})
         added = added or res.get("torrent-duplicate")
         if not added:
             raise TransmissionError("Transmission didn't accept the torrent.")

@@ -255,9 +255,9 @@ Already running an \*arr stack? Narratarr searches the indexers in your Prowlarr
 | | **NZBGet** | Address (e.g. `http://localhost:6789`) plus its ControlUsername / ControlPassword from *Settings → Security* |
 | **Torrents** | **Real-Debrid** | API key from [real-debrid.com/apitoken](https://real-debrid.com/apitoken). Nothing is shared from your machine |
 | | **AllDebrid** | Choose **Connect AllDebrid** and enter the short code at [alldebrid.com/pin](https://alldebrid.com/pin/), or paste a key from [alldebrid.com/apikeys](https://alldebrid.com/apikeys). The first time, AllDebrid may email you to approve your server's location. It refuses some data-centre and VPN addresses |
-| | **qBittorrent** | Web UI address, username and password. Torrents get an `audiobooks` category |
-| | **Transmission** | Address (e.g. `http://localhost:9091`), plus a username and password if you set one |
-| | **Deluge** | Web UI address (e.g. `http://localhost:8112`) and its password. Deluge has no username. Torrents are labelled `narratarr-<book id>` when the Label plugin is enabled |
+| | **qBittorrent** | Web UI address, username and password. Torrents get an `audiobooks` category, and can go to a download folder of their own |
+| | **Transmission** | Address (e.g. `http://localhost:9091`), plus a username and password if you set one. Torrents get an `audiobooks` label (Transmission 3.0+), and can go to a download folder of their own |
+| | **Deluge** | Web UI address (e.g. `http://localhost:8112`) and its password. Deluge has no username. Torrents are labelled `narratarr-<book id>` when the Label plugin is enabled, and can go to a download folder of their own |
 
 Press **Test** next to each one. Once Prowlarr is connected, a **Prowlarr** tab (and an **Audible catalog** tab) appears on Discover. Each Prowlarr result shows its indexer, size, format, and whether it's Usenet or a torrent. Open one and Narratarr matches the release name to the real book, so it's filed under the right author and title, with cover art.
 

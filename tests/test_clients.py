@@ -204,6 +204,49 @@ async def test_transmission_with_path_mapping(isolated_data):
     assert (original / "Dune.m4b").exists()
 
 
+async def test_transmission_saves_to_its_folder_with_the_label(isolated_data):
+    original = finished_download(isolated_data)
+    config.update({"torrent_client": "transmission", "transmission_url": "http://transmission:9091",
+                   "transmission_folder": "/data/torrents/books", "transmission_label": "books, audio",
+                   "path_remote": "/data/torrents", "path_local": str(original.parent)})
+    fake = FakeTransmission(original)
+    book = torrent_book()
+
+    await Worker(transport=httpx.MockTransport(fake)).process(book["id"])
+
+    assert db.get(book["id"])["status"] == "completed"
+    assert fake.added["download-dir"] == "/data/torrents/books"
+    assert fake.labels == [f"narratarr-{book['id']}", "books  audio"]  # no commas: Transmission refuses them
+
+
+async def test_transmission_defaults_leave_the_folder_alone(isolated_data):
+    original = finished_download(isolated_data)
+    config.update({"torrent_client": "transmission", "transmission_url": "http://transmission:9091",
+                   "path_remote": "/data/torrents", "path_local": str(original.parent)})
+    fake = FakeTransmission(original)
+    book = torrent_book()
+
+    await Worker(transport=httpx.MockTransport(fake)).process(book["id"])
+
+    assert "download-dir" not in fake.added
+    assert fake.labels == [f"narratarr-{book['id']}", "audiobooks"]
+
+
+async def test_qbittorrent_folder_overrides_automatic_management(isolated_data):
+    config.update({"torrent_client": "qbittorrent", "qbittorrent_url": "http://qbit:8080",
+                   "qbittorrent_username": "admin", "qbittorrent_password": "pw",
+                   "qbittorrent_folder": "/data/torrents/books"})
+    original = finished_download(isolated_data)
+    fake = FakeQbit(original)
+    book = torrent_book()
+
+    await Worker(transport=httpx.MockTransport(fake)).process(book["id"])
+
+    sent = fake.added.decode()
+    assert 'name="savepath"' in sent and "/data/torrents/books" in sent
+    assert 'name="autoTMM"' in sent
+
+
 class FakeDeluge:
     """Deluge 2.x, faithful where it matters.
 
@@ -287,6 +330,21 @@ async def test_deluge_with_path_mapping(isolated_data):
     assert fake.torrents[HASH]["label"] == f"narratarr-{book['id']}"
     assert done["client_job_id"] == HASH  # Deluge's upper-case hash normalised
     assert (original / "Dune.m4b").exists()
+    assert "download_location" not in fake.options
+
+
+async def test_deluge_saves_to_its_folder(isolated_data):
+    original = finished_download(isolated_data)
+    config.update({"torrent_client": "deluge", "deluge_url": "http://deluge:8112", "deluge_password": "pw",
+                   "deluge_folder": "/data/torrents/books",
+                   "path_remote": "/data/torrents", "path_local": str(original.parent)})
+    fake = FakeDeluge(original)
+    book = torrent_book()
+
+    await Worker(transport=httpx.MockTransport(fake)).process(book["id"])
+
+    assert db.get(book["id"])["status"] == "completed"
+    assert fake.options["download_location"] == "/data/torrents/books"
 
 
 async def test_deluge_reports_an_rpc_error(isolated_data):

@@ -74,10 +74,13 @@ class QBittorrent:
     async def version(self) -> str:
         return (await self._call("GET", "/api/v2/app/version")).text.strip()
 
-    async def add(self, kind: str, payload: str | bytes, tag: str, category: str = "") -> str:
+    async def add(self, kind: str, payload: str | bytes, tag: str, category: str = "", folder: str = "") -> str:
         fields = {"tags": (None, tag)}
         if category:
             fields["category"] = (None, category)
+        if folder:  # a folder of its own wins over the category's (automatic management would move it)
+            fields["savepath"] = (None, folder)
+            fields["autoTMM"] = (None, "false")
         if kind == "magnet":
             fields["urls"] = (None, payload)
         else:

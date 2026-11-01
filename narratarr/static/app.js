@@ -1609,6 +1609,11 @@ function Settings(root, page) {
               <div class="field"><label for="qbittorrent_password">Password</label><input class="input mono" id="qbittorrent_password" name="qbittorrent_password" type="password" value="${esc(s.qbittorrent_password)}" /></div>
               <div class="field"><label for="qbittorrent_category">Category</label><input class="input mono" id="qbittorrent_category" name="qbittorrent_category" value="${esc(s.qbittorrent_category)}" /></div>
             </div>
+            <div class="field">
+              <label for="qbittorrent_folder">Download folder</label>
+              <input class="input mono" id="qbittorrent_folder" name="qbittorrent_folder" placeholder="qBittorrent’s default" value="${esc(s.qbittorrent_folder)}" />
+              <span class="hint">Optional. Where qBittorrent saves Narratarr’s books, as qBittorrent sees it, e.g. <code>/data/torrents/books</code>. Keeps them apart from your other downloads.</span>
+            </div>
           </div>
           <div class="client-fields" data-for="torrent_client:transmission">
             <div class="field">
@@ -1622,6 +1627,16 @@ function Settings(root, page) {
             <div class="set-grid">
               <div class="field"><label for="transmission_username">Username</label><input class="input mono" id="transmission_username" name="transmission_username" value="${esc(s.transmission_username)}" autocomplete="off" placeholder="If you set one" /></div>
               <div class="field"><label for="transmission_password">Password</label><input class="input mono" id="transmission_password" name="transmission_password" type="password" value="${esc(s.transmission_password)}" /></div>
+            </div>
+            <div class="field">
+              <label for="transmission_label">Label</label>
+              <input class="input mono" id="transmission_label" name="transmission_label" value="${esc(s.transmission_label)}" />
+              <span class="hint">Optional. Added to every torrent Narratarr sends, so you can filter them in Transmission 3.0 or later.</span>
+            </div>
+            <div class="field">
+              <label for="transmission_folder">Download folder</label>
+              <input class="input mono" id="transmission_folder" name="transmission_folder" placeholder="Transmission’s default" value="${esc(s.transmission_folder)}" />
+              <span class="hint">Optional. Where Transmission saves Narratarr’s books, as Transmission sees it, e.g. <code>/data/torrents/books</code>. Keeps them apart from your other downloads.</span>
             </div>
           </div>
           <div class="client-fields" data-for="torrent_client:deluge">
@@ -1637,6 +1652,11 @@ function Settings(root, page) {
               <label for="deluge_password">Password</label>
               <input class="input mono" id="deluge_password" name="deluge_password" type="password" value="${esc(s.deluge_password)}" />
               <span class="hint">Deluge’s web password (it has no username). Set it under Preferences → Interface → Password.</span>
+            </div>
+            <div class="field">
+              <label for="deluge_folder">Download folder</label>
+              <input class="input mono" id="deluge_folder" name="deluge_folder" placeholder="Deluge’s default" value="${esc(s.deluge_folder)}" />
+              <span class="hint">Optional. Where Deluge saves Narratarr’s books, as Deluge sees it, e.g. <code>/data/torrents/books</code>. Keeps them apart from your other downloads.</span>
             </div>
           </div>
         </div>
@@ -2500,6 +2520,7 @@ function libraryLiveHTML(lib) {
       <div class="state done">${local ? "Imported" : "Downloaded"} ${esc(ago(lib.completed_at))}${local && lib.import_mode === "inplace" ? ", left where it was," : ""} to<code>${esc(lib.path)}</code></div>
       <div class="cta" style="margin-top:14px">
         ${local ? "" : `<button class="btn sm ghost" data-act="download">${I.retry} Download again</button>`}
+        <button class="btn sm ghost" data-act="edit">${I.pencil} Edit details</button>
         <button class="btn sm ghost danger" data-act="remove">${I.trash} Remove</button>
       </div>`;
   }
@@ -2517,6 +2538,7 @@ function libraryLiveHTML(lib) {
       <div class="state done">${local ? "Imported" : "Downloaded"} ${esc(ago(lib.completed_at))}${local && lib.import_mode === "inplace" ? ", left where it was," : ""} to<code>${esc(lib.path)}</code></div>
       <div class="cta" style="margin-top:14px">
         ${local ? "" : `<button class="btn sm ghost" data-act="download">${I.retry} Download again</button>`}
+        <button class="btn sm ghost" data-act="edit">${I.pencil} Edit details</button>
         <button class="btn sm ghost danger" data-act="remove">${I.trash} Remove</button>
       </div>`;
   }
@@ -2585,6 +2607,46 @@ async function showReleases(lib) {
   } catch (e) {
     box.innerHTML = `<div class="releases"><h4>Releases</h4><div class="state failed">${esc(e.message)}</div></div>`;
   }
+}
+
+// ---- correcting a book's details ----
+
+function editDetails(lib) {
+  const head = $("#meta-head", drawer);
+  if (!lib || !head || $("#meta-edit", head)) return;
+  const shown = head.innerHTML;
+  head.innerHTML = `<form class="meta-edit" id="meta-edit" autocomplete="off">
+      <h4>Edit details</h4>
+      <div class="field"><label for="me-title">Title</label><input class="input" id="me-title" name="title" value="${esc(lib.title)}" required /></div>
+      <div class="field"><label for="me-author">Author</label><input class="input" id="me-author" name="author" value="${esc(lib.author || "")}" /></div>
+      <div class="field"><label for="me-narrators">Narrated by</label><input class="input" id="me-narrators" name="narrators" value="${esc((lib.narrators || []).join(", "))}" />
+        <span class="hint">Separate several names with commas.</span></div>
+      <p class="hint">This changes what Narratarr shows, and how it matches authors you follow. Your files and folders stay as they are.</p>
+      <div class="cta"><button class="btn primary" type="submit">Save</button><button class="btn ghost" type="button" data-cancel>Cancel</button></div>
+    </form>`;
+  const form = $("#meta-edit", head);
+  const f = form.elements;
+  f.title.focus();
+  $("[data-cancel]", form).onclick = () => { head.innerHTML = shown; };
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const btn = $('[type="submit"]', form);
+    spinBtn(btn, true);
+    try {
+      const body = {
+        title: f.title.value,
+        author: f.author.value,
+        narrators: f.narrators.value.split(/[,;]/).map((n) => n.trim()).filter(Boolean),
+      };
+      const saved = await api(`/api/library/${lib.id}`, { method: "PATCH", body });
+      await refreshLibrary();
+      toast("Details saved", { kind: "ok" });
+      openDrawer({ bookId: saved.id });
+    } catch (err) {
+      toast(err.message, { kind: "err" });
+      spinBtn(btn, false);
+    }
+  };
 }
 
 // ---- following from the drawer ----
@@ -2662,9 +2724,11 @@ function drawerHTML(b, loading) {
     <button class="btn icon close" data-close aria-label="Close">${I.x}</button>
     <div class="drawer-body">
       ${coverHTML(b, "hero-cover")}
+      <div id="meta-head">
       <h2>${esc(b.title)}</h2>
       <div class="by">by <strong>${esc(b.author || "Unknown author")}</strong></div>
       ${narrators.length ? `<div class="narr">Narrated by ${esc(narrators.slice(0, 3).join(", "))}${narrators.length > 3 ? ` +${narrators.length - 3} more` : ""}</div>` : ""}
+      </div>
       ${pills.length ? `<div class="pills">${pills.map(([ic, t]) => `<span class="pill">${ic}${esc(t)}</span>`).join("")}</div>` : ""}
       <div id="drawer-live">${loading ? '<div class="cta"><span class="spinner" style="color:var(--text-3)"></span></div>' : ""}</div>
       ${!loading ? followHTML(b) : ""}
@@ -2769,6 +2833,7 @@ drawer.onclick = async (e) => {
   if (!btn || !state.drawer) return;
   const act = btn.dataset.act;
   if (act === "releases") return showReleases(drawerBook());
+  if (act === "edit") return editDetails(drawerBook());
   spinBtn(btn, true);
   try {
     if (act === "add" || act === "want") {

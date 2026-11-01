@@ -529,7 +529,9 @@ class Worker:
             if not job_id:
                 kind, payload = await self._torrent_payload(book, source, settings)
                 tag = f"narratarr-{book_id}"
-                job_id = await client.add(kind, payload, tag, downloaders.category_for(settings, name))
+                job_id = await client.add(
+                    kind, payload, tag, downloaders.category_for(settings, name), downloaders.folder_for(settings, name)
+                )
                 db.update(book_id, download_client=name, client_job_id=job_id, info_hash=book["info_hash"] or job_id)
 
             db.update(book_id, status="downloading", progress=0, detail=f"Sent to {client.label}")

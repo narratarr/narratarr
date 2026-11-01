@@ -2,6 +2,13 @@
 
 All notable changes to Narratarr. The app shows this under **Settings → Updates**.
 
+## 0.7.4 — 2026-10-31
+
+- **Authors, not narrators.** Books you import now take their author from the **Artist** tag first, then **Album artist**, the same way Audiobookshelf reads them. Many audiobooks put the narrator in Album artist, which made Narratarr show the narrator as the author (and miss books by authors you follow). A name that's only the narrator never counts as the author, "Author, read by Narrator" is split in two, and Audible's narrator tag in M4B files is read too.
+- **Edit details.** Open any book in your library and choose **Edit details** to correct its title, author or narrators. This fixes books imported before this update, and anything else that's off. Your files and folders stay as they are. Only admins can edit.
+- **A download folder for each torrent client.** qBittorrent, Transmission and Deluge each have an optional **Download folder**, so Narratarr's books can be kept apart from your other downloads instead of landing in the client's default folder.
+- **Transmission labels.** Torrents Narratarr sends to Transmission get a label (`audiobooks` by default, Transmission 3.0 or later), so you can filter them, like qBittorrent's category.
+
 ## 0.7.3 — 2026-10-31
 
 - **AllDebrid.** Torrents can now go through AllDebrid as well as Real-Debrid. In **Settings → Downloads**, pick the AllDebrid tile and choose **Connect AllDebrid**: Narratarr shows a short code, you enter it on alldebrid.com (on any device where you're signed in), and you're connected. There's no API key to copy, and your password never reaches Narratarr. Pasting a key still works too.

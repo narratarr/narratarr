@@ -103,11 +103,11 @@ class Deluge:
         await self._login()
         return str(await self._call("daemon.get_version") or "")
 
-    async def add(self, kind: str, payload: str | bytes, tag: str = "", category: str = "") -> str:
+    async def add(self, kind: str, payload: str | bytes, tag: str = "", category: str = "", folder: str = "") -> str:
         await self._login()
         options: dict = {}
-        if category:
-            options["download_location"] = category
+        if folder:
+            options["download_location"] = folder
         if kind == "magnet":
             found = await self._call("core.add_torrent_magnet", [payload, options])
         else:

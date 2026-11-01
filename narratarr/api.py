@@ -459,6 +459,34 @@ async def stop(book_id: int):
     return db.get(book_id)
 
 
+class BookEdit(BaseModel):
+    title: str | None = None
+    author: str | None = None
+    narrators: list[str] | None = None
+
+
+def _tidy(text: str, limit: int) -> str:
+    return " ".join(text.split())[:limit]
+
+
+@app.patch("/api/library/{book_id}")
+async def edit_book(book_id: int, body: BookEdit):
+    """Correct what Narratarr shows for a book. Its files and folder stay as they are."""
+    _get_or_404(book_id)
+    changes: dict = {}
+    if body.title is not None:
+        changes["title"] = _tidy(body.title, 300)
+        if not changes["title"]:
+            raise HTTPException(400, "A book needs a title.")
+    if body.author is not None:
+        changes["author"] = _tidy(body.author, 300)
+    if body.narrators is not None:
+        changes["narrators"] = [n for n in (_tidy(x, 120) for x in body.narrators[:8]) if n]
+    if changes:
+        db.update(book_id, **changes)
+    return db.get(book_id)
+
+
 @app.delete("/api/library/{book_id}")
 async def remove(book_id: int, delete_files: bool = False):
     book = _get_or_404(book_id)

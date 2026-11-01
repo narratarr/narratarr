@@ -61,7 +61,7 @@ def current_user(request) -> dict | None:
 def admin_only(method: str, path: str) -> bool:
     if path.startswith(ADMIN_PREFIXES) or (path == "/api/settings" and method != "GET"):
         return True
-    return method == "DELETE" and path.startswith("/api/library/")
+    return method in ("DELETE", "PATCH") and path.startswith("/api/library/")
 
 
 # ---- first run --------------------------------------------------------------------------
