@@ -29,7 +29,7 @@ from . import (apiv1, audible, audiobookshelf, auth, brave, config, db, download
                tokens, updates, users, wanted)
 from .audiobookshelf import Audiobookshelf, AudiobookshelfError
 from .downloaders import ClientError
-from . import alldebrid
+from . import alldebrid, notify
 from .alldebrid import AllDebrid, AllDebridError
 from .realdebrid import RealDebrid, RealDebridError
 from .sources import CATALOGS, ORDER, Prowlarr, ProwlarrError, Torznab, TorznabError, all_sources, ebook_indexers, get_source, source_for_url
@@ -358,6 +358,8 @@ async def add_book(body: AddBook, request: Request):
     )
     if body.download:
         _worker().poke()
+    elif me:
+        notify.emit("wanted", book, me["username"])
     return book
 
 
@@ -391,6 +393,7 @@ async def _add_wanted(url: str, search_now: bool, user_id: int | None = None, so
         if added and user_id:
             db.update(added["id"], requested_by=user_id)
             added = db.get(added["id"])
+            notify.emit("wanted", added)
         book = (added or wanted.in_library(b.get("asin") or "", b["title"], b["author"], kind=kind)
                 or db.get_by_url(wanted.url_for(b["url"], kind)))
         if search_now and book["status"] == "wanted" and book["source"] in CATALOGS:
@@ -695,6 +698,7 @@ async def other_format(book_id: int, request: Request):
     me = getattr(request.state, "user", None)
     if me:
         db.update(other["id"], requested_by=me["id"])
+        notify.emit("wanted", db.get(other["id"]), me["username"])
     _background(_search_in_background(other["id"]))
     return db.get(other["id"])
 
@@ -1098,6 +1102,68 @@ async def ad_pin_check(body: PinCheck):
         # Connected, but the key can't be used from here yet (e.g. AllDebrid wants this location approved).
         user = {"warning": str(e) if isinstance(e, AllDebridError) else "Couldn't reach AllDebrid to check the account."}
     return {"connected": True, **user, "settings": config.load().public()}
+
+
+# ---- notifications ------------------------------------------------------------
+
+
+class NotifierIn(BaseModel):
+    name: str | None = None
+    kind: str | None = None
+    url: str | None = None
+    token: str | None = None
+    headers: list[dict] | None = None
+    body: str | None = None
+    events: list[str] | None = None
+    enabled: bool | None = None
+
+
+@app.get("/api/settings/notifications")
+async def notifications():
+    return {
+        "items": [notify.public(n) for n in notify.load()],
+        "events": notify.EVENTS,
+        "kinds": notify.KINDS,
+        "variables": notify.VARIABLES,
+        "default_body": notify.DEFAULT_BODY,
+    }
+
+
+@app.post("/api/settings/notifications")
+async def add_notifier(body: NotifierIn):
+    try:
+        return notify.public(notify.create(body.model_dump(exclude_none=True)))
+    except notify.NotifyError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.put("/api/settings/notifications/{nid}")
+async def change_notifier(nid: int, body: NotifierIn):
+    try:
+        n = notify.update(nid, body.model_dump(exclude_none=True))
+    except notify.NotifyError as e:
+        raise HTTPException(400, str(e))
+    if n is None:
+        raise HTTPException(404, "That destination is gone.")
+    return notify.public(n)
+
+
+@app.delete("/api/settings/notifications/{nid}")
+async def remove_notifier(nid: int):
+    if not notify.delete(nid):
+        raise HTTPException(404, "That destination is gone.")
+    return {"ok": True}
+
+
+@app.post("/api/settings/notifications/{nid}/test")
+async def test_notifier(nid: int):
+    try:
+        error = await notify.test(nid)
+    except notify.NotifyError as e:
+        raise HTTPException(404, str(e))
+    if error:
+        raise HTTPException(400, error)
+    return notify.public(notify.get(nid))
 
 
 # ---- Audiobookshelf -----------------------------------------------------------

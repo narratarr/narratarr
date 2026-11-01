@@ -34,7 +34,7 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from . import audible, auth, db, tokens, updates, users, wanted
+from . import audible, auth, db, notify, tokens, updates, users, wanted
 
 log = logging.getLogger("narratarr.api.v1")
 
@@ -551,7 +551,8 @@ async def create_request(body: NewRequest, me: Caller, response: Response):
             raise ApiError(409, "conflict", "That book couldn't be added. Try again.")
         return request_out(same, _usernames())
     db.update(added["id"], requested_by=me["id"])
-    log.info("%s requested %s (%s, %s)", me["username"], b["title"], body.asin, kind)
+    log.info("%s requested %s (%s, %s) through an app", me["username"], b["title"], body.asin, kind)
+    notify.emit("wanted", db.get(added["id"]), me["username"])
     from . import api as core  # here, not at the top: api.py mounts this module
 
     core._background(core._search_in_background(added["id"]))

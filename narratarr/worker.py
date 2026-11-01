@@ -32,7 +32,7 @@ from pathlib import Path
 
 import httpx
 
-from . import audiobookshelf, config, db, downloaders, ebooks, importer, media, wanted
+from . import audiobookshelf, config, db, downloaders, ebooks, importer, media, notify, wanted
 from .downloaders import ClientError, debrid_client
 from .alldebrid import AllDebrid, AllDebridError
 from .realdebrid import RealDebrid, RealDebridError
@@ -337,6 +337,11 @@ class Worker:
         task.add_done_callback(lambda _: (self.running.pop(book_id, None), self.stops.pop(book_id, None), self.poke()))
 
     async def _run(self, book_id: int) -> None:
+        book = db.get(book_id)
+        # Imports aren't downloads, and a download picking up again after a restart already said so.
+        announce = bool(book) and book["source"] != "local"
+        if announce and not (book["client_job_id"] or book["rd_torrent_id"]):
+            notify.emit("grabbed", book)
         try:
             await self.process(book_id)
         except asyncio.CancelledError:
@@ -349,6 +354,10 @@ class Worker:
         except Exception as e:
             log.exception("Book %s crashed", book_id)
             db.update(book_id, status="failed", error=f"Unexpected error: {e}", speed=0, detail="")
+        else:
+            return
+        if announce and (failed := db.get(book_id)):
+            notify.emit("failed", failed, error=failed["error"])
 
     # ---- pipeline ---------------------------------------------------------
 
@@ -384,6 +393,8 @@ class Worker:
             book["id"], status="completed", path=str(dest), progress=100, speed=0, detail="",
             completed_at=time.time(), **extra,
         )
+        if book["source"] != "local":
+            notify.emit("completed", db.get(book["id"]))
         await self._notify_audiobookshelf(settings)
 
     async def _process_direct(self, book: dict, source) -> None:

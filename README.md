@@ -75,6 +75,7 @@ No other app needed. You get chapters (including the chapter markers inside `.m4
 - **Light and dark** themes that follow your system
 - Plugs into your **\*arr stack**: **Prowlarr** (or any **Torznab** indexer, such as **Jackett**) for search; **SABnzbd** or **NZBGet** for Usenet; **qBittorrent**, **Transmission**, **Deluge**, Real-Debrid or AllDebrid for torrents
 - **Wanted list** that fills itself: follow **authors and series** and new releases are found and downloaded automatically
+- **Notifications** to **ntfy**, **Gotify**, **Discord** or any **webhook** when someone adds a book to Wanted, and when downloads start, finish or fail
 - **Ebooks too:** want any book as an audiobook, an ebook or both, and read EPUBs right in Narratarr. The ebook lands next to its audiobook, so Audiobookshelf shows them as one book
 - **Import** the audiobooks you already have, or point it at an existing Audiobookshelf library
 - **Audiobookshelf** in a click: Narratarr finds your server (on this machine, in Docker, across your network, or at a public address), you sign in once, and it rescans after every download
@@ -374,6 +375,7 @@ Narratarr has no telemetry and phones nobody. These are the only outside service
 | **Brave Search** | Your searches, with your Brave key | Only if you turn it on |
 | **Real-Debrid**, **AllDebrid**, **Prowlarr**, **SABnzbd**, **NZBGet**, **qBittorrent**, **Transmission**, **Deluge**, **Torznab**, **Audiobookshelf** | Whatever each needs, with the key you entered for it | Only the ones you set up |
 | **Cover image hosts** (archive.org, Amazon's image CDN, covers.openlibrary.org, your indexers) | Nothing but the image request, with no referrer | Your browser loads cover art directly |
+| **Your notification destinations** (ntfy, Gotify, Discord, webhooks) | The book's title, author and cover link, and who asked for it | Only the ones you add under Settings → Notifications, for the events you choose |
 | **GitHub** (api.github.com) | Nothing but the request for the latest release | Once a day, for the update badge. Off under Settings → Updates |
 
 Fonts are bundled, so the UI itself never contacts a CDN. Torrents downloaded through **qBittorrent, Transmission or Deluge** expose your IP address to other peers, as with any torrent client; Real-Debrid and AllDebrid don't.

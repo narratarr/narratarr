@@ -1385,6 +1385,8 @@ const SETTINGS_PAGES = [
   ["downloads", "Downloads", "What fetches your books, and where Narratarr finds them when they’re done.", I.down],
   ["abs", "Audiobookshelf", "Every book Narratarr files shows up in Audiobookshelf as soon as it’s done.",
     '<svg viewBox="0 0 24 24"><path d="M4 19V6l8-3 8 3v13M4 19h16M9 19v-7h6v7"/></svg>'],
+  ["notifications", "Notifications", "Hear about new requests and finished downloads on your phone, in Discord, or anywhere a webhook goes.",
+    '<svg viewBox="0 0 24 24"><path d="M6 9.5a6 6 0 0 1 12 0c0 5 2 6.5 2 6.5H4s2-1.5 2-6.5M10 19.5a2.2 2.2 0 0 0 4 0"/></svg>'],
   ["users", "Users", "Who can sign in. Admins run Narratarr; listeners browse, request and listen, each with their own place in every book.",
     '<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.6a3.5 3.5 0 0 1 0 6.8M18.5 14.4A6.5 6.5 0 0 1 21.5 20"/></svg>'],
   ["updates", "Updates", "Which version you have, and whether a newer one is out.", I.retry],
@@ -1392,7 +1394,7 @@ const SETTINGS_PAGES = [
 const SETTINGS_PAGE = Object.fromEntries(SETTINGS_PAGES.map((p) => [p[0], p]));
 
 // The one-line status under each page in the Settings menu: [text, tone] where tone is "ok", "warn" or "".
-function settingsStatus(key, users) {
+function settingsStatus(key, users, notifiers) {
   const st = state.settings || {};
   const u = state.updates;
   if (key === "general") return [st.library_dir || "", ""];
@@ -1406,6 +1408,10 @@ function settingsStatus(key, users) {
   }
   if (key === "abs") return st.audiobookshelf_url && st.audiobookshelf_token ? ["Connected", "ok"] : ["Not connected", ""];
   if (key === "users") return [users == null ? "" : `${users} ${users === 1 ? "person" : "people"}`, ""];
+  if (key === "notifications") {
+    if (notifiers == null) return ["", ""];
+    return notifiers ? [`${notifiers} destination${notifiers === 1 ? "" : "s"}`, "ok"] : ["Not set up", ""];
+  }
   if (key === "updates") {
     if (u?.update_available) return [`${u.latest.version} is out`, "warn"];
     return [u?.current ? `${u.current}${u.latest ? " · up to date" : ""}` : "Version and what’s new", ""];
@@ -1470,6 +1476,15 @@ function Settings(root, page) {
             <span class="hint">Checked every minute. Must be outside your library folder. Leave it empty to turn this off.</span>
           </div>
           <div><button class="btn" type="button" id="open-import">${I.down} Import books now…</button></div>
+        </div>
+      </section>
+
+      <section class="panel" data-page="notifications">
+        <div class="ph"><h3>Destinations</h3><p class="desc">Where Narratarr tells you when someone adds a book to Wanted, and when downloads start, finish or fail. Every event is also written to Narratarr’s log (<code>docker logs</code>), whether or not anything is set up here.</p></div>
+        <div class="body">
+          <div class="notify-list" id="notify-list"><span class="spinner"></span></div>
+          <div class="notify-editor" id="notify-editor" hidden></div>
+          <div><button class="btn" type="button" id="add-notifier">${I.plus} Add a destination</button></div>
         </div>
       </section>
 
@@ -1897,6 +1912,7 @@ function Settings(root, page) {
   const form = $("#settings", root);
   const wrap = $("#set-wrap", root);
   let userCount = null;
+  let notifyCount = null;
   let saved = null; // the settings as last saved; the save bar shows when the form differs
 
   // Which page shows. No page: on a phone the menu itself; on a wide screen, General.
@@ -1917,7 +1933,7 @@ function Settings(root, page) {
   }
   function statuses() {
     $$(".set-nav a", root).forEach((a) => {
-      const [text, tone] = settingsStatus(a.dataset.page, userCount);
+      const [text, tone] = settingsStatus(a.dataset.page, userCount, notifyCount);
       $("[data-status]", a).textContent = text;
       $(".dot", a).className = `dot ${tone}`;
     });
@@ -2110,6 +2126,203 @@ function Settings(root, page) {
     }
     spinBtn(btn, false);
   };
+
+  // Notifications: each destination saves on its own, like people on the Users page, not with the save bar.
+  // The editor's fields have no names, so the Settings form (and its save bar) never sees them.
+  const notifyList = $("#notify-list", root);
+  const editor = $("#notify-editor", root);
+  let notifyMeta = null; // events, kinds, fill-ins and the default webhook body, from the server
+  const KIND_INFO = {
+    ntfy: { sub: "Phone and desktop", url: "https://ntfy.sh/your-topic", urlHint: "The server and the topic. ntfy.sh works, or your own server.",
+      token: "Access token (optional)", tokenHint: "Only for a protected topic: an access token (tk_…), or user:password." },
+    gotify: { sub: "Self-hosted", url: "https://gotify.example.com", urlHint: "Your Gotify server.",
+      token: "Application token", tokenHint: "In Gotify: Apps → Create application, then copy its token." },
+    discord: { sub: "A channel", url: "https://discord.com/api/webhooks/…",
+      urlHint: "In Discord: Server settings → Integrations → Webhooks → New webhook → Copy webhook URL." },
+    webhook: { sub: "Anything else", url: "https://",
+      urlHint: "Narratarr POSTs the JSON below: Home Assistant, Apprise, n8n, your own scripts…" },
+  };
+  const KIND_ICON = {
+    ntfy: I.bell, gotify: I.bell,
+    discord: '<svg viewBox="0 0 24 24"><path d="M4 5.5h16v10H9l-5 4v-14Z"/></svg>',
+    webhook: '<svg viewBox="0 0 24 24"><path d="M9 7 4 12l5 5M15 7l5 5-5 5"/></svg>',
+  };
+  const lastLine = (n) => n.last_error ? `<span class="bad"><i class="dot warn"></i>Last one failed: ${esc(n.last_error)}</span>`
+    : n.last_at ? `<span><i class="dot ok"></i>Last sent ${esc(ago(n.last_at))}</span>` : "<span>Nothing sent yet</span>";
+  const renderNotifiers = async () => {
+    try {
+      notifyMeta = await api("/api/settings/notifications");
+      const items = notifyMeta.items;
+      notifyCount = items.length;
+      statuses();
+      notifyList.innerHTML = items.length ? items.map((n) => `
+        <div class="notify-row ${n.enabled ? "" : "off"}" data-id="${n.id}">
+          <span class="kind-badge" aria-hidden="true">${KIND_ICON[n.kind]}</span>
+          <span class="name"><b>${esc(n.name)}</b>
+            <small>${esc(notifyMeta.kinds[n.kind])} · ${esc(n.events.map((e) => notifyMeta.events[e]).join(", "))}</small>
+            <small class="last">${lastLine(n)}</small></span>
+          <span class="tools">
+            <label class="switch" title="${n.enabled ? "On" : "Off"}"><input type="checkbox" data-enable ${n.enabled ? "checked" : ""} aria-label="Send to ${esc(n.name)}"><i></i></label>
+            <button class="btn sm" type="button" data-test>Test</button>
+            <button class="btn sm ghost" type="button" data-edit>Edit</button>
+            <button class="btn sm ghost icon danger" type="button" data-remove aria-label="Remove ${esc(n.name)}">${I.trash}</button>
+          </span>
+        </div>`).join("")
+        : `<p class="muted notify-empty">Nothing set up yet. Add ntfy, Gotify, Discord or a webhook to hear when someone adds a book to Wanted.</p>`;
+    } catch (err) {
+      notifyList.innerHTML = `<div class="rd-result bad">${esc(err.message)}</div>`;
+    }
+  };
+  const closeEditor = () => {
+    editor.hidden = true;
+    editor.innerHTML = "";
+    $("#add-notifier", root).hidden = false;
+  };
+  const headerRow = (h = { name: "", value: "" }) => `
+    <div class="hrow">
+      <input class="input mono" data-h="name" placeholder="Authorization" value="${esc(h.name)}" aria-label="Header name" />
+      <input class="input mono" data-h="value" type="password" placeholder="Bearer …" value="${esc(h.value)}" aria-label="Header value" autocomplete="off" />
+      <button class="btn sm ghost icon" type="button" data-drop aria-label="Remove this header">${I.x}</button>
+    </div>`;
+  const openEditor = (n) => {
+    let kind = n?.kind || "ntfy";
+    const events = n?.events || ["wanted", "completed", "failed"];
+    $("#add-notifier", root).hidden = true;
+    editor.hidden = false;
+    editor.innerHTML = `
+      <h4>${n ? `Edit ${esc(n.name)}` : "Add a destination"}</h4>
+      <div class="choice-tiles" id="ne-kind" role="radiogroup" aria-label="Send to">
+        ${Object.entries(notifyMeta.kinds).map(([k, label]) => `<button type="button" role="radio" data-v="${k}"><b>${esc(label)}</b><small>${KIND_INFO[k].sub}</small></button>`).join("")}
+      </div>
+      <div class="set-grid">
+        <div class="field"><label for="ne-name">Name</label><input class="input" id="ne-name" maxlength="60" value="${esc(n?.name || "")}" placeholder="My phone" /></div>
+        <div class="field"><label for="ne-url">Address</label><input class="input mono" id="ne-url" value="${esc(n?.url || "")}" autocomplete="off" /></div>
+      </div>
+      <span class="hint" id="ne-url-hint"></span>
+      <div class="field" id="ne-token-field">
+        <label for="ne-token" id="ne-token-label"></label>
+        <input class="input mono" id="ne-token" type="password" value="${esc(n?.token || "")}" autocomplete="off" />
+        <span class="hint" id="ne-token-hint"></span>
+      </div>
+      <div id="ne-webhook">
+        <div class="field">
+          <label>Headers</label>
+          <div id="ne-headers">${(n?.headers || []).map(headerRow).join("")}</div>
+          <div><button class="btn sm ghost" type="button" id="ne-add-header">${I.plus} Add a header</button></div>
+          <span class="hint">Optional. For a token, e.g. <code>Authorization</code> · <code>Bearer …</code>. Values are kept hidden.</span>
+        </div>
+        <div class="field">
+          <label for="ne-body">Body</label>
+          <textarea class="input mono" id="ne-body" rows="9" spellcheck="false"></textarea>
+          <span class="hint">JSON. Fill-ins (tap to add): ${notifyMeta.variables.map((v) => `<button type="button" class="fill-in" data-var="${v}">{${v}}</button>`).join(" ")}</span>
+        </div>
+      </div>
+      <fieldset class="ne-events">
+        <legend>Tell me when</legend>
+        ${Object.entries(notifyMeta.events).map(([k, label]) => `<label class="switch"><input type="checkbox" value="${k}" ${events.includes(k) ? "checked" : ""}><i></i>${{
+          wanted: "Someone adds a book to Wanted", grabbed: "A download starts", completed: "A book is in the library", failed: "A download fails",
+        }[k] || esc(label)}</label>`).join("")}
+      </fieldset>
+      <div class="cta-row" style="justify-content:flex-start">
+        <button class="btn primary" type="button" id="ne-save">Save</button>
+        <button class="btn ghost" type="button" id="ne-cancel">Cancel</button>
+      </div>`;
+    $("#ne-body", editor).value = n?.body || notifyMeta.default_body;
+    const setKind = (k) => {
+      kind = k;
+      $$("#ne-kind [data-v]", editor).forEach((b) => {
+        b.classList.toggle("on", b.dataset.v === k);
+        b.setAttribute("aria-checked", b.dataset.v === k);
+      });
+      const info = KIND_INFO[k];
+      $("#ne-url", editor).placeholder = info.url;
+      $("#ne-url-hint", editor).textContent = info.urlHint;
+      $("#ne-token-field", editor).hidden = !info.token;
+      $("#ne-token-label", editor).textContent = info.token || "";
+      $("#ne-token-hint", editor).textContent = info.tokenHint || "";
+      $("#ne-webhook", editor).hidden = k !== "webhook";
+    };
+    setKind(kind);
+    $("#ne-kind", editor).onclick = (e) => { const b = e.target.closest("[data-v]"); if (b) setKind(b.dataset.v); };
+    $("#ne-add-header", editor).onclick = () => $("#ne-headers", editor).insertAdjacentHTML("beforeend", headerRow());
+    $("#ne-headers", editor).onclick = (e) => e.target.closest("[data-drop]")?.closest(".hrow").remove();
+    editor.onclick = (e) => {
+      const fill = e.target.closest("[data-var]");
+      if (!fill) return;
+      const box = $("#ne-body", editor);
+      const at = box.selectionStart ?? box.value.length;
+      box.setRangeText(`{${fill.dataset.var}}`, at, box.selectionEnd ?? at, "end");
+      box.focus();
+    };
+    // Enter in a field here must not submit the Settings form around it.
+    editor.onkeydown = (e) => { if (e.key === "Enter" && e.target.tagName !== "TEXTAREA") e.preventDefault(); };
+    $("#ne-cancel", editor).onclick = closeEditor;
+    $("#ne-save", editor).onclick = async (e) => {
+      const btn = e.currentTarget;
+      const body = {
+        kind,
+        name: $("#ne-name", editor).value,
+        url: $("#ne-url", editor).value,
+        token: KIND_INFO[kind].token ? $("#ne-token", editor).value : "",
+        headers: $$("#ne-headers .hrow", editor).map((r) => ({ name: $('[data-h="name"]', r).value, value: $('[data-h="value"]', r).value })),
+        body: kind === "webhook" ? $("#ne-body", editor).value : "",
+        events: $$(".ne-events input:checked", editor).map((i) => i.value),
+      };
+      spinBtn(btn, true);
+      try {
+        await api(n ? `/api/settings/notifications/${n.id}` : "/api/settings/notifications", { method: n ? "PUT" : "POST", body });
+        closeEditor();
+        await renderNotifiers();
+        toast(n ? "Destination saved" : "Destination added. Choose Test to send one now.", { kind: "ok" });
+      } catch (err) {
+        toast(err.message, { kind: "err" });
+        spinBtn(btn, false);
+      }
+    };
+    $("#ne-name", editor).focus();
+  };
+  $("#add-notifier", root).onclick = () => notifyMeta && openEditor(null);
+  notifyList.onchange = async (e) => {
+    const box = e.target.closest("[data-enable]");
+    if (!box) return;
+    const id = box.closest(".notify-row").dataset.id;
+    try {
+      await api(`/api/settings/notifications/${id}`, { method: "PUT", body: { enabled: box.checked } });
+    } catch (err) {
+      toast(err.message, { kind: "err" });
+    }
+    renderNotifiers();
+  };
+  notifyList.onclick = async (e) => {
+    const row = e.target.closest(".notify-row");
+    if (!row) return;
+    const n = notifyMeta.items.find((x) => String(x.id) === row.dataset.id);
+    if (e.target.closest("[data-edit]")) return openEditor(n);
+    if (e.target.closest("[data-test]")) {
+      const btn = e.target.closest("[data-test]");
+      spinBtn(btn, true);
+      try {
+        await api(`/api/settings/notifications/${n.id}/test`, { method: "POST" });
+        toast(`Sent a test to ${n.name}`, { kind: "ok" });
+      } catch (err) {
+        toast(err.message, { kind: "err" });
+      }
+      spinBtn(btn, false);
+      return renderNotifiers();
+    }
+    if (e.target.closest("[data-remove]")) {
+      const ok = await modal({ title: `Remove ${n.name}?`, body: "Narratarr will stop sending notifications there.", confirm: "Remove", danger: true });
+      if (!ok) return;
+      try {
+        await api(`/api/settings/notifications/${n.id}`, { method: "DELETE" });
+        if (!editor.hidden) closeEditor();
+      } catch (err) {
+        toast(err.message, { kind: "err" });
+      }
+      renderNotifiers();
+    }
+  };
+  renderNotifiers();
 
   // AllDebrid: connect with a short code the user enters on alldebrid.com, or with a pasted key.
   const adCard = () => {

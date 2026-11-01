@@ -4,6 +4,9 @@ All notable changes to Narratarr. The app shows this under **Settings → Update
 
 ## Unreleased
 
+- **Notifications.** A new **Settings → Notifications** page sends word to **ntfy**, **Gotify**, **Discord** or any **webhook** when someone adds a book to Wanted (with who asked for it), and when a download starts, finishes or fails. Choose the events for each destination, and press **Test** to send one straight away. A webhook can carry headers (such as `Authorization: Bearer …`) and a JSON body of your own, with fill-ins like `{title}`, `{author}`, `{cover}`, `{username}` and `{event}`. AudioBookRequest's `{bookTitle}`, `{bookAuthors}` and `{bookCover}` work too.
+- Tokens, header values and webhook addresses are kept hidden in Settings and stored where only Narratarr can read them. A notification that can't be sent never holds up a download: it's tried once more, then noted on its destination.
+- **Events in the log.** Every request, download start, finished book and failure is now written to Narratarr's log (`docker logs`), so scripts can follow along even without notifications.
 - **Torznab, for Jackett users.** Settings → Search & sources has a **Torznab** section for Jackett, Prowlarr's Torznab endpoint, or any indexer that speaks Torznab. It's searched alongside Prowlarr, or on its own: it gets a tab on Discover, Wanted books are looked for on it (in its ebook categories for ebooks), and the Audible and Open Library tabs appear with it alone. Its API key is kept out of every saved link, whatever name the indexer gives it. Contributed by curator8888.
 - If an indexer can't be reached while you search Discover, Narratarr now says so instead of showing no results.
 
