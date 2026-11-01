@@ -18,6 +18,9 @@ class RealDebridError(Exception):
 
 
 class RealDebrid:
+    label = "Real-Debrid"
+    prefix = ""  # its job ids are stored as they are (AllDebrid's carry "ad:")
+
     def __init__(self, api_key: str, transport: httpx.AsyncBaseTransport | None = None):
         if not api_key:
             raise RealDebridError("Add your Real-Debrid API key in Settings first.")
@@ -73,3 +76,44 @@ class RealDebrid:
 
     async def delete_torrent(self, torrent_id: str) -> None:
         await self._call("DELETE", f"/torrents/delete/{torrent_id}")
+
+    # ---- the steps a download goes through (the same ones AllDebrid has) ----
+
+    async def add(self, kind: str, payload: str | bytes) -> str:
+        return await (self.add_torrent(payload) if kind == "torrent" else self.add_magnet(payload))
+
+    async def exists(self, torrent_id: str) -> bool:
+        try:
+            await self.torrent_info(torrent_id)
+        except RealDebridError:
+            return False
+        return True
+
+    async def poll(self, torrent_id: str) -> dict:
+        info = await self.torrent_info(torrent_id)
+        status = info.get("status", "")
+        if status == "downloaded":
+            return {"done": True, "progress": 100.0, "speed": 0, "detail": "Real-Debrid has it"}
+        if status in DEAD:
+            raise RealDebridError(f"Real-Debrid couldn't fetch this torrent ({status}).")
+        if status == "waiting_files_selection":
+            await self.select_all_files(torrent_id)
+        detail = {
+            "magnet_conversion": "Real-Debrid is reading the magnet…",
+            "waiting_files_selection": "Selecting files…",
+            "queued": "Queued on Real-Debrid",
+            "downloading": f"Real-Debrid is caching · {info.get('seeders') or 0} seeders",
+            "compressing": "Real-Debrid is packaging files…",
+            "uploading": "Real-Debrid is finishing up…",
+        }.get(status, f"Real-Debrid: {status}")
+        return {"done": False, "progress": float(info.get("progress") or 0), "speed": int(info.get("speed") or 0), "detail": detail}
+
+    async def direct_files(self, torrent_id: str) -> list[dict]:
+        """The finished torrent's files as direct downloads: [{'filename', 'filesize', 'download'}]."""
+        links = (await self.torrent_info(torrent_id)).get("links") or []
+        if not links:
+            raise RealDebridError("Real-Debrid finished but returned no files.")
+        return [await self.unrestrict(link) for link in links]
+
+    async def remove(self, torrent_id: str) -> None:
+        await self.delete_torrent(torrent_id)

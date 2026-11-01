@@ -26,6 +26,8 @@ class Settings:
     abb_base_url: str = "https://audiobookbay.lu"
     max_concurrent: int = 2
     delete_from_rd_after: bool = True
+    ad_api_key: str = ""  # AllDebrid
+    delete_from_ad_after: bool = True
     smart_search: bool = True
     search_provider: str = "audiobookbay"  # or "brave"
     brave_api_key: str = ""
@@ -44,7 +46,7 @@ class Settings:
     nzbget_username: str = ""
     nzbget_password: str = ""
     nzbget_category: str = ""
-    torrent_client: str = "realdebrid"  # or "qbittorrent" / "transmission" / "deluge"
+    torrent_client: str = "realdebrid"  # or "alldebrid" / "qbittorrent" / "transmission" / "deluge"
     qbittorrent_url: str = ""
     qbittorrent_username: str = ""
     qbittorrent_password: str = ""
@@ -72,6 +74,7 @@ class Settings:
         for key in SECRETS:
             d[key] = _mask(d[key], key)
         d["rd_configured"] = bool(self.rd_api_key)
+        d["ad_configured"] = bool(self.ad_api_key)
         d["brave_configured"] = bool(self.brave_api_key)
         d["prowlarr_configured"] = bool(self.prowlarr_url and self.prowlarr_api_key)
         d["sabnzbd_configured"] = bool(self.sabnzbd_url and self.sabnzbd_api_key)
@@ -80,18 +83,19 @@ class Settings:
         d["transmission_configured"] = bool(self.transmission_url)
         d["deluge_configured"] = bool(self.deluge_url)
         d["usenet_configured"] = d[f"{self.usenet_client}_configured"]
-        d["torrent_configured"] = d["rd_configured" if self.torrent_client == "realdebrid" else f"{self.torrent_client}_configured"]
+        short = {"realdebrid": "rd", "alldebrid": "ad"}.get(self.torrent_client, self.torrent_client)
+        d["torrent_configured"] = d[f"{short}_configured"]
         return d
 
 
 SECRETS = (
-    "rd_api_key", "audiobookshelf_token", "brave_api_key", "prowlarr_api_key", "sabnzbd_api_key",
+    "rd_api_key", "ad_api_key", "audiobookshelf_token", "brave_api_key", "prowlarr_api_key", "sabnzbd_api_key",
     "nzbget_password", "qbittorrent_password", "transmission_password", "deluge_password",
 )
 CHOICES = {
     "search_provider": ("audiobookbay", "brave"),
     "usenet_client": ("sabnzbd", "nzbget"),
-    "torrent_client": ("realdebrid", "qbittorrent", "transmission", "deluge"),
+    "torrent_client": ("realdebrid", "alldebrid", "qbittorrent", "transmission", "deluge"),
     "audible_region": ("us", "uk", "ca", "au", "in", "de", "fr", "it", "es", "jp"),
 }
 # Each service's secrets. Changing the service's address to a different host clears them, so a

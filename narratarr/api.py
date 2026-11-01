@@ -29,6 +29,8 @@ from . import (apiv1, audible, audiobookshelf, auth, brave, config, db, download
                tokens, updates, users, wanted)
 from .audiobookshelf import Audiobookshelf, AudiobookshelfError
 from .downloaders import ClientError
+from . import alldebrid
+from .alldebrid import AllDebrid, AllDebridError
 from .realdebrid import RealDebrid, RealDebridError
 from .sources import CATALOGS, ORDER, Prowlarr, ProwlarrError, all_sources, ebook_indexers, get_source, source_for_url
 from .worker import Worker, has_files, readable_error, safe_name, tmp_dir
@@ -906,7 +908,7 @@ async def apply_update(body: Update):
 
 # What listeners see of the settings: enough for the app to know what's set up, no addresses or keys.
 LISTENER_SETTINGS = (
-    "rd_configured", "brave_configured", "prowlarr_configured", "usenet_configured", "torrent_configured",
+    "rd_configured", "ad_configured", "brave_configured", "prowlarr_configured", "usenet_configured", "torrent_configured",
     "usenet_client", "torrent_client", "smart_search", "search_provider", "audible_region", "check_updates",
     "auto_search", "auto_search_hours",
 )
@@ -978,6 +980,77 @@ async def test_rd():
         "expiration": user.get("expiration"),
         "points": user.get("points"),
     }
+
+
+def _ad_user(user: dict) -> dict:
+    until = user.get("premiumUntil")
+    return {
+        "username": user.get("username"),
+        "premium": bool(user.get("isPremium")),
+        "trial": bool(user.get("isTrial")),
+        "premium_until": until if isinstance(until, int) and until > 0 else None,  # seconds since 1970
+    }
+
+
+@app.post("/api/settings/test-ad")
+async def test_ad():
+    try:
+        async with AllDebrid(config.load().ad_api_key) as ad:
+            return _ad_user(await ad.user())
+    except AllDebridError as e:
+        raise HTTPException(400, str(e))
+    except httpx.HTTPError:
+        raise HTTPException(502, "Couldn't reach AllDebrid.")
+
+
+# Connecting AllDebrid with a short code: the user enters it on alldebrid.com and AllDebrid hands us
+# a new API key. The code's private half ("check") stays here; the browser only ever sees the code.
+_ad_pin: dict = {}
+
+
+@app.post("/api/settings/alldebrid/pin")
+async def ad_pin_start():
+    try:
+        pin = await alldebrid.pin_start()
+    except AllDebridError as e:
+        raise HTTPException(400, str(e))
+    except httpx.HTTPError:
+        raise HTTPException(502, "Couldn't reach AllDebrid.")
+    _ad_pin.clear()
+    _ad_pin.update(pin, expires=time.time() + pin["expires_in"])
+    return {"pin": pin["pin"], "user_url": pin["user_url"], "expires_in": pin["expires_in"]}
+
+
+class PinCheck(BaseModel):
+    pin: str
+
+
+@app.post("/api/settings/alldebrid/pin/check")
+async def ad_pin_check(body: PinCheck):
+    if not _ad_pin or body.pin != _ad_pin["pin"]:
+        raise HTTPException(400, "That code isn't the latest one. Choose Connect AllDebrid again.")
+    if time.time() > _ad_pin["expires"]:
+        _ad_pin.clear()
+        raise HTTPException(400, alldebrid.ERRORS["PIN_EXPIRED"])
+    try:
+        key = await alldebrid.pin_check(_ad_pin["pin"], _ad_pin["check"])
+    except AllDebridError as e:
+        if e.code in ("PIN_EXPIRED", "PIN_INVALID"):
+            _ad_pin.clear()
+        raise HTTPException(400, str(e))
+    except httpx.HTTPError:
+        return {"connected": False}  # a blip; the page keeps asking
+    if not key:
+        return {"connected": False}
+    _ad_pin.clear()
+    config.update({"ad_api_key": key, "torrent_client": "alldebrid"})  # connecting it is choosing it
+    try:
+        async with AllDebrid(key) as ad:
+            user = _ad_user(await ad.user())
+    except (AllDebridError, httpx.HTTPError) as e:
+        # Connected, but the key can't be used from here yet (e.g. AllDebrid wants this location approved).
+        user = {"warning": str(e) if isinstance(e, AllDebridError) else "Couldn't reach AllDebrid to check the account."}
+    return {"connected": True, **user, "settings": config.load().public()}
 
 
 # ---- Audiobookshelf -----------------------------------------------------------

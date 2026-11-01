@@ -476,6 +476,23 @@ img { display: block; }
 .choice-tiles button.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); background: color-mix(in oklab, var(--accent) 8%, transparent); }
 .choice-tiles b { font-size: 14px; font-weight: 600; }
 .choice-tiles small { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-3); }
+.tile-groups { display: flex; flex-wrap: wrap; gap: 14px 12px; }
+.tile-group { flex: 2 1 240px; min-width: 0; }
+.tile-group + .tile-group { flex: 3 1 360px; }
+.tile-group .choice-tiles { grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)); }
+.tile-label { display: block; margin: 0 0 8px 2px; font-size: 11.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-3); }
+.pin-card { padding: 16px 18px; border-radius: 16px; background: var(--surface-2); }
+.pin-start { display: flex; align-items: center; justify-content: space-between; gap: 14px 16px; flex-wrap: wrap; }
+.pin-start > div:first-child { flex: 1 1 260px; display: grid; gap: 4px; }
+.pin-start b, .pin-steps b { font-size: 14.5px; font-weight: 600; }
+.pin-card .desc { margin: 0; }
+.pin-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.pin-start[hidden], .pin-wait[hidden], .pin-actions [hidden] { display: none; }
+.pin-wait { display: flex; align-items: center; gap: 18px 22px; flex-wrap: wrap; }
+.pin-code { padding: 14px 18px 14px 24px; border-radius: 14px; border: 1px dashed var(--border-strong); background: var(--bg); font: 500 32px var(--mono); letter-spacing: 0.2em; color: var(--text); user-select: all; }
+.pin-steps { flex: 1 1 240px; display: grid; gap: 8px; }
+.pin-status { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-3); }
+.pin-status .spinner { width: 13px; height: 13px; }
 .path-map { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: end; gap: 12px; }
 .path-map .arrow { display: grid; place-items: center; height: 44px; color: var(--text-3); }
 .path-map .arrow svg { width: 20px; height: 20px; transform: rotate(-90deg); fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
@@ -514,6 +531,8 @@ body.has-player .save-float { bottom: 104px; }
   .save-float { gap: 6px; padding-left: 14px; }
   .save-float .btn { padding: 0 12px; }
   .save-float .long { display: none; }
+  .tile-group .choice-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tile-group .choice-tiles button:last-child:nth-child(odd) { grid-column: 1 / -1; }
   .set-layout { margin-top: 20px; }
   .set-nav { flex: 1 1 100%; position: static; padding: 0; gap: 0; border-radius: 20px; background: var(--surface); border: 1px solid var(--border); overflow: hidden; }
   .set-nav a { min-height: 64px; padding: 10px 16px; border-radius: 0; gap: 14px; }

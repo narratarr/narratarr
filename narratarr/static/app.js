@@ -11,7 +11,7 @@ const STATUS = {
   wanted: "Wanted",
   queued: "Queued",
   resolving: "Resolving",
-  caching: "On Real-Debrid",
+  get caching() { return `On ${cloudName()}`; },
   downloading: "Downloading",
   organizing: "Organizing",
   completed: "In library",
@@ -23,7 +23,10 @@ const PHASES = [
   ["downloading", "Download"],
   ["organizing", "Organize"],
 ];
-const CLIENTS = { sabnzbd: "SABnzbd", nzbget: "NZBGet", realdebrid: "Real-Debrid", qbittorrent: "qBittorrent", transmission: "Transmission", deluge: "Deluge" };
+const CLIENTS = { sabnzbd: "SABnzbd", nzbget: "NZBGet", realdebrid: "Real-Debrid", alldebrid: "AllDebrid", qbittorrent: "qBittorrent", transmission: "Transmission", deluge: "Deluge" };
+// Cloud services fetch torrents for us; then we download the files from them.
+const DEBRID = ["realdebrid", "alldebrid"];
+const cloudName = () => (state.settings?.torrent_client === "alldebrid" ? "AllDebrid" : "Real-Debrid");
 // Catalogs are where book details come from; the book itself is then found on your indexers.
 const CATALOGS = ["audible", "openlibrary"];
 const isCatalog = (name) => CATALOGS.includes(name);
@@ -154,9 +157,9 @@ function phasesFor(b) {
   if (b.source === "local") return [["downloading", "Copy"], ["organizing", "Organize"]];
   if (isDirect(b.source)) return PHASES.filter(([s]) => s !== "caching");
   const client = b.protocol === "usenet" ? b.download_client || st.usenet_client
-    : b.download_client || (st.torrent_client !== "realdebrid" ? st.torrent_client : "");
-  if (client && client !== "realdebrid") return [["resolving", "Resolve"], ["downloading", CLIENTS[client]], ["organizing", "Organize"]];
-  return PHASES;
+    : b.download_client || (DEBRID.includes(st.torrent_client) ? "" : st.torrent_client);
+  if (client && !DEBRID.includes(client)) return [["resolving", "Resolve"], ["downloading", CLIENTS[client]], ["organizing", "Organize"]];
+  return PHASES.map(([s, label]) => [s, s === "caching" ? cloudName() : label]);
 }
 
 // ---------------------------------------------------------------------------
@@ -371,8 +374,8 @@ function Discover(root) {
       <div class="banner">
         <div class="ico">${I.key}</div>
         <div><strong>Connect a download client to start downloading</strong><p>${src.delivery === "indexer"
-          ? "Usenet results go to SABnzbd or NZBGet, torrents to Real-Debrid, qBittorrent, Transmission or Deluge. You can save books to Wanted until then."
-          : "Use Real-Debrid, qBittorrent, Transmission or Deluge. You can browse and save books to Wanted until then."}</p></div>
+          ? "Usenet results go to SABnzbd or NZBGet, torrents to Real-Debrid, AllDebrid, qBittorrent, Transmission or Deluge. You can save books to Wanted until then."
+          : "Use Real-Debrid, AllDebrid, qBittorrent, Transmission or Deluge. You can browse and save books to Wanted until then."}</p></div>
         <a class="btn" href="#/settings">Open Settings</a>
       </div>` : ""}
     <div class="section-head"><h2 id="disc-title"></h2><div class="refine" id="refine"></div></div>
@@ -1410,7 +1413,7 @@ function settingsStatus(key, users) {
 function Settings(root, page) {
   const s = state.settings || {};
   const tile = (client, label, where) => {
-    const ready = s[`${client === "realdebrid" ? "rd" : client}_configured`];
+    const ready = s[`${{ realdebrid: "rd", alldebrid: "ad" }[client] || client}_configured`];
     return `<button type="button" role="radio" data-v="${client}"><b>${label}</b><small>${ready ? `<i class="dot ok"></i>Ready` : where}</small></button>`;
   };
   root.innerHTML = `
@@ -1535,10 +1538,13 @@ function Settings(root, page) {
       </section>
 
       <section class="panel" data-page="downloads">
-        <div class="ph"><h3>Torrents</h3><p class="desc">Real-Debrid fetches them for you, so nothing is shared from your computer. qBittorrent, Transmission and Deluge download on your own machine and keep seeding, which shows your IP address to other peers; many people run them behind a VPN.</p></div>
+        <div class="ph"><h3>Torrents</h3><p class="desc">Real-Debrid and AllDebrid fetch them for you, so nothing is shared from your computer. qBittorrent, Transmission and Deluge download on your own machine and keep seeding, which shows your IP address to other peers; many people run them behind a VPN.</p></div>
         <div class="body">
-          <div class="choice-tiles" data-choice="torrent_client" role="radiogroup" aria-label="Download torrents with">
-            ${tile("realdebrid", "Real-Debrid", "In the cloud")}${tile("qbittorrent", "qBittorrent", "On this machine")}${tile("transmission", "Transmission", "On this machine")}${tile("deluge", "Deluge", "On this machine")}
+          <div class="tile-groups" data-choice="torrent_client" role="radiogroup" aria-label="Download torrents with">
+            <div class="tile-group"><span class="tile-label" aria-hidden="true">In the cloud</span>
+              <div class="choice-tiles">${tile("realdebrid", "Real-Debrid", "Premium account")}${tile("alldebrid", "AllDebrid", "Premium account")}</div></div>
+            <div class="tile-group"><span class="tile-label" aria-hidden="true">On this machine</span>
+              <div class="choice-tiles">${tile("qbittorrent", "qBittorrent", "Seeds from here")}${tile("transmission", "Transmission", "Seeds from here")}${tile("deluge", "Deluge", "Seeds from here")}</div></div>
           </div>
           <input type="hidden" name="torrent_client" value="${esc(s.torrent_client)}" />
           <div class="client-fields" data-for="torrent_client:realdebrid">
@@ -1552,6 +1558,42 @@ function Settings(root, page) {
             </div>
             <div id="rd-result"></div>
             <label class="switch"><input type="checkbox" name="delete_from_rd_after" ${s.delete_from_rd_after ? "checked" : ""}><i></i>Remove torrents from Real-Debrid after downloading</label>
+          </div>
+          <div class="client-fields" data-for="torrent_client:alldebrid">
+            <div class="pin-card" id="ad-pin-card">
+              <div class="pin-start" id="ad-pin-start">
+                <div><b id="ad-pin-title"></b><p class="desc" id="ad-pin-desc"></p></div>
+                <div class="pin-actions">
+                  <button class="btn" type="button" data-ad-test>Test</button>
+                  <button class="btn" type="button" id="ad-pin">Connect AllDebrid</button>
+                </div>
+              </div>
+              <div class="pin-wait" id="ad-pin-wait" hidden>
+                <span class="pin-code" id="ad-pin-code" aria-label="Your code"></span>
+                <div class="pin-steps">
+                  <b>Enter this code on AllDebrid</b>
+                  <p class="desc">Open the page below wherever you're signed in to AllDebrid, even on your phone. This page carries on by itself once you have.</p>
+                  <div class="pin-actions">
+                    <a class="btn" id="ad-pin-link" href="https://alldebrid.com/pin/" target="_blank" rel="noopener noreferrer">Open alldebrid.com/pin</a>
+                    <button class="btn ghost" type="button" id="ad-pin-cancel">Cancel</button>
+                  </div>
+                  <small class="pin-status"><span class="spinner" aria-hidden="true"></span><span id="ad-pin-left">Waiting for the code…</span></small>
+                </div>
+              </div>
+            </div>
+            <div id="ad-result"></div>
+            <details class="set-more">
+              <summary>Use an API key instead</summary>
+              <div class="field">
+                <label for="ad_api_key">AllDebrid API key</label>
+                <div class="input-row">
+                  <input class="input mono" id="ad_api_key" name="ad_api_key" type="password" placeholder="Paste an API key" value="${esc(s.ad_api_key)}" />
+                  <button class="btn" type="button" data-ad-test>Test</button>
+                </div>
+                <span class="hint">Create one at <a href="https://alldebrid.com/apikeys" target="_blank" rel="noopener" style="color:var(--accent)">alldebrid.com/apikeys</a>.</span>
+              </div>
+            </details>
+            <label class="switch"><input type="checkbox" name="delete_from_ad_after" ${s.delete_from_ad_after ? "checked" : ""}><i></i>Remove torrents from AllDebrid after downloading</label>
           </div>
           <div class="client-fields" data-for="torrent_client:qbittorrent">
             <div class="field">
@@ -1880,6 +1922,7 @@ function Settings(root, page) {
   const collect = () => {
     const data = Object.fromEntries(new FormData(form));
     data.delete_from_rd_after = form.delete_from_rd_after.checked;
+    data.delete_from_ad_after = form.delete_from_ad_after.checked;
     data.smart_search = form.smart_search.checked;
     data.auto_search = form.auto_search.checked;
     data.check_updates = form.check_updates.checked;
@@ -1894,6 +1937,7 @@ function Settings(root, page) {
   async function save(quiet) {
     state.settings = await api("/api/settings", { method: "PUT", body: collect() });
     form.rd_api_key.value = state.settings.rd_api_key;
+    form.ad_api_key.value = state.settings.ad_api_key;
     form.audiobookshelf_token.value = state.settings.audiobookshelf_token;
     form.brave_api_key.value = state.settings.brave_api_key;
     for (const key of ["prowlarr_api_key", "sabnzbd_api_key", "nzbget_password", "qbittorrent_password", "transmission_password", "deluge_password"]) {
@@ -2005,6 +2049,103 @@ function Settings(root, page) {
       out.innerHTML = `<div class="rd-result bad">${esc(err.message)}</div>`;
     }
     spinBtn(btn, false);
+  };
+
+  // AllDebrid: connect with a short code the user enters on alldebrid.com, or with a pasted key.
+  const adCard = () => {
+    const on = Boolean(state.settings.ad_configured);
+    $("#ad-pin-title", root).textContent = on ? "AllDebrid is connected" : "Connect with a code";
+    $("#ad-pin-desc", root).textContent = on
+      ? "Test checks the account. To use a different one, connect again."
+      : "Narratarr shows a short code, you enter it on alldebrid.com, and you’re connected. There’s no key to copy, and your password never comes here.";
+    $("#ad-pin", root).textContent = on ? "Connect again" : "Connect AllDebrid";
+    $("#ad-pin", root).classList.toggle("primary", !on);
+    $("#ad-pin-start [data-ad-test]", root).hidden = !on;
+    const tileNote = $('[data-v="alldebrid"] small', root);
+    if (on) tileNote.innerHTML = `<i class="dot ok"></i>Ready`;
+  };
+  const adLine = (u) => {
+    if (u.warning) return `<div class="rd-result bad">${esc(u.warning)}</div>`;
+    if (!u.premium && !u.trial) return `<div class="rd-result bad">Connected as ${esc(u.username)}, but the account isn’t premium. AllDebrid needs premium for torrents.</div>`;
+    const until = u.premium_until ? new Date(u.premium_until * 1000).toLocaleDateString(undefined, { dateStyle: "medium" }) : "";
+    return okLine(`Connected as <b>${esc(u.username)}</b> · ${u.trial ? "free trial" : "premium"}${until ? ` until ${esc(until)}` : ""}`);
+  };
+  adCard();
+  $$("[data-ad-test]", root).forEach((btn) => {
+    btn.onclick = async () => {
+      const out = $("#ad-result", root);
+      spinBtn(btn, true);
+      try {
+        await save(true);
+        adCard();
+        out.innerHTML = adLine(await api("/api/settings/test-ad", { method: "POST" }));
+      } catch (err) {
+        out.innerHTML = `<div class="rd-result bad">${esc(err.message)}</div>`;
+      }
+      spinBtn(btn, false);
+    };
+  });
+  let pinTimer = 0;
+  const pinStop = () => {
+    clearTimeout(pinTimer);
+    $("#ad-pin-wait", root).hidden = true;
+    $("#ad-pin-start", root).hidden = false;
+  };
+  $("#ad-pin-cancel", root).onclick = pinStop;
+  $("#ad-pin", root).onclick = async (e) => {
+    const btn = e.currentTarget;
+    const out = $("#ad-result", root);
+    const wait = $("#ad-pin-wait", root);
+    out.innerHTML = "";
+    spinBtn(btn, true);
+    let pin;
+    try {
+      pin = await api("/api/settings/alldebrid/pin", { method: "POST" });
+    } catch (err) {
+      out.innerHTML = `<div class="rd-result bad">${esc(err.message)}</div>`;
+      spinBtn(btn, false);
+      return;
+    }
+    spinBtn(btn, false);
+    $("#ad-pin-code", root).textContent = pin.pin;
+    $("#ad-pin-link", root).href = pin.user_url;
+    $("#ad-pin-start", root).hidden = true;
+    wait.hidden = false;
+    const ends = Date.now() + pin.expires_in * 1000;
+    const tick = async () => {
+      if (!wait.isConnected || wait.hidden) return; // cancelled, or left Settings
+      const left = Math.ceil((ends - Date.now()) / 60000);
+      if (left <= 0) {
+        pinStop();
+        out.innerHTML = `<div class="rd-result bad">That code has expired. Choose Connect AllDebrid to get a new one.</div>`;
+        return;
+      }
+      $("#ad-pin-left", root).textContent = `Waiting for the code · expires in ${left} min`;
+      try {
+        const r = await api("/api/settings/alldebrid/pin/check", { method: "POST", body: { pin: pin.pin } });
+        if (!wait.isConnected || wait.hidden) return;
+        if (r.connected) {
+          // The server saved the key and chose AllDebrid; keep anything else typed here as it was.
+          const { ad_api_key, ad_configured, torrent_client, torrent_configured } = r.settings;
+          Object.assign(state.settings, { ad_api_key, ad_configured, torrent_client, torrent_configured });
+          form.ad_api_key.value = ad_api_key;
+          if (saved) Object.assign(saved, { ad_api_key, torrent_client });
+          choose("torrent_client", torrent_client);
+          pinStop();
+          adCard();
+          updateRdPill();
+          statuses();
+          out.innerHTML = adLine(r);
+          return;
+        }
+      } catch (err) {
+        pinStop();
+        out.innerHTML = `<div class="rd-result bad">${esc(err.message)}</div>`;
+        return;
+      }
+      pinTimer = setTimeout(tick, 3000);
+    };
+    pinTimer = setTimeout(tick, 3000);
   };
 
   // Audiobookshelf: find the server, sign in once (which creates an API key), pick a library.

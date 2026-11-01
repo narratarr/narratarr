@@ -2,6 +2,12 @@
 
 All notable changes to Narratarr. The app shows this under **Settings → Updates**.
 
+## 0.7.3 — 2026-10-31
+
+- **AllDebrid.** Torrents can now go through AllDebrid as well as Real-Debrid. In **Settings → Downloads**, pick the AllDebrid tile and choose **Connect AllDebrid**: Narratarr shows a short code, you enter it on alldebrid.com (on any device where you're signed in), and you're connected. There's no API key to copy, and your password never reaches Narratarr. Pasting a key still works too.
+- If AllDebrid wants you to approve a new location, or won't serve your server's address (it refuses some data-centre and VPN addresses), Narratarr tells you so in plain words instead of failing quietly.
+- The torrent tiles are now grouped: **In the cloud** (Real-Debrid, AllDebrid) and **On this machine** (qBittorrent, Transmission, Deluge).
+
 ## 0.7.2 — 2026-10-30
 
 - **Settings, in pages.** Settings is no longer one long scroll. It's six short pages (General, Search & sources, Downloads, Audiobookshelf, Users and Updates), with a menu that shows each one's state at a glance: which download clients are ready, whether Prowlarr and Audiobookshelf are connected, how many people can sign in, and whether an update is out. Each page has its own address, so the browser's Back button works.

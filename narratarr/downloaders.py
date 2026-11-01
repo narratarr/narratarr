@@ -1,8 +1,8 @@
 """Download clients the user runs themselves: Usenet (SABnzbd, NZBGet) and torrents (qBittorrent, Transmission, Deluge).
 
 Each client reports a job in the same shape, so the download pipeline doesn't
-care which one is in use. Real-Debrid is handled separately (it's a service
-we download *from*, not a client that writes files somewhere for us).
+care which one is in use. Real-Debrid and AllDebrid are handled separately (they're
+services we download *from*, not clients that write files somewhere for us).
 """
 
 from __future__ import annotations
@@ -29,8 +29,9 @@ class ClientError(Exception):
 
 
 USENET_CLIENTS = {"sabnzbd": "SABnzbd", "nzbget": "NZBGet"}
+DEBRID = ("realdebrid", "alldebrid")  # cloud services: they fetch the torrent, we download the files
 TORRENT_CLIENTS = {
-    "realdebrid": "Real-Debrid", "qbittorrent": "qBittorrent", "transmission": "Transmission", "deluge": "Deluge",
+    "realdebrid": "Real-Debrid", "alldebrid": "AllDebrid", "qbittorrent": "qBittorrent", "transmission": "Transmission", "deluge": "Deluge",
 }
 
 
@@ -49,6 +50,8 @@ def torrent_configured(s: config.Settings, name: str | None = None) -> bool:
         return bool(s.transmission_url)
     if name == "deluge":
         return bool(s.deluge_url)
+    if name == "alldebrid":
+        return bool(s.ad_api_key)
     return bool(s.rd_api_key)
 
 
@@ -77,7 +80,18 @@ def torrent_client(s: config.Settings, transport: httpx.AsyncBaseTransport | Non
         from .deluge import Deluge
 
         return Deluge(s.deluge_url, s.deluge_password, transport=transport)
-    raise ClientError("Real-Debrid isn't a torrent client Narratarr can hand torrents to.")
+    raise ClientError(f"{TORRENT_CLIENTS.get(name, name)} isn't a torrent client Narratarr can hand torrents to.")
+
+
+def debrid_client(s: config.Settings, transport: httpx.AsyncBaseTransport | None = None):
+    """The cloud service torrents go through: AllDebrid if chosen, otherwise Real-Debrid."""
+    if s.torrent_client == "alldebrid":
+        from .alldebrid import AllDebrid
+
+        return AllDebrid(s.ad_api_key, transport=transport)
+    from .realdebrid import RealDebrid
+
+    return RealDebrid(s.rd_api_key, transport=transport)
 
 
 def category_for(s: config.Settings, name: str) -> str:

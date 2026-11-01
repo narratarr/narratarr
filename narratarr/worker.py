@@ -2,7 +2,7 @@
 
 For each queued book:
   resolving   - make sure we have the info hash (scrape the book page if needed)
-  caching     - hand the magnet to Real-Debrid and wait for it to finish on their side
+  caching     - hand the magnet to Real-Debrid or AllDebrid and wait for it to finish on their side
   downloading - unrestrict each link and stream the files to a temp folder
   organizing  - unzip, move into the library, add cover/description, notify Audiobookshelf
 
@@ -33,8 +33,9 @@ from pathlib import Path
 import httpx
 
 from . import audiobookshelf, config, db, downloaders, ebooks, importer, media, wanted
-from .downloaders import ClientError
-from .realdebrid import DEAD, RealDebrid, RealDebridError
+from .downloaders import ClientError, debrid_client
+from .alldebrid import AllDebrid, AllDebridError
+from .realdebrid import RealDebrid, RealDebridError
 from .sources import Details, ProwlarrError, get_source
 from .sources.prowlarr import fetch
 
@@ -340,7 +341,7 @@ class Worker:
         except asyncio.CancelledError:
             raise
         except (
-            RealDebridError, ClientError, ProwlarrError, httpx.HTTPError, ValueError, OSError, zipfile.BadZipFile
+            RealDebridError, AllDebridError, ClientError, ProwlarrError, httpx.HTTPError, ValueError, OSError, zipfile.BadZipFile
         ) as e:
             log.warning("Book %s failed: %s", book_id, readable_error(e))
             db.update(book_id, status="failed", error=readable_error(e), speed=0, detail="")
@@ -363,7 +364,7 @@ class Worker:
             raise ValueError("Pick a release for this book first: open it and choose Find releases.")
         elif book["protocol"] == "usenet":
             await self._process_usenet(book)
-        elif config.load().torrent_client != "realdebrid":
+        elif config.load().torrent_client not in downloaders.DEBRID:
             await self._process_torrent_client(book, source)
         else:
             await self._process_torrent(book, source)
@@ -407,38 +408,37 @@ class Worker:
         await self._finish(book, tmp, settings)
 
     async def _process_torrent(self, book: dict, source) -> None:
+        """Torrents through a cloud service (Real-Debrid or AllDebrid): it fetches them, we download the files."""
         settings = config.load()
         book_id = book["id"]
-        async with RealDebrid(settings.rd_api_key, transport=self._transport) as rd:
-            torrent_id = book["rd_torrent_id"]
-            if torrent_id:
-                try:
-                    await rd.torrent_info(torrent_id)
-                except RealDebridError:
-                    torrent_id = ""
-            if not torrent_id:
-                torrent_id = await self._add_to_rd(rd, book, source, settings)
-                db.update(book_id, rd_torrent_id=torrent_id)
+        async with debrid_client(settings, self._transport) as cloud:
+            # A job id is only reused on the service that made it (AllDebrid's are stored as "ad:<id>").
+            stored = book["rd_torrent_id"]
+            mine = stored.startswith(cloud.prefix) and (cloud.prefix or ":" not in stored)
+            job_id = stored[len(cloud.prefix):] if stored and mine else ""
+            if job_id and not await cloud.exists(job_id):
+                job_id = ""
+            if not job_id:
+                kind, payload = await self._torrent_payload(book, source, settings)
+                job_id = await cloud.add(kind, payload)
+                db.update(book_id, rd_torrent_id=cloud.prefix + job_id)
 
-            db.update(book_id, status="caching", detail="Sent to Real-Debrid")
-            info = await self._wait_for_rd(rd, book_id, torrent_id)
-
-            links = info.get("links") or []
-            if not links:
-                raise RealDebridError("Real-Debrid finished but returned no files.")
+            db.update(book_id, status="caching", detail=f"Sent to {cloud.label}")
+            await self._wait_for_cloud(cloud, book_id, job_id)
 
             db.update(book_id, status="downloading", progress=0, detail="Preparing download…")
-            direct = [await rd.unrestrict(link) for link in links]
+            direct = await cloud.direct_files(job_id)
             tmp = self._fresh_tmp(book, settings)
             await self._download(book_id, direct, tmp)
 
-            if settings.delete_from_rd_after:
+            remove = settings.delete_from_ad_after if isinstance(cloud, AllDebrid) else settings.delete_from_rd_after
+            if remove:
                 try:
-                    await rd.delete_torrent(torrent_id)
-                except (RealDebridError, httpx.HTTPError):
-                    log.info("Couldn't remove torrent %s from Real-Debrid", torrent_id)
+                    await cloud.remove(job_id)
+                except (RealDebridError, AllDebridError, httpx.HTTPError):
+                    log.info("Couldn't remove torrent %s from %s", job_id, cloud.label)
 
-        await self._finish(book, tmp, settings, rd_torrent_id="" if settings.delete_from_rd_after else torrent_id)
+        await self._finish(book, tmp, settings, rd_torrent_id="" if remove else cloud.prefix + job_id)
 
     async def _torrent_payload(self, book: dict, source, settings: config.Settings) -> tuple[str, str | bytes]:
         """What to hand a torrent client: ("magnet", uri) or ("torrent", .torrent bytes)."""
@@ -465,10 +465,6 @@ class Worker:
             url=book["source_url"], title=book["title"], info_hash=book["info_hash"], trackers=book["trackers"]
         ).magnet()
         return "magnet", magnet
-
-    async def _add_to_rd(self, rd: RealDebrid, book: dict, source, settings: config.Settings) -> str:
-        kind, payload = await self._torrent_payload(book, source, settings)
-        return await (rd.add_torrent(payload) if kind == "torrent" else rd.add_magnet(payload))
 
     async def _resume_job(self, client, book: dict, name: str) -> str:
         """The client's id for this book's job, if the client still has it (e.g. after a restart)."""
@@ -597,28 +593,15 @@ class Worker:
         extra = {"source_url": f"{book['source_url']}#imported-{int(time.time())}"} if moving else {}
         await self._finish(book, tmp, settings, **extra)
 
-    async def _wait_for_rd(self, rd: RealDebrid, book_id: int, torrent_id: str) -> dict:
+    async def _wait_for_cloud(self, cloud, book_id: int, job_id: str) -> None:
         started = time.monotonic()
         while True:
-            info = await rd.torrent_info(torrent_id)
-            status = info.get("status", "")
-            if status == "downloaded":
-                return info
-            if status in DEAD:
-                raise RealDebridError(f"Real-Debrid couldn't fetch this torrent ({status}).")
-            if status == "waiting_files_selection":
-                await rd.select_all_files(torrent_id)
-            label = {
-                "magnet_conversion": "Real-Debrid is reading the magnet…",
-                "waiting_files_selection": "Selecting files…",
-                "queued": "Queued on Real-Debrid",
-                "downloading": f"Real-Debrid is caching · {info.get('seeders') or 0} seeders",
-                "compressing": "Real-Debrid is packaging files…",
-                "uploading": "Real-Debrid is finishing up…",
-            }.get(status, f"Real-Debrid: {status}")
-            db.update(book_id, progress=float(info.get("progress") or 0), speed=int(info.get("speed") or 0), detail=label)
+            state = await cloud.poll(job_id)
+            if state["done"]:
+                return
+            db.update(book_id, progress=state["progress"], speed=state["speed"], detail=state["detail"])
             if time.monotonic() - started > RD_TIMEOUT_SECONDS:
-                raise RealDebridError("Timed out waiting for Real-Debrid. The torrent may have no seeders.")
+                raise TimeoutError(f"Timed out waiting for {cloud.label}. The torrent may have no seeders.")
             await asyncio.sleep(POLL_SECONDS)
 
     async def _download(self, book_id: int, files: list[dict], tmp: Path) -> None:
