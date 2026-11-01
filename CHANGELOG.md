@@ -2,7 +2,7 @@
 
 All notable changes to Narratarr. The app shows this under **Settings → Updates**.
 
-## Unreleased
+## 0.8.0 — 2026-11-01
 
 - **Notifications.** A new **Settings → Notifications** page sends word to **ntfy**, **Gotify**, **Discord** or any **webhook** when someone adds a book to Wanted (with who asked for it), and when a download starts, finishes or fails. Choose the events for each destination, and press **Test** to send one straight away. A webhook can carry headers (such as `Authorization: Bearer …`) and a JSON body of your own, with fill-ins like `{title}`, `{author}`, `{cover}`, `{username}` and `{event}`. AudioBookRequest's `{bookTitle}`, `{bookAuthors}` and `{bookCover}` work too.
 - Tokens, header values and webhook addresses are kept hidden in Settings and stored where only Narratarr can read them. A notification that can't be sent never holds up a download: it's tried once more, then noted on its destination.
