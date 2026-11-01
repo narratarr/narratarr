@@ -2,7 +2,7 @@
 
 All notable changes to Narratarr. The app shows this under **Settings → Updates**.
 
-## Unreleased
+## 0.8.1 — 2026-11-01
 
 - **Approve what listeners ask for.** A listener's request now waits under **Library → Awaiting approval** until an admin approves it. Nothing is searched for or downloaded before then. If the listener picked a release, approving downloads exactly that one; otherwise Narratarr starts looking. Admins see a badge on Library, and the **Added to Wanted** notification goes out for every listener request, including a release they picked themselves, saying it's waiting. Requests made through the app API wait too, and still show as `wanted` to apps. This is on by default; turn it off under **Settings → Users → Requests**. While it's on, only admins follow authors and series, since following adds books by itself.
 - **Listeners can take back their own requests**, until the book is in the library. Other people's requests, and books already downloaded, stay an admin's to remove.
