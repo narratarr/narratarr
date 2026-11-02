@@ -2,7 +2,7 @@
 
 All notable changes to Narratarr. The app shows this under **Settings → Updates**.
 
-## Unreleased
+## 0.8.7 — 2026-11-01
 
 - **Narratarr has a Discord**: <https://discord.gg/kB5EgmfBrA>, for help, ideas and news about new versions. It's linked from the sidebar, your account (on phones too), Settings → Updates and What's new.
 
