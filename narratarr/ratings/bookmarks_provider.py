@@ -28,6 +28,9 @@ class BookmarksProvider:
     def enabled(self) -> bool:
         return bool(bookmarks._get_entries())
 
+    def state(self, title: str, author: str, asin: str = "") -> str:
+        return "none"  # a local dataset: an entry is either rated or absent, never unrated
+
     def cached(self, title: str, author: str, asin: str = "") -> Rating | None:
         entry = bookmarks.lookup(title, author)
         if not entry:

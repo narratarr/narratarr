@@ -365,9 +365,9 @@ function bmRatingHTML(item) {
         ${second ? `<span class="bm-cons">${esc(second)}</span>` : ""}
       </a>`;
   } else {
-    // The same words on every card, whatever the source. David asked for this exact string, and a
-    // per-source gate left LibriVox cards silently blank instead.
-    inner = `<span class="bm-rating empty">No Rating</span>`;
+    // Two different facts, so two different strings. "The source knows this book and nobody has
+    // rated it" is information; "we never found it" is not the same thing.
+    inner = `<span class="bm-rating empty">${item.rating_state === "unrated" ? "No Rating Available" : "No Rating"}</span>`;
   }
   // Always emit the slot so every card reserves the same space and the row
   // sits at the same height whether or not a rating exists.

@@ -827,3 +827,43 @@ async def test_enrich_asks_the_provider_with_the_cleaned_title(store, monkeypatc
     enrich(item)
     assert asked == ["Alice's Adventures in Wonderland"], asked
     assert "rating" in item
+
+
+# ---- "nobody rated it" is not "we never found it" -------------------------------------------
+
+def test_a_resolved_but_unrated_book_carries_its_own_state(store):
+    store.put(AUDNEX_ASIN, "audnex", state="unrated")
+    p = AudnexProvider(store, regions=["uk"])
+    item = {"title": "Project Hail Mary", "author": "Andy Weir", "asin": AUDNEX_ASIN, "source": "audible"}
+    enrich(item, provider_obj=p)
+    assert item["rating"] is None
+    assert item["rating_state"] == "unrated", "the source knows the book and nobody has rated it"
+
+
+def test_an_unresolved_book_says_only_that_it_is_unknown(store):
+    p = AudnexProvider(store, regions=["uk"])
+    item = {"title": "Nowhere At All", "author": "Nobody", "source": "audiobookbay"}
+    enrich(item, provider_obj=p)
+    assert item["rating"] is None
+    assert item["rating_state"] == "none"
+
+
+def test_a_stale_unrated_row_stops_claiming_to_know_the_book(store):
+    """A remembered miss expires sooner than a rating; once it has, the card must go back to the
+    weaker claim rather than assert something the cache no longer supports."""
+    store.put(AUDNEX_ASIN, "audnex", state="unrated")
+    assert store.state(AUDNEX_ASIN, "audnex") == "unrated"
+
+    import sqlite3
+    import time
+
+    with sqlite3.connect(str(store.path)) as con:   # backdate it past RETRY_AFTER
+        con.execute("UPDATE rating SET checked_at = ? WHERE key = ?", (time.time() - 10**6, AUDNEX_ASIN))
+    assert store.state(AUDNEX_ASIN, "audnex") == "none"
+
+
+def test_the_client_prints_two_different_strings():
+    src = (Path(__file__).parent.parent / "narratarr/static/app.js").read_text()
+    line = next(l for l in src.splitlines() if "rating_state" in l and "bm-rating empty" in l)
+    assert '"No Rating Available"' in line, "an unrated-but-known book needs its own words"
+    assert ': "No Rating"' in line, "everything else keeps the old ones"

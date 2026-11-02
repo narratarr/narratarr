@@ -136,6 +136,9 @@ class GoodreadsProvider:
 
     # ---- page path: cache only -------------------------------------------------------------
 
+    def state(self, title: str, author: str, asin: str = "") -> str:
+        return self.store.state(self._key(title, author), self.name)
+
     def cached(self, title: str, author: str, asin: str = "") -> Rating | None:
         row = self.store.get(self._key(title, author), self.name)
         if not row or row.get("state") != "rated":

@@ -194,6 +194,7 @@ def enrich(item: dict, provider_obj=None, settings=None) -> dict:
     Always sets the key — the UI reserves a slot per card and reads `item.rating` without a guard.
     """
     item["rating"] = None
+    item["rating_state"] = "none"
     p = provider_obj if provider_obj is not None else provider(settings)
     if p is None:
         return item
@@ -205,7 +206,14 @@ def enrich(item: dict, provider_obj=None, settings=None) -> dict:
         return item
     if rating is not None:
         item["rating"] = rating.to_dict()
-    elif p.enabled:
+        return item
+    # No score, but "nobody has rated this yet" is not the same as "we never found it", and the
+    # difference is the only thing the card can honestly say about an unrated book.
+    try:
+        item["rating_state"] = p.state(title, item.get("author") or "", item.get("asin") or "")
+    except Exception as e:  # a ratings problem must never fail a search
+        log.warning("ratings state failed for %r: %s", item.get("title"), e)
+    if p.enabled:
         _enqueue(title, item.get("author") or "", item.get("asin") or "")
     return item
 

@@ -128,6 +128,11 @@ class AudnexProvider:
             return None
         return self._rating(row["score"], asin)
 
+    def state(self, title: str, author: str, asin: str = "") -> str:
+        """Audnex knows the book when it answered with a "0.0": nobody has rated that edition."""
+        asin = asin or self._known_asin(title, author)
+        return self.store.state(asin, self.name, ttl=RATING_TTL) if asin else "none"
+
     def _known_asin(self, title: str, author: str) -> str:
         from .store import key_for
 

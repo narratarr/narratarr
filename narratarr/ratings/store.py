@@ -123,6 +123,11 @@ class Store:
             )
             con.commit()
 
+    def state(self, key: str, provider: str, ttl: float | None = None) -> str:
+        """`rated`, `unrated`, or `none` for a row that is absent or stale."""
+        row = self.get(key, provider, ttl)
+        return (row or {}).get("state", "none")
+
     def count(self, provider: str) -> dict:
         self._init()
         rows = self._con().execute(
