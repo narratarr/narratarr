@@ -2,7 +2,7 @@
 
 All notable changes to Narratarr. The app shows this under **Settings → Updates**.
 
-## Unreleased
+## 0.8.5 — 2026-11-01
 
 - **A fresh look for Discover.** The search bar now says where it's looking ("in Audible catalog ▾") and switches sources from there. Sources are grouped by what they do (free downloads, your indexers, catalogs) with a dot showing which are ready. Audiobooks or Ebooks sits beside the heading. While you browse, one book gets a **Spotlight**, with what you already have by the same author, and a **New from authors you follow** shelf runs above the grid. Every cover shows where the book stands: In library, Downloading 42%, Awaiting approval, Wanted or Failed.
 - **The Library** opens with any requests waiting for approval, which an admin can approve, give a release, or decline right there (a listener sees their own and can take them back). Then Continue listening, then everything, with new filters (Listening, Finished), a sort (recently added, recently listened, title, author), and a line under each book saying how far you are, who asked for it, or why it failed.
