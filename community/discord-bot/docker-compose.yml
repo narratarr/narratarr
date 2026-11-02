@@ -1,0 +1,8 @@
+# The Narratarr Discord bot: react with 🎧 on the welcome post to unlock posting.
+# Put the bot's token in a .env file next to this one (DISCORD_TOKEN=...), then: docker compose up -d --build
+services:
+  narratarr-discord:
+    build: .
+    container_name: narratarr-discord
+    restart: unless-stopped
+    env_file: .env
