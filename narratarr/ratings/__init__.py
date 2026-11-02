@@ -92,7 +92,7 @@ def compact_count(n: int | None) -> str:
 
 def available() -> dict[str, str]:
     """Provider keys the user can pick in Settings."""
-    return {"bookmarks": "Bookmarks", "goodreads": "Goodreads (unofficial)"}
+    return {"audnex": "Audible", "bookmarks": "Bookmarks", "goodreads": "Goodreads (unofficial)"}
 
 
 def make_rating(score, count, url: str, source: str, label: str = "", tooltip: str = "") -> Rating | None:
@@ -141,6 +141,10 @@ def provider(settings=None):
         from .bookmarks_provider import BookmarksProvider
 
         return BookmarksProvider(store)
+    if name == "audnex":
+        from .audnex import AudnexProvider
+
+        return AudnexProvider(store)
     if name == "goodreads":
         from .goodreads import GoodreadsProvider
 
@@ -183,36 +187,45 @@ def enrich(item: dict, provider_obj=None, settings=None) -> dict:
     if p is None:
         return item
     try:
-        rating = p.cached(item.get("title") or "", item.get("author") or "")
+        rating = p.cached(item.get("title") or "", item.get("author") or "", item.get("asin") or "")
     except Exception as e:  # a ratings problem must never fail a search
         log.warning("ratings lookup failed for %r: %s", item.get("title"), e)
         return item
     if rating is not None:
         item["rating"] = rating.to_dict()
     elif p.enabled:
-        _enqueue(item.get("title") or "", item.get("author") or "")
+        _enqueue(item.get("title") or "", item.get("author") or "", item.get("asin") or "")
     return item
 
 
 def sort_items(items: list[dict]) -> list[dict]:
-    """Sort by the Bayesian score, unrated last."""
-    return sorted(items, key=lambda i: (i.get("rating") or {}).get("bayes", -1), reverse=True)
+    """Highest score first, unrated last.
+
+    No weighted score any more: the source of record publishes a bare average with no count, and a
+    weighting invented to stand in for a missing count is a number we made up. A tie keeps the
+    order it arrived in, so the page does not reshuffle between identical requests.
+    """
+    def key(item):
+        score = (item.get("rating") or {}).get("score")
+        return (score is None, -(score or 0.0))
+
+    return sorted(items, key=key)
 
 
-def _enqueue(title: str, author: str) -> None:
+def _enqueue(title: str, author: str, asin: str = "") -> None:
     if not title or _queue.qsize() > 500:
         return
-    _queue.put_nowait((title, author))
+    _queue.put_nowait((title, author, asin))
 
 
 async def _drain() -> None:
     """One book at a time, at the provider's own pace. Never started in tests."""
     p = provider()
     while True:
-        title, author = await _queue.get()
+        title, author, asin = await _queue.get()
         try:
             if p is not None:
-                await p.fetch_and_store(title, author)
+                await p.fetch_and_store(title, author, asin)
         except Exception as e:
             log.warning("ratings fetch failed for %r: %s", title, e)
         finally:

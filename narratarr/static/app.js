@@ -351,24 +351,23 @@ function cardHTML(item, lib, i = 0) {
     </article>`;
 }
 
-const RATING_SOURCES = new Set(["audiobookbay", "prowlarr", "audible", "torznab"]);
-
 function bmRatingHTML(item) {
-  // `rating` is whatever provider Settings selected: Goodreads shows the score and the number of
-  // ratings, Bookmarks shows the score and the consensus line.
+  // `rating` is whatever provider Settings selected. `label` is the small mark beside the score:
+  // "Audible" where there is no count to show, or a consensus line from Bookmarks.
   const r = item.rating || item.bookmarks_rating;
   let inner = "";
   if (r && (r.score_text || r.display)) {
     const score = r.score_text || `★ ${Number(r.R).toFixed(1)}`;
     const second = r.label || r.consensus || (r.count ? `${r.count}` : "");
     const tip = r.tooltip || r.display || "";
-    const where = r.source === "goodreads" ? "Goodreads" : "Bookmarks";
-    inner = `<a class="bm-rating" href="${esc(r.url)}" target="_blank" rel="noopener" title="${esc(tip)} — open on ${where}">
+    inner = `<a class="bm-rating" href="${esc(r.url)}" target="_blank" rel="noopener" title="${esc(tip)}">
         <span class="bm-score">${esc(score)}</span>
         ${second ? `<span class="bm-cons">${esc(second)}</span>` : ""}
       </a>`;
-  } else if (RATING_SOURCES.has(item.source)) {
-    inner = `<span class="bm-rating empty">No rating yet</span>`;
+  } else {
+    // The same words on every card, whatever the source. David asked for this exact string, and a
+    // per-source gate left LibriVox cards silently blank instead.
+    inner = `<span class="bm-rating empty">No Rating</span>`;
   }
   // Always emit the slot so every card reserves the same space and the row
   // sits at the same height whether or not a rating exists.
@@ -579,7 +578,7 @@ function Discover(root) {
     let items = d.items.filter((i) => (!d.lang || i.language === d.lang) && (!d.fmt || i.format.toUpperCase() === d.fmt))
       .filter((i) => d.allLangs || i.lang_ok !== false);
     const by = {
-      rating: (a, b) => ((b.rating?.bayes ?? b.bookmarks_rating?.R ?? -1) - (a.rating?.bayes ?? a.bookmarks_rating?.R ?? -1)),
+      rating: (a, b) => { const s = (x) => x.rating?.score ?? x.bookmarks_rating?.R ?? null; const av = s(a), bv = s(b); if (av == null && bv == null) return 0; if (av == null) return 1; if (bv == null) return -1; return bv - av; },
       newest: (a, b) => (Date.parse(b.posted) || 0) - (Date.parse(a.posted) || 0),
       largest: (a, b) => sizeOf(b.size) - sizeOf(a.size),
       smallest: (a, b) => sizeOf(a.size) - sizeOf(b.size),

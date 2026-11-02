@@ -79,16 +79,23 @@ class Store:
 
     # ---- ratings ---------------------------------------------------------------------------
 
-    def get(self, key: str, provider: str) -> dict | None:
-        """The cached rating, or None. Never touches the network."""
+    def get(self, key: str, provider: str, ttl: float | None = None) -> dict | None:
+        """The cached rating, or None. Never touches the network.
+
+        `ttl` expires a rating that was found (a score does drift); a remembered miss always uses
+        `RETRY_AFTER`, so a book that had no rating is looked at again sooner than one that did.
+        """
         self._init()
         row = self._con().execute(
             "SELECT * FROM rating WHERE key = ? AND provider = ?", (key, provider)
         ).fetchone()
         if row is None:
             return None
-        if row["state"] == "unrated" and time.time() - row["checked_at"] < RETRY_AFTER:
-            return {"state": "unrated"}
+        age = time.time() - row["checked_at"]
+        if row["state"] == "unrated":
+            return {"state": "unrated"} if age < RETRY_AFTER else None
+        if ttl is not None and age > ttl:
+            return None
         return dict(row)
 
     def put(self, key: str, provider: str, **fields) -> None:

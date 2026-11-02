@@ -28,7 +28,7 @@ class BookmarksProvider:
     def enabled(self) -> bool:
         return bool(bookmarks._get_entries())
 
-    def cached(self, title: str, author: str) -> Rating | None:
+    def cached(self, title: str, author: str, asin: str = "") -> Rating | None:
         entry = bookmarks.lookup(title, author)
         if not entry:
             return None
@@ -46,5 +46,5 @@ class BookmarksProvider:
             extra={"R": r, "consensus": entry.get("consensus", ""), "flags": flags},
         )
 
-    async def fetch_and_store(self, title: str, author: str) -> Rating | None:
+    async def fetch_and_store(self, title: str, author: str, asin: str = "") -> Rating | None:
         return self.cached(title, author)  # local data: nothing to fetch

@@ -136,7 +136,7 @@ class GoodreadsProvider:
 
     # ---- page path: cache only -------------------------------------------------------------
 
-    def cached(self, title: str, author: str) -> Rating | None:
+    def cached(self, title: str, author: str, asin: str = "") -> Rating | None:
         row = self.store.get(self._key(title, author), self.name)
         if not row or row.get("state") != "rated":
             return None
@@ -149,7 +149,7 @@ class GoodreadsProvider:
 
     # ---- background: the only place that fetches -------------------------------------------
 
-    async def fetch_and_store(self, title: str, author: str) -> Rating | None:
+    async def fetch_and_store(self, title: str, author: str, asin: str = "") -> Rating | None:
         key = self._key(title, author)
         hit = await self._resolver.resolve(title, author)
         if not hit:
