@@ -80,6 +80,7 @@ class Settings:
     auto_search_hours: int = 12
     audible_region: str = "us"
     check_updates: bool = True  # one request a day to GitHub's releases API
+    ratings_provider: str = "bookmarks"  # "bookmarks", "goodreads", or "" for none
     auth_local_bypass: bool = False  # skip sign-in for requests from this machine and the home network
     listener_approval: bool = True  # a listener's request waits for an admin before anything is searched or downloaded
     languages: str = ""  # the languages books should be in, e.g. "German, English" (blank: any)
@@ -118,6 +119,7 @@ CHOICES = {
     "usenet_client": ("sabnzbd", "nzbget"),
     "torrent_client": ("realdebrid", "alldebrid", "torbox", "premiumize", "qbittorrent", "transmission", "deluge"),
     "audible_region": ("us", "uk", "ca", "au", "in", "de", "fr", "it", "es", "jp"),
+    "ratings_provider": ("bookmarks", "goodreads", ""),
 }
 # Each service's secrets. Changing the service's address to a different host clears them, so a
 # saved key can never be sent to a machine the user didn't enter it for.

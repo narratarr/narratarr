@@ -351,11 +351,28 @@ function cardHTML(item, lib, i = 0) {
     </article>`;
 }
 
+const RATING_SOURCES = new Set(["audiobookbay", "prowlarr", "audible", "torznab"]);
+
 function bmRatingHTML(item) {
-  const r = item.bookmarks_rating;
-  if (r && r.display) return `<a class="bm-rating" href="${esc(r.url)}" target="_blank" rel="noopener" title="View on Bookmarks">${esc(r.display)}</a>`;
-  if (r === null || r === undefined) return "";
-  return `<span class="bm-rating empty">No Bookmarks rating yet</span>`;
+  // `rating` is whatever provider Settings selected: Goodreads shows the score and the number of
+  // ratings, Bookmarks shows the score and the consensus line.
+  const r = item.rating || item.bookmarks_rating;
+  let inner = "";
+  if (r && (r.score_text || r.display)) {
+    const score = r.score_text || `★ ${Number(r.R).toFixed(1)}`;
+    const second = r.label || r.consensus || (r.count ? `${r.count}` : "");
+    const tip = r.tooltip || r.display || "";
+    const where = r.source === "goodreads" ? "Goodreads" : "Bookmarks";
+    inner = `<a class="bm-rating" href="${esc(r.url)}" target="_blank" rel="noopener" title="${esc(tip)} — open on ${where}">
+        <span class="bm-score">${esc(score)}</span>
+        ${second ? `<span class="bm-cons">${esc(second)}</span>` : ""}
+      </a>`;
+  } else if (RATING_SOURCES.has(item.source)) {
+    inner = `<span class="bm-rating empty">No rating yet</span>`;
+  }
+  // Always emit the slot so every card reserves the same space and the row
+  // sits at the same height whether or not a rating exists.
+  return `<div class="bm-slot">${inner}</div>`;
 }
 
 const shortLength = (len) => (len || "").replace(/ hours?/, "h").replace(/ and /, " ").replace(/ minutes?/, "m");
@@ -562,7 +579,7 @@ function Discover(root) {
     let items = d.items.filter((i) => (!d.lang || i.language === d.lang) && (!d.fmt || i.format.toUpperCase() === d.fmt))
       .filter((i) => d.allLangs || i.lang_ok !== false);
     const by = {
-      rating: (a, b) => ((b.bookmarks_rating?.R ?? -1) - (a.bookmarks_rating?.R ?? -1)),
+      rating: (a, b) => ((b.rating?.bayes ?? b.bookmarks_rating?.R ?? -1) - (a.rating?.bayes ?? a.bookmarks_rating?.R ?? -1)),
       newest: (a, b) => (Date.parse(b.posted) || 0) - (Date.parse(a.posted) || 0),
       largest: (a, b) => sizeOf(b.size) - sizeOf(a.size),
       smallest: (a, b) => sizeOf(a.size) - sizeOf(b.size),
@@ -2321,6 +2338,22 @@ function Settings(root, page) {
               ${[["us", "United States"], ["uk", "United Kingdom"], ["ca", "Canada"], ["au", "Australia"], ["in", "India"], ["de", "Germany"], ["fr", "France"], ["it", "Italy"], ["es", "Spain"], ["jp", "Japan"]]
                 .map(([v, l]) => `<option value="${v}" ${s.audible_region === v ? "selected" : ""}>${l}</option>`).join("")}
             </select>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" data-page="search">
+        <div class="ph"><h3>Ratings</h3><p class="desc">Where the star pill on every Discover card comes from. Ratings are read from a local cache, never fetched while a page loads: a book with no rating yet is filled in the background and shows up on your next search.</p></div>
+        <div class="body">
+          <div class="field">
+            <label>Show ratings from</label>
+            <div class="segmented" data-choice="ratings_provider" role="radiogroup" aria-label="Ratings provider">
+              <button type="button" role="radio" data-v="bookmarks">Bookmarks</button>
+              <button type="button" role="radio" data-v="goodreads">Goodreads</button>
+              <button type="button" role="radio" data-v="">Off</button>
+            </div>
+            <input type="hidden" name="ratings_provider" value="${esc(s.ratings_provider ?? "bookmarks")}" />
+            <span class="hint">Goodreads averages are shown with the number of ratings behind them, and sorted by a weighted score, so a book with a dozen ratings cannot outrank one with two million. Scores under 50 ratings are hidden. Finding a book uses Open Library and Wikidata, then Goodreads' own book pages &mdash; never their search, which they ask automated clients not to use.</span>
           </div>
         </div>
       </section>

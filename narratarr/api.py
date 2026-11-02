@@ -26,8 +26,8 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from . import (apiv1, audible, audiobookshelf, auth, brave, config, db, downloaders, ebooks, importer, media, search,
-               tokens, updates, users, wanted)
+from . import (apiv1, audible, audiobookshelf, auth, brave, config, db, downloaders, ebooks, importer, media, ratings,
+               search, tokens, updates, users, wanted)
 from .audiobookshelf import Audiobookshelf, AudiobookshelfError
 from .downloaders import ClientError
 from . import alldebrid, languages, notify
@@ -55,6 +55,7 @@ async def lifespan(app: FastAPI):
     app.state.worker = worker
     app.state.tasks = set()
     worker.start()
+    ratings.start_filler()
     yield
     await worker.stop()
 
@@ -257,15 +258,15 @@ async def discover(q: str = "", category: str = "", page: int = 1, source: str =
             languages.detect(item.get("title") or "") if src.name in ("prowlarr", "torznab", "audiobookbay") else "")
         item["lang_ok"] = languages.allowed(item["language"], want)
         item["library"] = {"id": (b or e)["id"], "status": (b or e)["status"]} if b or e else None
-    # Bookmarks ratings enrichment
-    try:
-        from . import bookmarks as _bm
-        for item in data["items"]:
-            _bm.enrich_item(item)
-        if sort == "rating":
-            data["items"].sort(key=lambda x: (x.get("bookmarks_rating") or {}).get("R", -1), reverse=True)
-    except Exception:
-        pass
+    # Ratings: read from the cache only. Anything missing is filled in the background and shows
+    # up on the next search, so a slow ratings provider never holds up a page.
+    from . import ratings
+
+    _provider = ratings.provider()
+    for item in data["items"]:
+        ratings.enrich(item, provider_obj=_provider)
+    if sort == "rating":
+        data["items"] = ratings.sort_items(data["items"])
     if src.name == "prowlarr" and kind == "ebook" and not data["items"]:
         data["note"] = await _no_ebook_indexers(src)
     return data
