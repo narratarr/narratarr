@@ -2,7 +2,7 @@
 
 All notable changes to Narratarr. The app shows this under **Settings → Updates**.
 
-## Unreleased
+## 0.8.6 — 2026-11-01
 
 - **Preferred languages.** Settings → Search & sources → Languages: pick the languages your books should be in (say, German). Discover hides books it can tell are in another language, with one click to show them; automatic search never grabs a release in another language, and Pick a release shows each release's language, with the others faded (you can still grab them). Narratarr goes by what the source says, or the release name (`[German]`, `.GER.`, `Hörbuch`, `livre audio`…), never by words in the book's own title, and a book whose language it can't tell is never hidden.
 - **Folder layout presets**: Author / Title, Author / Series / Title, and **Audiobookshelf style**, `{author}/{series}/Vol {series_number} - {year} - {title} {{narrator}}`, so Audiobookshelf reads the series, volume, year and narrator straight from the folder name. Double braces keep braces in a name.
