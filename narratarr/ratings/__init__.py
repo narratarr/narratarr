@@ -23,6 +23,13 @@ from .store import Store
 
 log = logging.getLogger("narratarr.ratings")
 
+# The vote floor has to match what each source's number actually counts. Goodreads publishes
+# reader votes, in the millions, so a book with twelve of them is noise. Bookmarks publishes critic
+# reviews, single digits by design, so the same floor would blank every entry it has and the
+# provider would look broken while being correct. One map, one place to add the next provider.
+MIN_COUNT_BY_SOURCE = {"goodreads": MIN_COUNT, "bookmarks": 3}
+MIN_COUNT_DEFAULT = 3
+
 PRIOR_SCORE = 3.9       # the average a new book is treated as having, so few votes pull toward it
 PRIOR_WEIGHT = 1000     # how many real votes the prior is worth
 UNKNOWN_COUNT_WEIGHT = 100  # what a rating with no count is worth: real, but weak evidence
@@ -95,11 +102,13 @@ def available() -> dict[str, str]:
     return {"audnex": "Audible", "bookmarks": "Bookmarks", "goodreads": "Goodreads (unofficial)"}
 
 
-def make_rating(score, count, url: str, source: str, label: str = "", tooltip: str = "") -> Rating | None:
+def make_rating(score, count, url: str, source: str, label: str = "", tooltip: str = "",
+                extra: dict | None = None) -> Rating | None:
     """The one place a score becomes a rating, and the one place the vote floor is applied.
 
-    Below MIN_COUNT ratings a score is noise, and a thin 5.0 outranks a solid 4.3 on any honest
-    list. Refusing here means no caller has to remember the rule.
+    Below its source's floor a score is noise, and a thin 5.0 outranks a solid 4.3 on any honest
+    list. Refusing here means no caller has to remember the rule, and the floor lives next to the
+    source's name so the next provider cannot inherit the wrong one by accident.
     """
     if score is None:
         return None
@@ -110,7 +119,8 @@ def make_rating(score, count, url: str, source: str, label: str = "", tooltip: s
             count = int(count)
         except (TypeError, ValueError):
             count = None
-    if count is not None and count < MIN_COUNT:
+    floor = MIN_COUNT_BY_SOURCE.get(source, MIN_COUNT_DEFAULT)
+    if count is not None and count < floor:
         return None
     source_label = {"goodreads": "Goodreads", "bookmarks": "Bookmarks"}.get(source, source)
     if tooltip:
@@ -127,6 +137,7 @@ def make_rating(score, count, url: str, source: str, label: str = "", tooltip: s
         url=url or "",
         label=label or compact_count(count),
         tooltip=tooltip,
+        extra=extra or {},
     )
 
 
@@ -199,15 +210,16 @@ def enrich(item: dict, provider_obj=None, settings=None) -> dict:
 
 
 def sort_items(items: list[dict]) -> list[dict]:
-    """Highest score first, unrated last.
+    """Ordered by the weighted score, unrated last.
 
-    Deliberately the raw score: the provider of record publishes a bare average with no count, so
-    every rating from it carries the same evidence and a weight would only reorder what the score
-    already orders. `Rating.bayes` stays available for a source that does publish counts.
+    The weight is what stops a twelve-vote 5.0 outranking two million votes at 4.3. Where a source
+    publishes no count every rating from it carries the same weight, so ordering among those falls
+    back to the score itself — which is the right answer, and the reason a weighted sort and a raw
+    one agree for that provider alone.
     """
     def key(item):
-        score = (item.get("rating") or {}).get("score")
-        return (score is None, -(score or 0.0))
+        weight = (item.get("rating") or {}).get("bayes")
+        return (weight is None, -(weight or 0.0))
 
     return sorted(items, key=key)
 

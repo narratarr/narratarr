@@ -14,6 +14,7 @@ import pytest
 from narratarr import config
 from narratarr.ratings import audnex as audnex_module
 from narratarr.ratings import Rating, compact_count, enrich, make_rating, provider, sort_items
+from narratarr.ratings import bookmarks_provider
 from narratarr.ratings.audnex import (
     AudnexProvider,
     RegionUnavailable,
@@ -245,14 +246,49 @@ def test_compact_count():
     assert compact_count(None) == ""
 
 
-def test_the_vote_floor_is_what_stops_a_thin_score():
-    """The floor is a real filter and it still applies where a count exists. Sorting is by the
-    score itself, so the floor is the only thing standing between a 12-vote 5.0 and the top."""
-    assert make_rating(5.0, 12, "u", "goodreads") is None
-    assert make_rating(5.0, 60, "u", "goodreads") is not None
-    thin = make_rating(5.0, 60, "u", "goodreads").to_dict()
+def test_a_dozen_votes_do_not_outrank_two_million():
+    """The weight is the point: a 12-rating 5.0 must not top a 4.3 backed by two million."""
+    assert make_rating(5.0, 12, "u", "goodreads") is None       # under the floor
+    thin_ok = make_rating(5.0, 60, "u", "goodreads").to_dict()
     solid = make_rating(4.3, 2_000_000, "u", "goodreads").to_dict()
-    assert sort_items([{"rating": thin}, {"rating": solid}])[0]["rating"]["score"] == 5.0
+    assert thin_ok["score"] > solid["score"]
+    assert thin_ok["bayes"] < solid["bayes"], "the score is higher but the evidence is not"
+    assert sort_items([{"rating": thin_ok}, {"rating": solid}])[0]["rating"]["score"] == 4.3
+
+
+def test_the_vote_floor_is_per_source_not_global():
+    """A Bookmarks count is critic reviews, 7 to 10 in the real dataset. A global floor of 50 would
+    refuse every one of them and the provider would look broken while behaving as designed."""
+    assert make_rating(3.9, 8, "u", "bookmarks") is not None
+    assert make_rating(3.9, 2, "u", "bookmarks") is None          # still refuses a single review
+    assert make_rating(4.3, 8, "u", "goodreads") is None          # a Goodreads 8 is noise
+    assert make_rating(4.3, 8, "u", "somebody-new") is not None   # unknown source: the low default
+
+
+def test_bookmarks_ratings_are_unchanged_by_going_through_the_gate():
+    """Routing it through make_rating must not alter one byte of what the pill shows: same score,
+    same one-decimal text, same consensus label, same tooltip, same R and flags."""
+    from narratarr import bookmarks
+
+    entries = bookmarks._get_entries()
+    assert entries, "the committed dataset should still load"
+    seen = 0
+    for entry in entries:
+        got = bookmarks_provider.BookmarksProvider().cached(entry["title"], entry.get("author", ""))
+        if got is None:
+            continue
+        seen += 1
+        reviews = sum(int(v or 0) for v in (entry.get("flags") or {}).values())
+        consensus = entry.get("consensus", "")
+        assert got.score == float(entry["R"])
+        assert got.scale == 4.0
+        assert got.count == (reviews or None)
+        assert got.label == consensus
+        assert got.tooltip == f"{float(entry['R']):.1f} from {reviews} critics on Bookmarks — {consensus}".strip(" —")
+        assert got.to_dict()["score_text"] == f"★ {float(entry['R']):.1f}"
+        assert got.to_dict()["R"] == float(entry["R"])
+        assert got.to_dict()["flags"] == (entry.get("flags") or {})
+    assert seen == len(entries), "a real Bookmarks entry was refused by the floor"
 
 
 def test_count_less_ratings_order_by_score_among_themselves():
