@@ -13,8 +13,9 @@ Discover a book, click once, and it lands in your library, tagged, organized and
 [![Docker image](https://github.com/narratarr/narratarr/actions/workflows/docker.yml/badge.svg)](https://github.com/narratarr/narratarr/pkgs/container/narratarr)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-ec6f55)](pyproject.toml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-f8c66e)](LICENSE)
+[![Discord](https://img.shields.io/badge/Discord-join%20the%20community-5865F2?logo=discord&logoColor=white)](https://discord.gg/kB5EgmfBrA)
 
-[**Install**](#-install) · [**Features**](#-features) · [**How it works**](#-how-it-works) · [**Configuration**](#%EF%B8%8F-configuration) · [**FAQ**](#-faq)
+[**Install**](#-install) · [**Features**](#-features) · [**How it works**](#-how-it-works) · [**Configuration**](#%EF%B8%8F-configuration) · [**FAQ**](#-faq) · [**Discord**](https://discord.gg/kB5EgmfBrA)
 
 <br>
 
