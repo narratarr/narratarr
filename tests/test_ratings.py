@@ -237,13 +237,34 @@ def test_compact_count():
     assert compact_count(None) == ""
 
 
+def test_a_dozen_votes_do_not_outrank_two_million():
+    """The weight is the point: a 12-rating 5.0 must not top a 4.3 backed by two million."""
+    thin = make_rating(5.0, 12, "u", "goodreads")          # refused: under the floor
+    assert thin is None
+    thin_ok = make_rating(5.0, 60, "u", "goodreads").to_dict()
+    solid = make_rating(4.3, 2_000_000, "u", "goodreads").to_dict()
+    assert thin_ok["score"] > solid["score"]
+    assert thin_ok["bayes"] < solid["bayes"], "the score is higher but the evidence is not"
+    assert sort_items([{"rating": thin_ok}, {"rating": solid}])[0]["rating"]["score"] == 4.3
+
+
+def test_count_less_ratings_order_by_score_among_themselves():
+    """Every Audnex rating has an unknown count, so they all carry the same weight and the score
+    decides between them — which is why a weighted sort suits that provider too."""
+    high = make_rating(4.9, None, "u", "audnex").to_dict()
+    mid = make_rating(4.5, None, "u", "audnex").to_dict()
+    low = make_rating(3.1, None, "u", "audnex").to_dict()
+    ranked = sort_items([{"rating": mid}, {"rating": low}, {"rating": high}])
+    assert [r["rating"]["score"] for r in ranked] == [4.9, 4.5, 3.1]
+
+
 def test_sorting_keeps_nulls_last():
     """No weighting: there is no count to weight by, and an invented weight is a made-up number."""
     items = [
-        {"rating": {"score": 4.1}},
+        {"rating": make_rating(4.1, 500, "u", "goodreads").to_dict()},
         {"rating": None},
-        {"rating": {"score": 4.9}},
-        {"rating": {"score": 3.5}},
+        {"rating": make_rating(4.9, 500, "u", "goodreads").to_dict()},
+        {"rating": make_rating(3.5, 500, "u", "goodreads").to_dict()},
     ]
     assert [i["rating"] and i["rating"]["score"] for i in sort_items(items)] == [4.9, 4.1, 3.5, None]
 

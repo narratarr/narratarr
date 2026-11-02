@@ -199,15 +199,17 @@ def enrich(item: dict, provider_obj=None, settings=None) -> dict:
 
 
 def sort_items(items: list[dict]) -> list[dict]:
-    """Highest score first, unrated last.
+    """Ordered by the weighted score, unrated last.
 
-    No weighted score any more: the source of record publishes a bare average with no count, and a
-    weighting invented to stand in for a missing count is a number we made up. A tie keeps the
-    order it arrived in, so the page does not reshuffle between identical requests.
+    The weight is what stops a twelve-vote 5.0 outranking two million votes at 4.3. Where a source
+    publishes no count (Audnex publishes none at all) every rating from it carries the same
+    UNKNOWN_COUNT_WEIGHT, so ordering among them falls back to the score itself — which is the
+    right answer, and the reason a weighted sort and a raw one agree for that provider alone.
     """
     def key(item):
-        score = (item.get("rating") or {}).get("score")
-        return (score is None, -(score or 0.0))
+        rating = item.get("rating") or {}
+        weighted = rating.get("bayes")
+        return (weighted is None, -(weighted or 0.0))
 
     return sorted(items, key=key)
 
