@@ -578,7 +578,7 @@ function Discover(root) {
     let items = d.items.filter((i) => (!d.lang || i.language === d.lang) && (!d.fmt || i.format.toUpperCase() === d.fmt))
       .filter((i) => d.allLangs || i.lang_ok !== false);
     const by = {
-      rating: (a, b) => { const s = (x) => x.rating?.bayes ?? x.bookmarks_rating?.R ?? null; const av = s(a), bv = s(b); if (av == null && bv == null) return 0; if (av == null) return 1; if (bv == null) return -1; return bv - av; },
+      rating: (a, b) => { const s = (x) => x.rating?.score ?? x.bookmarks_rating?.R ?? null; const av = s(a), bv = s(b); if (av == null && bv == null) return 0; if (av == null) return 1; if (bv == null) return -1; return bv - av; },
       newest: (a, b) => (Date.parse(b.posted) || 0) - (Date.parse(a.posted) || 0),
       largest: (a, b) => sizeOf(b.size) - sizeOf(a.size),
       smallest: (a, b) => sizeOf(a.size) - sizeOf(b.size),
@@ -2352,7 +2352,7 @@ function Settings(root, page) {
             </select>
           </div>
           <div class="set-row">
-            <label><b>Audible storefronts</b><small>Ratings only exist in the regions where a title is sold, so each storefront is tried in turn and the first that has the book wins. More regions means more coverage and more requests. The one that answered is remembered for that book.</small></label>
+            <label><b>Audible storefronts</b><small>A book is only sold in some countries, and the ratings service only answers from a country that sells it. Narratarr asks your list in order, then the country the book itself came from, so the single United Kingdom entry is enough for most titles. The storefront that answered is remembered for that book. Add more only if the same cards keep showing <b>No Rating</b>: more regions means more coverage and more requests.</small></label>
             <div id="audnex-regions"></div>
             <input type="hidden" name="audnex_regions" value="${esc((s.audnex_regions || ["uk"]).join(","))}" />
             <div><button class="btn" type="button" id="add-region">Add a region</button></div>

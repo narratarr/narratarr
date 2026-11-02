@@ -245,15 +245,14 @@ def test_compact_count():
     assert compact_count(None) == ""
 
 
-def test_a_dozen_votes_do_not_outrank_two_million():
-    """The weight is the point: a 12-rating 5.0 must not top a 4.3 backed by two million."""
-    thin = make_rating(5.0, 12, "u", "goodreads")          # refused: under the floor
-    assert thin is None
-    thin_ok = make_rating(5.0, 60, "u", "goodreads").to_dict()
+def test_the_vote_floor_is_what_stops_a_thin_score():
+    """The floor is a real filter and it still applies where a count exists. Sorting is by the
+    score itself, so the floor is the only thing standing between a 12-vote 5.0 and the top."""
+    assert make_rating(5.0, 12, "u", "goodreads") is None
+    assert make_rating(5.0, 60, "u", "goodreads") is not None
+    thin = make_rating(5.0, 60, "u", "goodreads").to_dict()
     solid = make_rating(4.3, 2_000_000, "u", "goodreads").to_dict()
-    assert thin_ok["score"] > solid["score"]
-    assert thin_ok["bayes"] < solid["bayes"], "the score is higher but the evidence is not"
-    assert sort_items([{"rating": thin_ok}, {"rating": solid}])[0]["rating"]["score"] == 4.3
+    assert sort_items([{"rating": thin}, {"rating": solid}])[0]["rating"]["score"] == 5.0
 
 
 def test_count_less_ratings_order_by_score_among_themselves():

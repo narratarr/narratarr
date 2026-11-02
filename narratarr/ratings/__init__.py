@@ -199,17 +199,15 @@ def enrich(item: dict, provider_obj=None, settings=None) -> dict:
 
 
 def sort_items(items: list[dict]) -> list[dict]:
-    """Ordered by the weighted score, unrated last.
+    """Highest score first, unrated last.
 
-    The weight is what stops a twelve-vote 5.0 outranking two million votes at 4.3. Where a source
-    publishes no count (Audnex publishes none at all) every rating from it carries the same
-    UNKNOWN_COUNT_WEIGHT, so ordering among them falls back to the score itself — which is the
-    right answer, and the reason a weighted sort and a raw one agree for that provider alone.
+    Deliberately the raw score: the provider of record publishes a bare average with no count, so
+    every rating from it carries the same evidence and a weight would only reorder what the score
+    already orders. `Rating.bayes` stays available for a source that does publish counts.
     """
     def key(item):
-        rating = item.get("rating") or {}
-        weighted = rating.get("bayes")
-        return (weighted is None, -(weighted or 0.0))
+        score = (item.get("rating") or {}).get("score")
+        return (score is None, -(score or 0.0))
 
     return sorted(items, key=key)
 
