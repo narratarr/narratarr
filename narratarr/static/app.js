@@ -89,6 +89,26 @@ const mine = (b) => !!b && b.requested_by === state.user?.id;
 // A listener's request waits for an admin while that's turned on (Settings → Users).
 const asksFirst = () => !isAdmin() && state.settings?.listener_approval !== false;
 
+// A book's state on its cover: In library, Downloading 42%, Awaiting approval, Wanted, Failed.
+// On the Library's own shelves a downloaded book says Finished or New instead (or nothing).
+function stBadge(b, onShelf = false) {
+  if (!b) return "";
+  const s = b.status;
+  let cls = "dl", text = STATUS[s] || s, icon = "";
+  if (s === "completed") {
+    if (!onShelf) [cls, text, icon] = ["ok", "In library", I.check];
+    else if (b.finished) [cls, text, icon] = ["ok", "Finished", I.check];
+    else if (!b.listen_position && Date.now() / 1000 - (b.completed_at || 0) < 3 * 86400) [cls, text] = ["new", "New"];
+    else return "";
+  } else if (s === "requested") [cls, text, icon] = ["req", "Awaiting approval", I.bell];
+  else if (s === "wanted") [cls, text, icon] = ["want", "Wanted", I.bookmark];
+  else if (s === "failed") [cls, text] = ["bad", "Failed"];
+  else if (s === "queued") text = "Queued";
+  else if (s === "caching") text = `On ${cloudName()} ${Math.round(b.progress || 0)}%`;
+  else if (s === "downloading") text = `Downloading ${Math.round(b.progress || 0)}%`;
+  return `<span class="st-badge ${cls}">${icon}${esc(text)}</span>`;
+}
+
 function spinBtn(btn, on) {
   if (on) {
     btn.dataset.html = btn.innerHTML;
@@ -316,7 +336,7 @@ function cardHTML(item, lib, i = 0) {
     <article class="card" tabindex="0" data-url="${esc(item.url)}" ${lib ? `data-id="${lib.id}"` : ""} style="--glow:hsl(${h} 80% 55%);animation-delay:${Math.min(i, 12) * 35}ms">
       <div class="cover-wrap">
         ${coverHTML(item)}
-        <span class="tag-slot">${lib ? statusTag(lib.status) : ""}</span>
+        ${stBadge(lib)}
         ${active ? `<div class="bar"><i style="width:${lib.progress || 0}%"></i></div>` : ""}
         ${quickButton(item, lib)}
       </div>
@@ -349,6 +369,69 @@ function quickButton(item, lib) {
   return "";
 }
 
+// The big card at the top of Discover.
+function spotlightHTML(item, lib, src) {
+  const narr = (item.narrators || []).slice(0, 2).join(", ");
+  const facts = [
+    isCatalog(item.source) ? (formatFor(item.source) === "ebook" ? "Ebook" : "Audiobook") : item.format,
+    item.source === "audible" ? shortLength(item.length) : item.size,
+    item.language && item.language !== "English" ? item.language : "",
+    item.protocol === "usenet" ? "Usenet" : item.seeders != null ? `${item.seeders} seeder${item.seeders === 1 ? "" : "s"}` : "",
+    releaseLabel(item.released || item.posted),
+  ].filter(Boolean);
+  const author = firstAuthor(item.author);
+  const also = author ? state.library.filter((b) => firstAuthor(b.author) === author && b.source_url !== item.url).slice(0, 3) : [];
+  let primary;
+  if (lib?.status === "completed") {
+    primary = `<button class="btn primary" data-play="${lib.id}">${isEbook(lib) ? `${I.book} Read` : `${I.play} Play`}</button>`;
+  } else if (lib) {
+    primary = stBadge(lib).replace("st-badge", "st-badge inline");
+  } else {
+    const asks = asksFirst();
+    const label = asks ? "Ask for it" : isCatalog(item.source) ? "Add to Wanted"
+      : missingClient(item.source, item.protocol) ? "Save to Wanted" : "Download";
+    primary = `<button class="btn primary" data-quick>${asks ? I.bell : isCatalog(item.source) ? I.bookmark : I.down} ${label}</button>`;
+  }
+  return `
+    <section class="spotlight" data-url="${esc(item.url)}" aria-label="Spotlight: ${esc(item.title)}" style="--glow:hsl(${hue(item.title + item.author)} 80% 55%)">
+      <div class="spot-cover">${coverHTML(item)}</div>
+      <div class="spot-copy">
+        <div class="eyebrow">Spotlight · ${esc(src.label)}</div>
+        <h2>${esc(item.title)}</h2>
+        <p class="by">${esc(item.author || (item.indexer ? `via ${item.indexer}` : "Unknown author"))}${narr ? ` · read by ${esc(narr)}` : ""}</p>
+        ${facts.length ? `<div class="spot-facts">${facts.map((f) => `<span>${esc(f)}</span>`).join("")}</div>` : ""}
+        ${item.description ? `<p class="spot-desc">${esc(item.description)}</p>` : ""}
+        <div class="spot-actions">
+          ${primary}
+          <button class="btn" type="button" data-spot-details>Details</button>
+          ${author ? `<button class="btn ghost" type="button" data-more-by="${esc(author)}">More by ${esc(author)}</button>` : ""}
+        </div>
+        ${!lib && asksFirst() ? `<p class="spot-note">An admin approves requests before anything downloads.</p>` : ""}
+        ${also.length ? `<div class="spot-also"><span>Also by ${esc(author)}</span>${also.map((b) => `
+          <button type="button" class="also" data-open-book="${b.id}">${coverHTML(b)}<span>${esc(b.title)}</span>${stBadge(b).replace("st-badge", "st-badge inline")}</button>`).join("")}</div>` : ""}
+      </div>
+    </section>`;
+}
+
+// New books from the authors and series you follow (following puts them in the library as Wanted).
+function followShelfHTML() {
+  const norm = (n) => String(n || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const authors = new Set(state.follows.filter((f) => f.kind === "author").map((f) => norm(f.name)));
+  const series = new Set(state.follows.filter((f) => f.kind === "series").map((f) => f.asin));
+  if (!authors.size && !series.size) return "";
+  const when = (b) => Date.parse(b.released || "") || (b.added_at || 0) * 1000;
+  const books = state.library
+    .filter((b) => !isEbook(b) && (authors.has(norm(firstAuthor(b.author))) || (b.series || []).some((x) => series.has(x.asin))))
+    .sort((a, b) => when(b) - when(a))
+    .slice(0, 12);
+  if (!books.length) return "";
+  return `
+    <section class="follow-shelf" aria-labelledby="fs-title">
+      <div class="section-head"><h2 id="fs-title">New from authors you follow</h2><a class="see-all" href="#/authors">See all</a></div>
+      <div class="hshelf">${books.map((b, i) => cardHTML({ ...b, url: b.source_url }, b, i)).join("")}</div>
+    </section>`;
+}
+
 const skeletons = (n) => Array.from({ length: n }, () => '<div class="card skeleton"><div class="cover-wrap"></div><div class="line"></div><div class="line short"></div></div>').join("");
 
 function Discover(root) {
@@ -365,37 +448,49 @@ function Discover(root) {
     return h < 5 ? "Late night listening" : h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening";
   })();
 
+  // Audiobooks or ebooks: Prowlarr searches different categories; a catalog book is wanted in that format.
+  const fmtNow = src.name === "prowlarr" ? d.kind : isCatalog(d.source) ? (formatFor(d.source) === "ebook" ? "ebook" : "audiobook") : "";
+  const groups = [
+    ["Free · download now", (s) => s.delivery === "direct"],
+    ["Your indexers", (s) => s.delivery === "torrent" || s.delivery === "indexer"],
+    ["Catalogs · add to Wanted", (s) => s.delivery === "wanted"],
+  ];
+  const ready = (s) => s.delivery === "direct" || (s.delivery === "torrent" ? st?.torrent_configured
+    : s.delivery === "indexer" ? st?.torrent_configured || st?.usenet_configured : st?.indexer_configured);
+  const sourceSub = (s) => s.name === "openlibrary" ? "Books · for ebooks"
+    : { direct: "Free · direct download", indexer: "Your indexers", wanted: "Add to Wanted" }[s.delivery] || "Torrents";
+  const groupHTML = (role) => groups.map(([label, test]) => {
+    const list = state.sources.filter(test);
+    return list.length ? `<div class="src-group"><span class="src-label">${label}</span><div class="src-pills">${list.map((s) => `
+      <button type="button" role="${role}" aria-${role === "radio" ? "checked" : "selected"}="${s.name === d.source}" class="src-pill ${s.name === d.source ? "on" : ""}" data-src="${esc(s.name)}" title="${esc(sourceSub(s))}">
+        <i class="dot ${ready(s) ? "ok" : ""}" aria-hidden="true"></i>${esc(s.label)}</button>`).join("")}</div></div>` : "";
+  }).join("");
+
   root.innerHTML = `
-    <header class="hero">
+    <header class="disc-head">
       <div>
         <div class="eyebrow">${greeting}</div>
         <h1 class="page-title">What are we <em>${ebooksHere ? "reading" : "listening"}</em> to next?</h1>
       </div>
-      <div class="sources" id="sources" role="tablist" aria-label="Where to look">
-        ${state.sources.map((s) => `
-          <button role="tab" aria-selected="${s.name === d.source}" class="source ${s.name === d.source ? "on" : ""}" data-src="${esc(s.name)}">
-            <b>${esc(s.label)}</b><small>${esc(s.name === "openlibrary" ? "Books · for ebooks" : { direct: "Free · direct download", indexer: "Your indexers", wanted: "Add to Wanted" }[s.delivery] || "Torrents")}</small>
-          </button>`).join("")}
-      </div>
-      <div class="search-wrap">
-        <form class="search" id="search-form" role="search">
-          ${I.search}
-          <input id="q" type="search" placeholder="${ebooksHere ? "Search titles and authors… typos are fine" : "Search titles, authors, narrators… typos are fine"}" autocomplete="off" value="${esc(d.q)}" aria-label="Search audiobooks" aria-autocomplete="list" aria-controls="suggest" />
-          <kbd>/</kbd>
-          <button class="btn primary" type="submit">Search</button>
-        </form>
-        <div class="suggest" id="suggest" role="listbox" hidden></div>
-      </div>
-      <div class="chips" id="chips">
-        ${src.name === "prowlarr" ? `
-        <div class="segmented kinds" role="radiogroup" aria-label="Search for">
-          ${[["audiobook", I.headphones, "Audiobooks"], ["ebook", I.book, "Ebooks"]].map(([k, icon, label]) => `
-            <button type="button" role="radio" aria-checked="${d.kind === k}" class="${d.kind === k ? "on" : ""}" data-kind="${k}">${icon}${label}</button>`).join("")}
-        </div>` : ""}
-        <button class="chip ${!d.q && !d.category ? "on" : ""}" data-cat="">${esc(defaultLabel)}</button>
-        ${src.categories.map((c) => `<button class="chip ${!d.q && d.category === c.slug ? "on" : ""}" data-cat="${esc(c.slug)}">${esc(c.name)}</button>`).join("")}
-      </div>
+      ${fmtNow ? `<div class="segmented kinds" role="radiogroup" aria-label="Look for">
+        ${[["audiobook", I.headphones, "Audiobooks"], ["ebook", I.book, "Ebooks"]].map(([k, icon, label]) => `
+          <button type="button" role="radio" aria-checked="${fmtNow === k}" aria-label="${label}" class="${fmtNow === k ? "on" : ""}" data-kind="${k}">${icon}<span>${label}</span></button>`).join("")}
+      </div>` : ""}
     </header>
+    <div class="search-wrap">
+      <form class="search" id="search-form" role="search">
+        ${I.search}
+        <input id="q" type="search" placeholder="${ebooksHere ? "Search titles and authors… typos are fine" : "Search titles, authors, narrators… typos are fine"}" autocomplete="off" value="${esc(d.q)}" aria-label="Search ${esc(src.label)}" />
+        <div class="scope">
+          <button type="button" class="scope-btn" id="scope-btn" aria-haspopup="true" aria-expanded="false" aria-label="Searching ${esc(src.label)}. Change where to search">in <b>${esc(src.label)}</b>${I.chevron}</button>
+          <div class="scope-menu" id="scope-menu" role="listbox" aria-label="Where to search" hidden>${groupHTML("option")}</div>
+        </div>
+        <kbd>/</kbd>
+        <button class="btn primary" type="submit" aria-label="Search">${I.search}<span>Search</span></button>
+      </form>
+      <div class="suggest" id="suggest" role="listbox" hidden></div>
+    </div>
+    <div class="src-groups" id="sources" role="radiogroup" aria-label="Where to look">${groupHTML("radio")}</div>
     ${needsClient ? `
       <div class="banner">
         <div class="ico">${I.key}</div>
@@ -404,7 +499,13 @@ function Discover(root) {
           : "Use Real-Debrid, AllDebrid, TorBox, Premiumize, qBittorrent, Transmission or Deluge. You can browse and save books to Wanted until then."}</p></div>
         <a class="btn" href="#/settings">Open Settings</a>
       </div>` : ""}
+    <div id="spotlight"></div>
+    <div id="follow-shelf"></div>
     <div class="section-head"><h2 id="disc-title"></h2><div class="refine" id="refine"></div></div>
+    <div class="chips" id="chips">
+      <button class="chip ${!d.q && !d.category ? "on" : ""}" data-cat="">${esc(defaultLabel)}</button>
+      ${src.categories.map((c) => `<button class="chip ${!d.q && d.category === c.slug ? "on" : ""}" data-cat="${esc(c.slug)}">${esc(c.name)}</button>`).join("")}
+    </div>
     <div id="dym"></div>
     <div class="grid" id="grid"></div>
     <div class="load-more" id="sentinel"></div>`;
@@ -456,9 +557,19 @@ function Discover(root) {
     return by ? [...items].sort(by) : items;
   }
 
+  // Browsing (not searching or filtering): the first good-looking book gets the spotlight.
+  function spotlightItem(items) {
+    if (d.q || d.lang || d.fmt || d.sort || d.error || items.length < 6) return null;
+    return items.slice(0, 4).find((i) => /^https:\/\//.test(i.cover_url || "")) || items[0];
+  }
+
   function renderItems() {
     const lib = byUrl();
-    const items = visibleItems();
+    let items = visibleItems();
+    const spot = spotlightItem(items);
+    $("#spotlight", root).innerHTML = spot ? spotlightHTML(spot, libFor(lib, spot.url), src) : "";
+    $("#follow-shelf", root).innerHTML = d.q ? "" : followShelfHTML();
+    if (spot) items = items.filter((i) => i !== spot);
     grid.innerHTML = items.map((it, i) => cardHTML(it, libFor(lib, it.url), i)).join("");
     if (!items.length && !d.loading) {
       const filtered = d.items.length > 0;
@@ -577,8 +688,20 @@ function Discover(root) {
     refine();
   };
 
-  $("#sources", root).onclick = (e) => {
+  const scopeBtn = $("#scope-btn", root), scopeMenu = $("#scope-menu", root);
+  const closeScope = () => { scopeMenu.hidden = true; scopeBtn.setAttribute("aria-expanded", "false"); };
+  scopeBtn.onclick = () => {
+    scopeMenu.hidden = !scopeMenu.hidden;
+    scopeBtn.setAttribute("aria-expanded", String(!scopeMenu.hidden));
+    if (!scopeMenu.hidden) $(".src-pill.on", scopeMenu)?.focus();
+  };
+  scopeMenu.onkeydown = (e) => { if (e.key === "Escape") { e.stopPropagation(); closeScope(); scopeBtn.focus(); } };
+  const outsideScope = (e) => { if (!e.target.closest(".scope")) closeScope(); };
+  document.addEventListener("click", outsideScope);
+
+  $("#sources", root).onclick = scopeMenu.onclick = (e) => {
     const b = e.target.closest("[data-src]");
+    closeScope();
     if (!b || b.dataset.src === d.source) return;
     d.source = b.dataset.src;
     try { localStorage.setItem("narratarr.source", d.source); } catch { /* private mode */ }
@@ -591,18 +714,25 @@ function Discover(root) {
     route();
   };
 
-  $("#chips", root).onclick = (e) => {
+  const kindBox = $(".disc-head .kinds", root);
+  if (kindBox) kindBox.onclick = (e) => {
     const kind = e.target.closest("[data-kind]");
-    if (kind) {
-      if (kind.dataset.kind === d.kind) return;
+    if (!kind || kind.dataset.kind === fmtNow) return;
+    if (src.name === "prowlarr") {
       d.kind = kind.dataset.kind;
       try { localStorage.setItem("narratarr.discoverKind", d.kind); } catch { /* private mode */ }
       d.items = [];
       d.lang = d.fmt = d.sort = "";
       d.token++;
       d.loading = false;
-      return route(); // the same search, now for the other format
+    } else {
+      state.format = kind.dataset.kind; // what catalog books are wanted as from now on
+      try { localStorage.setItem("narratarr.format", state.format); } catch { /* private mode */ }
     }
+    route(); // the same search, now for the other format
+  };
+
+  $("#chips", root).onclick = (e) => {
     const chip = e.target.closest(".chip");
     if (!chip) return;
     d.category = chip.dataset.cat;
@@ -626,9 +756,16 @@ function Discover(root) {
     if (e.target.closest("a.quick")) return; // an ebook download: let the link do it
     const play = e.target.closest("[data-play]");
     if (play) return playBook(Number(play.dataset.play));
-    const card = e.target.closest(".card[data-url]");
+    const moreBy = e.target.closest("[data-more-by]");
+    if (moreBy) { input.value = moreBy.dataset.moreBy; return search(moreBy.dataset.moreBy); }
+    const openBook = e.target.closest("[data-open-book]");
+    if (openBook) return openDrawer({ bookId: Number(openBook.dataset.openBook) });
+    const shelfCard = e.target.closest("#follow-shelf .card[data-id]");
+    if (shelfCard) return openDrawer({ bookId: Number(shelfCard.dataset.id) });
+    const card = e.target.closest(".card[data-url], .spotlight[data-url]");
     if (!card) return;
     const item = d.items.find((i) => i.url === card.dataset.url);
+    if (!item) return;
     if (e.target.closest("[data-quick]")) {
       const btn = e.target.closest("[data-quick]");
       spinBtn(btn, true);
@@ -658,13 +795,15 @@ function Discover(root) {
     update(structural) {
       if (structural && !d.loading && d.items.length) return renderItems();
       const lib = byUrl();
-      $$(".card[data-url]", grid).forEach((card) => {
+      $$(".card[data-url]", root).forEach((card) => {
         const b = libFor(lib, card.dataset.url);
         const bar = $(".bar i", card);
         if (bar && b) bar.style.width = `${b.progress || 0}%`;
+        const badge = $(".st-badge", card);
+        if (badge && b) badge.outerHTML = stBadge(b);
       });
     },
-    destroy() { io.disconnect(); },
+    destroy() { io.disconnect(); document.removeEventListener("click", outsideScope); },
   };
 }
 
@@ -681,13 +820,17 @@ function libCardHTML(b, i) {
     : ebook ? `<a class="quick" href="/api/library/${b.id}/ebook" download aria-label="Download the ebook of ${esc(b.title)}" title="Download ebook">${I.down}</a>`
     : `<button class="quick play-quick" data-play="${b.id}" aria-label="Play ${esc(b.title)}" title="Play">${I.play}</button>`;
   const facts = listening ? [ebook ? readLeft(b) : fmtLeft(b.listen_duration - b.listen_position)]
+    : b.status === "requested" ? [b.requested_by_name ? `Asked by ${b.requested_by_name}` : "Awaiting approval"]
+    : b.status === "wanted" ? [b.last_searched ? `Looked ${ago(b.last_searched)}` : "Not looked for yet"]
+    : b.status === "failed" ? [(b.error || "Couldn’t download").slice(0, 70)]
+    : active ? [b.status === "queued" ? "Waiting for a free slot" : b.detail || STATUS[b.status]]
+    : b.finished ? [ebook ? "Read" : "Finished"]
     : ebook ? [b.format, b.size] : [shortLength(b.length), b.size];
   return `
     <article class="card" tabindex="0" data-id="${b.id}" style="--glow:hsl(${h} 80% 55%);animation-delay:${Math.min(i, 12) * 30}ms">
       <div class="cover-wrap">
         ${coverHTML(b)}
-        ${b.status === "completed" ? "" : statusTag(b.status)}
-        ${b.finished ? `<span class="finished-tag" title="Finished">${I.check}</span>` : ""}
+        ${stBadge(b, true)}
         ${active ? `<div class="bar"><i style="width:${b.progress || 0}%"></i></div>` : ""}
         ${listening ? `<div class="listen-bar"><i style="width:${(b.listen_position / b.listen_duration) * 100}%"></i></div>` : ""}
         ${ebook ? `<span class="kind-tag" title="Ebook">${I.book}Ebook</span>` : ""}
@@ -696,7 +839,7 @@ function libCardHTML(b, i) {
       <div class="meta">
         <div class="title">${esc(b.title)}</div>
         <div class="author">${esc(b.author || "Unknown author")}</div>
-        <div class="facts">${facts.filter(Boolean).map((f) => `<span>${esc(f)}</span>`).join("")}</div>
+        <div class="facts ${b.status === "failed" ? "bad" : ""}">${facts.filter(Boolean).map((f) => `<span>${esc(f)}</span>`).join("")}</div>
       </div>
     </article>`;
 }
@@ -743,56 +886,99 @@ function downloadEbook(b) {
   a.remove();
 }
 
+// Requests waiting for approval: admins approve them right here; a listener sees their own.
+function requestsTrayHTML() {
+  const admin = isAdmin();
+  const reqs = state.library.filter((b) => b.status === "requested" && (admin || mine(b)))
+    .sort((a, b) => a.updated_at - b.updated_at);
+  if (!reqs.length) return "";
+  const n = reqs.length;
+  return `
+    <section class="req-tray" aria-labelledby="req-title">
+      <div class="req-head">
+        <h2 id="req-title">${I.bell}${admin ? (n === 1 ? "A request is waiting for you" : `${n} requests are waiting for you`)
+          : n === 1 ? "Your request is waiting for approval" : `Your ${n} requests are waiting for approval`}</h2>
+        <span>${admin ? "Nothing downloads until you approve" : "An admin approves requests before anything downloads"}</span>
+      </div>
+      ${reqs.map((b) => {
+        const picked = !isCatalog(b.source);
+        const what = picked ? `picked “${esc(b.release || b.title)}”${b.size ? ` · ${esc(b.size)}` : ""}`
+          : admin ? "no release picked: approving starts the search" : "any good release";
+        return `
+        <div class="req-row" data-id="${b.id}">
+          ${coverHTML(b)}
+          <div class="req-copy">
+            <b>${esc(b.title)}</b> <span class="req-by">· ${esc(firstAuthor(b.author) || "Unknown author")}</span>${isEbook(b) ? ` <span class="kind-inline">${I.book}Ebook</span>` : ""}
+            <small>${admin ? `<b>${esc(b.requested_by_name || "A listener")}</b> asked` : "Asked"} ${esc(ago(b.updated_at))} · ${what}</small>
+          </div>
+          <div class="req-actions">${admin ? `
+            <button class="btn primary sm" data-act="approve">${I.check} Approve</button>
+            <button class="btn sm" data-act="releases">Pick a release</button>
+            <button class="btn sm ghost danger" data-act="remove">Decline</button>`
+            : `<button class="btn sm ghost danger" data-act="remove" data-mine>Take back</button>`}
+          </div>
+        </div>`;
+      }).join("")}
+    </section>`;
+}
+
+const LIB_SORTS = {
+  added: ["Recently added", (a, b) => b.added_at - a.added_at],
+  listened: ["Recently listened", (a, b) => (b.listened_at || 0) - (a.listened_at || 0) || b.added_at - a.added_at],
+  title: ["Title A–Z", (a, b) => a.title.localeCompare(b.title)],
+  author: ["Author A–Z", (a, b) => (a.author || "").localeCompare(b.author || "") || a.title.localeCompare(b.title)],
+};
+
 function Library(root) {
   const filters = [
     ["all", "All", () => true],
-    ["completed", "Downloaded", (b) => b.status === "completed"],
+    ["completed", "On your shelf", (b) => b.status === "completed"],
+    ["listening", "Listening", (b) => underway(b)],
+    ["finished", "Finished", (b) => b.status === "completed" && b.finished],
     ["active", "In progress", (b) => ACTIVE.includes(b.status)],
     ["requested", "Awaiting approval", (b) => b.status === "requested"],
     ["wanted", "Wanted", (b) => b.status === "wanted"],
     ["failed", "Failed", (b) => b.status === "failed"],
   ];
+  state.libSort ||= "added";
 
   root.innerHTML = `
-    <header class="page-head">
+    <header class="page-row">
       <div>
         <div class="eyebrow">Your collection</div>
         <h1 class="page-title">The <em>Library</em></h1>
+        <p class="lede" id="lib-summary"></p>
       </div>
       <button class="btn" id="import-btn">${I.down} Import books</button>
     </header>
-    <div id="requests-banner"></div>
+    <div id="req-tray"></div>
     <div id="shelf"></div>
-    <div class="stats" id="stats"></div>
-    <div class="toolbar">
-      <div class="segmented" id="filters"></div>
-      <div class="lib-tools">
-        <div class="segmented formats-filter" id="lib-format" hidden></div>
-        <input class="input" id="lib-search" type="search" placeholder="Filter by title or author" value="${esc(state.libSearch)}" aria-label="Filter library" />
+    <section class="lib-all" aria-labelledby="lib-all-title">
+      <div class="section-head">
+        <h2 id="lib-all-title">Everything</h2>
+        <div class="lib-tools">
+          <div class="segmented formats-filter" id="lib-format" hidden></div>
+          <label class="lib-find">${I.search}<input id="lib-search" type="search" placeholder="Title or author" value="${esc(state.libSearch)}" aria-label="Filter by title or author" /></label>
+          <select class="select" id="lib-sort" aria-label="Sort">${Object.entries(LIB_SORTS).map(([k, [label]]) =>
+            `<option value="${k}" ${state.libSort === k ? "selected" : ""}>${label}</option>`).join("")}</select>
+        </div>
       </div>
-    </div>
-    <div class="grid" id="lib-grid"></div>`;
+      <div class="fpills" id="filters" role="tablist" aria-label="Show"></div>
+      <div class="grid" id="lib-grid"></div>
+    </section>`;
 
   function render() {
     const lib = state.library;
     const count = (fn) => lib.filter(fn).length;
-    const waiting = isAdmin() ? count((b) => b.status === "requested") : 0;
-    $("#requests-banner", root).innerHTML = waiting && state.libFilter !== "requested" ? `
-      <div class="banner">
-        <div class="ico">${I.bell}</div>
-        <div><strong>${waiting === 1 ? "A request is" : `${waiting} requests are`} waiting for you</strong><p>Listeners asked for ${waiting === 1 ? "a book" : "these books"}. Nothing downloads until you approve.</p></div>
-        <button class="btn" type="button" data-f="requested">Review</button>
-      </div>` : "";
+    const shelf = count((b) => b.status === "completed");
+    const done = count((b) => b.status === "completed" && b.finished);
+    $("#lib-summary", root).textContent = lib.length
+      ? `${lib.length} book${lib.length === 1 ? "" : "s"} · ${shelf} on your shelf · ${done} finished` : "Nothing here yet.";
+    $("#req-tray", root).innerHTML = requestsTrayHTML();
     $("#shelf", root).innerHTML = continueListening();
-    $("#stats", root).innerHTML = [
-      [lib.length, "Books in library"],
-      [count((b) => b.status === "completed"), "Downloaded"],
-      [count((b) => ACTIVE.includes(b.status)), "In progress"],
-      [count((b) => b.status === "wanted"), "Wanted"],
-    ].map(([n, l]) => `<div class="stat"><b>${n}</b><span>${l}</span></div>`).join("");
 
-    $("#filters", root).innerHTML = filters.filter(([k, , fn]) => k !== "requested" || count(fn) || state.libFilter === k).map(([k, label, fn]) =>
-      `<button class="${state.libFilter === k ? "on" : ""}" data-f="${k}">${label} <small>${count(fn)}</small></button>`).join("");
+    $("#filters", root).innerHTML = filters.filter(([k, , fn]) => k === "all" || count(fn) || state.libFilter === k).map(([k, label, fn]) =>
+      `<button type="button" role="tab" aria-selected="${state.libFilter === k}" class="fpill ${state.libFilter === k ? "on" : ""}" data-f="${k}">${label} <small>${count(fn)}</small></button>`).join("");
 
     // Audiobooks and ebooks side by side, or one at a time once there are ebooks to tell apart.
     const ebooks = count(isEbook);
@@ -802,10 +988,11 @@ function Library(root) {
     fmtBox.innerHTML = [["", "All"], ["audiobook", `${I.headphones} Audiobooks`], ["ebook", `${I.book} Ebooks`]]
       .map(([k, label]) => `<button class="${state.libFormat === k ? "on" : ""}" data-format="${k}" aria-pressed="${state.libFormat === k}">${label}</button>`).join("");
 
-    const fn = filters.find((f) => f[0] === state.libFilter)[2];
+    const fn = (filters.find((f) => f[0] === state.libFilter) || filters[0])[2];
     const q = state.libSearch.toLowerCase();
     const books = lib.filter(fn).filter((b) => !state.libFormat || (b.kind || "audiobook") === state.libFormat)
-      .filter((b) => !q || `${b.title} ${b.author} ${b.narrators.join(" ")}`.toLowerCase().includes(q));
+      .filter((b) => !q || `${b.title} ${b.author} ${b.narrators.join(" ")}`.toLowerCase().includes(q))
+      .sort(LIB_SORTS[state.libSort]?.[1] || LIB_SORTS.added[1]);
     const grid = $("#lib-grid", root);
 
     if (!lib.length) {
@@ -822,22 +1009,38 @@ function Library(root) {
     }
   }
 
-  $("#filters", root).onclick = $("#requests-banner", root).onclick = (e) => {
+  $("#filters", root).onclick = (e) => {
     const b = e.target.closest("[data-f]");
     if (!b) return;
     state.libFilter = b.dataset.f;
     render();
   };
   $("#lib-search", root).oninput = (e) => { state.libSearch = e.target.value; render(); };
+  $("#lib-sort", root).onchange = (e) => { state.libSort = e.target.value; render(); };
   $("#lib-format", root).onclick = (e) => {
     const b = e.target.closest("[data-format]");
     if (!b) return;
     state.libFormat = b.dataset.format;
     render();
   };
-  root.onclick = (e) => {
+  root.onclick = async (e) => {
     if (e.target.closest("a.quick")) return; // an ebook download: let the link do it
     if (e.target.closest("#import-btn, [data-import]")) return openImport();
+    const row = e.target.closest(".req-row");
+    const act = e.target.closest("[data-act]");
+    if (row && act) {
+      const id = Number(row.dataset.id);
+      if (act.dataset.act === "releases") {
+        await openDrawer({ bookId: id });
+        const lib = drawerBook();
+        if (lib) showReleases(lib);
+        return;
+      }
+      spinBtn(act, true);
+      try { await bookAction(id, act.dataset.act); } catch (err) { toast(err.message, { kind: "err" }); spinBtn(act, false); }
+      return;
+    }
+    if (row) return openDrawer({ bookId: Number(row.dataset.id) });
     const play = e.target.closest("[data-play]");
     if (play) return playBook(Number(play.dataset.play));
     const card = e.target.closest(".card[data-id]");
@@ -852,8 +1055,12 @@ function Library(root) {
       const sig = state.library.map((b) => `${b.id}:${b.finished}:${Math.round(b.listen_position / 60)}`).join("|");
       if (structural || sig !== listenSig) { listenSig = sig; return render(); }
       for (const b of state.library) {
-        const bar = $(`.card[data-id="${b.id}"] .bar i`, root);
+        const card = $(`.card[data-id="${b.id}"]`, root);
+        if (!card) continue;
+        const bar = $(".bar i", card);
         if (bar) bar.style.width = `${b.progress || 0}%`;
+        const badge = $(".st-badge", card);
+        if (badge && ACTIVE.includes(b.status)) badge.outerHTML = stBadge(b, true);
       }
     },
   };
@@ -1151,23 +1358,58 @@ function Authors(root, param) {
       </form>
       <div class="suggest" id="author-results" hidden></div>
     </div>
-    <div class="section-head"><h2>You follow</h2><span class="muted" id="follow-count"></span></div>
-    <div class="follow-grid" id="follows"></div>`;
+    <div id="follows"></div>`;
+
+  // "9 of 12 in your library", and what's going on with the rest.
+  const totalOf = (f) => Math.max(f.known || 0, f.in_library + f.wanted, 1);
+  const tagsOf = (f) => [
+    f.new && `<span class="tag accent">New book</span>`,
+    f.downloading && `<span class="tag info">Downloading</span>`,
+    f.requested && `<span class="tag accent">${f.requested} awaiting approval</span>`,
+    f.wanted - f.downloading - f.requested > 0 && `<span class="tag">${f.wanted - f.downloading - f.requested} wanted</span>`,
+    f.in_library && f.in_library >= totalOf(f) && `<span class="tag ok">All caught up</span>`,
+  ].filter(Boolean).join("");
+  const seriesNote = (f) => f.downloading ? ["info", "A book is downloading"]
+    : f.requested ? ["accent", `${f.requested} awaiting approval`]
+    : f.wanted ? ["", `${f.wanted} wanted`]
+    : f.in_library ? ["ok", `All ${f.in_library} in your library`] : ["", "Nothing in your library yet"];
+  const stack = (f) => `<span class="stack" aria-hidden="true">${[2, 1, 0].map((i) => {
+    const src = f.covers?.[i];
+    return `<span class="s${i}" style="--h:${hue(f.name + i)}">${src ? `<img src="${esc(src)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : ""}</span>`;
+  }).join("")}</span>`;
 
   function render() {
-    const list = state.follows;
-    $("#follow-count", root).textContent = list.length ? `${list.length}` : "";
-    $("#follows", root).innerHTML = list.length ? list.map((f, i) => `
-      <a class="follow-card" href="#/authors/${f.id}" style="animation-delay:${Math.min(i, 12) * 35}ms">
-        ${portraitHTML(f)}
-        <b>${esc(f.name)}</b>
-        <small>${f.kind === "author" ? "Author" : "Series"} · ${f.in_library} in library${f.wanted ? ` · ${f.wanted} wanted` : ""}</small>
-      </a>`).join("") : `
-      <div class="empty" style="grid-column:1/-1">
+    const authors = state.follows.filter((f) => f.kind === "author");
+    const series = state.follows.filter((f) => f.kind === "series");
+    const fresh = authors.filter((f) => f.new).length;
+    $("#follows", root).innerHTML = !state.follows.length ? `
+      <div class="empty">
         <div class="art">${I.books}</div>
         <h3>Never miss a new release</h3>
         <p>Search for an author above, or open any book from the Audible catalog and choose Follow.</p>
-      </div>`;
+      </div>` : `
+      ${authors.length ? `
+      <section aria-labelledby="au-title">
+        <div class="section-head"><h2 id="au-title">Authors you follow</h2><span class="muted">${authors.length} author${authors.length === 1 ? "" : "s"}${fresh ? ` · ${fresh} with a new book` : ""}</span></div>
+        <div class="author-grid">${authors.map((f, i) => `
+          <a class="author-card" href="#/authors/${f.id}" style="animation-delay:${Math.min(i, 12) * 35}ms">
+            <div class="ac-top">${portraitHTML(f)}<span><b>${esc(f.name)}</b><small>${f.in_library} of ${totalOf(f)} in your library</small></span></div>
+            <span class="meter" aria-hidden="true"><i style="width:${Math.round((f.in_library / totalOf(f)) * 100)}%"></i></span>
+            <span class="tags">${tagsOf(f)}</span>
+          </a>`).join("")}</div>
+      </section>` : ""}
+      ${series.length ? `
+      <section aria-labelledby="se-title">
+        <div class="section-head"><h2 id="se-title">Series you follow</h2></div>
+        <div class="series-grid">${series.map((f) => {
+          const [tone, note] = seriesNote(f);
+          return `
+          <a class="series-card" href="#/authors/${f.id}">
+            ${stack(f)}
+            <span class="sc-copy"><b>${esc(f.name)}</b><small class="${tone}">${esc(note)}</small></span>
+          </a>`;
+        }).join("")}</div>
+      </section>` : ""}`;
   }
 
   const results = $("#author-results", root);
@@ -1221,15 +1463,14 @@ function AuthorDetail(root, id) {
     <header class="author-hero">
       ${portraitHTML(f0 || { name: "", kind: "author" }, "big")}
       <div class="author-copy">
-        <div class="eyebrow">${f0?.kind === "series" ? "Series" : "Author"}</div>
+        <div class="eyebrow">${f0?.kind === "series" ? "Series you follow" : "Author you follow"}</div>
         <h1 class="page-title">${esc(f0?.name || "Loading…")}</h1>
+        <div class="hero-stats" id="a-stats"></div>
         <p class="bio" id="bio"></p>
-        <div class="hero-actions" id="hero-actions"></div>
       </div>
+      <div class="hero-actions" id="hero-actions"></div>
     </header>
-    <div class="stats" id="a-stats"></div>
-    <div class="section-head"><h2>Books</h2><span class="muted" id="a-count"></span></div>
-    <div class="grid" id="a-books">${skeletons(10)}</div>`;
+    <div id="a-books"><div class="grid">${skeletons(10)}</div></div>`;
 
   const libFor = (b) => b.library && state.library.find((x) => x.id === b.library.id);
   function render() {
@@ -1239,17 +1480,34 @@ function AuthorDetail(root, id) {
     const missing = books.length - have.length;
     const mine = [...new Map(have.map((b) => [libFor(b).id, libFor(b)])).values()];  // one per library book
     $("#a-stats", root).innerHTML = [
-      [books.length, data.kind === "author" ? "Books on Audible" : "Books in the series"],
-      [mine.filter((b) => b.status === "completed").length, "In your library"],
-      [mine.filter((b) => b.status !== "completed").length, "Wanted or downloading"],
-      [missing, "Not added yet"],
-    ].map(([n, l]) => `<div class="stat"><b>${n}</b><span>${l}</span></div>`).join("");
-    $("#a-count", root).textContent = data.kind === "series" ? "In reading order" : "Newest first";
+      ["ok", mine.filter((b) => b.status === "completed").length, "In your library"],
+      ["info", mine.filter((b) => b.status !== "completed").length, "Wanted or downloading"],
+      ["", missing, "Not added yet"],
+    ].map(([tone, n, l]) => `<div class="hstat ${tone}"><b>${n}</b><span>${l}</span></div>`).join("");
     $("#hero-actions", root).innerHTML = `
       ${missing ? `<button class="btn primary" data-act="want-all">${I.bookmark} Add ${missing} missing to Wanted</button>` : ""}
       <button class="btn ghost danger" data-act="unfollow">Unfollow</button>`;
-    $("#a-books", root).innerHTML = books.length ? books.map((b, i) => cardHTML(b, libFor(b), i)).join("")
-      : `<div class="empty" style="grid-column:1/-1"><h3>No books yet</h3><p>Audible doesn't list any books here yet.</p></div>`;
+    // An author's books by series (each in reading order), then everything else; a series is one group.
+    const groups = new Map();
+    for (const b of books) {
+      const ser = data.kind === "author" ? (b.series || [])[0] : null;
+      const key = ser?.title || (data.kind === "series" ? data.name : "");
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(b);
+    }
+    const seq = (b) => parseFloat((b.series || [])[0]?.sequence) || 999;
+    const ordered = [...groups.entries()].sort(([a], [b]) => (a === "") - (b === ""));
+    $("#a-books", root).innerHTML = books.length ? ordered.map(([name, list]) => {
+      if (name) list.sort((a, b) => seq(a) - seq(b));
+      const owned = list.filter((b) => libFor(b)?.status === "completed").length;
+      const notYet = list.filter((b) => !libFor(b)).length;
+      return `
+      <section class="book-group">
+        <div class="section-head"><h2>${esc(name || (groups.size > 1 ? "Standalones and others" : "Books"))}</h2>
+          <span class="muted">${owned} of ${list.length} in your library${notYet ? ` · ${notYet} not added yet` : ""}</span></div>
+        <div class="grid">${list.map((b, i) => cardHTML(b, libFor(b), i).replace('class="card"', `class="card${libFor(b) ? "" : " missing"}"`)).join("")}</div>
+      </section>`;
+    }).join("") : `<div class="empty"><h3>No books yet</h3><p>Audible doesn't list any books here yet.</p></div>`;
     root._books = books;
   }
 
@@ -1262,7 +1520,7 @@ function AuthorDetail(root, id) {
     }
     $(".author-hero", root).querySelector(".portrait").outerHTML = portraitHTML(data, "big");
     $(".author-hero h1", root).textContent = data.name;
-    $(".author-hero .eyebrow", root).textContent = data.kind === "series" ? "Series" : "Author";
+    $(".author-hero .eyebrow", root).textContent = data.kind === "series" ? "Series you follow" : "Author you follow";
     const bio = $("#bio", root);
     bio.textContent = data.description || "";
     bio.classList.toggle("clamped", (data.description || "").length > 360);
@@ -1335,35 +1593,94 @@ function stepsHTML(b) {
     `<span class="step ${idx > i ? "done" : idx === i ? "now" : ""}"><i></i>${label}</span>`).join("")}</div>`;
 }
 
+function dayLabel(ts) {
+  const d = new Date(ts * 1000), today = new Date();
+  const y = new Date(); y.setDate(today.getDate() - 1);
+  if (d.toDateString() === today.toDateString()) return "Today";
+  if (d.toDateString() === y.toDateString()) return "Yesterday";
+  return d.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
+}
+const clock = (ts) => new Date(ts * 1000).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+
 function Activity(root) {
   root.innerHTML = `
-    <header>
-      <div class="eyebrow">Live</div>
-      <h1 class="page-title">Activity</h1>
-      <p class="lede">Every download, from search result to your library shelf.</p>
+    <header class="page-row">
+      <div>
+        <div class="eyebrow live"><i aria-hidden="true"></i>Live</div>
+        <h1 class="page-title">Activity</h1>
+        <p class="lede">Every download, from search result to your library shelf.</p>
+      </div>
+      <div class="act-stats" id="act-stats"></div>
     </header>
-    <div class="section-head"><h2>In progress</h2><span class="muted" id="act-count"></span></div>
-    <div class="jobs" id="jobs"></div>
-    <div id="hist-wrap"></div>`;
+    <div class="act-layout">
+      <div class="act-main">
+        <section aria-labelledby="ip-title">
+          <div class="section-head"><h2 id="ip-title">In progress</h2></div>
+          <div class="jobs" id="jobs"></div>
+        </section>
+        <div id="hist-wrap"></div>
+      </div>
+      <aside class="act-side" id="act-side"></aside>
+    </div>`;
+
+  function sideHTML() {
+    const st = state.settings || {};
+    const reqs = state.library.filter((b) => b.status === "requested" && (isAdmin() || mine(b)));
+    const wanted = state.library.filter((b) => b.status === "wanted");
+    let next = "";
+    if (st.auto_search && st.indexer_configured && wanted.length) {
+      const due = Math.min(...wanted.map((b) => (b.last_searched || 0) + (st.auto_search_hours || 12) * 3600)) - Date.now() / 1000;
+      next = due <= 600 ? "Narratarr looks again in a few minutes" : `Narratarr looks again in <b>${esc(fmtLeft(due).replace(" left", ""))}</b>`;
+    }
+    return `
+      ${reqs.length ? `
+      <section class="side-card req" aria-labelledby="wait-title">
+        <h2 id="wait-title">${I.bell}${isAdmin() ? "Waiting for your approval" : "Your requests"}</h2>
+        ${reqs.slice(0, 4).map((b) => `
+          <button type="button" class="side-row" data-id="${b.id}">${coverHTML(b)}<span><b>${esc(b.title)}</b><small>${esc(b.requested_by_name || "")}${b.requested_by_name ? " · " : ""}${esc(ago(b.updated_at))}</small></span></button>`).join("")}
+        <a class="btn ${isAdmin() ? "primary" : ""} sm" href="#/library" data-review>${isAdmin() ? "Review requests" : "See in Library"}</a>
+      </section>` : ""}
+      <section class="side-card" aria-labelledby="want-title">
+        <h2 id="want-title">Wanted</h2>
+        <p>${wanted.length ? `${wanted.length} book${wanted.length === 1 ? "" : "s"}.` : "Nothing wanted right now."}
+          ${!st.indexer_configured ? "Connect an indexer in Settings so Narratarr can look for them."
+            : !st.auto_search ? "Automatic search is off." : next ? `${next}, a few at a time.` : ""}</p>
+        ${wanted.slice(0, 4).map((b) => `
+          <button type="button" class="side-line" data-id="${b.id}"><span>${esc(b.title)}</span><small>${b.last_searched ? `looked ${esc(ago(b.last_searched))}` : "not looked yet"}</small></button>`).join("")}
+        ${wanted.length ? `<a class="side-link" href="#/library" data-wanted>See all Wanted</a>` : ""}
+      </section>`;
+  }
 
   function render() {
-    const active = state.library.filter((b) => ACTIVE.includes(b.status))
+    const lib = state.library;
+    const active = lib.filter((b) => ACTIVE.includes(b.status))
       .sort((a, b) => ACTIVE.indexOf(b.status) - ACTIVE.indexOf(a.status) || a.updated_at - b.updated_at);
-    const recent = state.library.filter((b) => ["completed", "failed"].includes(b.status))
-      .sort((a, b) => (b.completed_at || b.updated_at) - (a.completed_at || a.updated_at)).slice(0, 25);
+    const recent = lib.filter((b) => ["completed", "failed"].includes(b.status))
+      .sort((a, b) => (b.completed_at || b.updated_at) - (a.completed_at || a.updated_at)).slice(0, 30);
+    const today = new Date().toDateString();
+    const doneToday = lib.filter((b) => b.status === "completed" && b.completed_at && new Date(b.completed_at * 1000).toDateString() === today).length;
 
-    $("#act-count", root).textContent = active.length ? `${active.length} active` : "";
+    $("#act-stats", root).innerHTML = [
+      ["info", active.filter((b) => b.status !== "queued").length, "Downloading"],
+      ["", active.filter((b) => b.status === "queued").length, "Waiting for a slot"],
+      ["ok", doneToday, "Finished today"],
+    ].map(([tone, n, label]) => `<div class="hstat box ${tone}"><b>${n}</b><span>${label}</span></div>`).join("");
+
     $("#jobs", root).innerHTML = active.length ? active.map((b, i) => `
       <div class="job" data-id="${b.id}" style="animation-delay:${i * 40}ms">
         ${coverHTML(b)}
         <div style="min-width:0">
-          <h3>${esc(b.title)}</h3>
-          <div class="by">${esc(b.author)}${isEbook(b) ? ` <span class="kind-inline">${I.book}Ebook</span>` : ""}</div>
+          <div class="job-top">
+            <div style="min-width:0">
+              <h3>${esc(b.title)}</h3>
+              <div class="by">${esc(b.author)}${b.requested_by_name ? ` · for ${esc(b.requested_by_name)}` : ""}${isEbook(b) ? ` <span class="kind-inline">${I.book}Ebook</span>` : ""}</div>
+            </div>
+            <button class="btn sm" data-act="stop">${I.stop} Stop</button>
+          </div>
           ${stepsHTML(b)}
           <div class="progress ${["caching", "downloading"].includes(b.status) ? "" : "indeterminate"}"><i style="width:${b.progress || 0}%"></i></div>
           <div class="detail">${jobDetail(b)}</div>
         </div>
-        <div class="actions"><button class="btn sm" data-act="stop">${I.stop} Stop</button></div>
       </div>`).join("") : `
       <div class="empty" style="padding:50px 20px">
         <div class="art">${I.headphones}</div>
@@ -1372,17 +1689,40 @@ function Activity(root) {
         <a class="btn" href="#/discover">Browse books</a>
       </div>`;
 
+    const days = new Map();
+    for (const b of recent) {
+      const label = dayLabel(b.completed_at || b.updated_at);
+      if (!days.has(label)) days.set(label, []);
+      days.get(label).push(b);
+    }
     $("#hist-wrap", root).innerHTML = recent.length ? `
-      <div class="section-head"><h2>Recently finished</h2></div>
-      <div class="history">${recent.map((b) => `
-        <div class="row" data-id="${b.id}">
-          ${coverHTML(b)}
-          <div style="min-width:0"><div class="t">${esc(b.title)}${isEbook(b) ? ` <span class="kind-inline">${I.book}Ebook</span>` : ""}</div><div class="s">${esc(b.status === "failed" ? b.error : b.author)}</div></div>
-          <div class="when">${statusTag(b.status)}<span>${ago(b.completed_at || b.updated_at)}</span></div>
-        </div>`).join("")}</div>` : "";
+      <section aria-labelledby="done-title">
+        <div class="section-head"><h2 id="done-title">Recently finished</h2></div>
+        ${[...days.entries()].map(([label, list]) => `
+          <div class="day"><span class="day-label">${esc(label)}</span>
+          <div class="history">${list.map((b) => {
+            const failed = b.status === "failed";
+            const note = failed ? b.error || "Couldn’t download"
+              : [b.author, isEbook(b) ? "ebook" : "", b.requested_by_name ? `for ${b.requested_by_name}` : ""].filter(Boolean).join(" · ");
+            return `
+            <div class="row ${failed ? "bad" : ""}" data-id="${b.id}">
+              ${coverHTML(b)}
+              <div style="min-width:0"><div class="t">${esc(b.title)}</div><div class="s">${esc(note)}</div></div>
+              <div class="when">
+                ${failed ? `<button class="btn sm" data-act="download">${I.retry} Try again</button>` : ""}
+                <span class="st ${failed ? "bad" : "ok"}"><i aria-hidden="true"></i>${failed ? "Failed" : "In library"}</span>
+                <span class="tm">${esc(clock(b.completed_at || b.updated_at))}</span>
+              </div>
+            </div>`;
+          }).join("")}</div></div>`).join("")}
+      </section>` : "";
+
+    $("#act-side", root).innerHTML = sideHTML();
   }
 
   root.onclick = async (e) => {
+    if (e.target.closest("[data-review]")) { state.libFilter = "requested"; return; }
+    if (e.target.closest("[data-wanted]")) { state.libFilter = "wanted"; return; }
     const job = e.target.closest("[data-id]");
     if (!job) return;
     const id = Number(job.dataset.id);
@@ -1590,6 +1930,24 @@ function Settings(root, page) {
           <div class="notify-list" id="notify-list"><span class="spinner"></span></div>
           <div class="notify-editor" id="notify-editor" hidden></div>
           <div><button class="btn" type="button" id="add-notifier">${I.plus} Add a destination</button></div>
+        </div>
+      </section>
+      <section class="panel" data-page="notifications" aria-labelledby="log-title">
+        <div class="ph ph-row">
+          <div><h3 id="log-title">Event log <span class="live-chip"><i aria-hidden="true"></i>Live</span></h3>
+            <p class="desc">The same lines Narratarr writes to <code>docker logs</code>, newest first, with where each one was sent. Open a line to see exactly what happened.</p></div>
+          <div class="ph-actions">
+            <button class="btn sm" type="button" id="log-copy">${I.copy}Copy</button>
+            <a class="btn sm" href="/api/settings/notifications/events.log" download>${I.down} Download .log</a>
+          </div>
+        </div>
+        <div class="body">
+          <div class="log-tools">
+            <div class="log-filters" id="log-filters" role="radiogroup" aria-label="Show"></div>
+            <label class="lib-find">${I.search}<input id="log-q" type="search" placeholder="Find a book or person" aria-label="Find a book or person in the event log" /></label>
+          </div>
+          <ol class="log-list" id="log-list" aria-label="Events"><li class="log-empty"><span class="spinner"></span></li></ol>
+          <div class="log-foot"><span id="log-kept"></span><button class="btn sm" type="button" id="log-more" hidden>Show older</button></div>
         </div>
       </section>
 
@@ -2296,7 +2654,7 @@ function Settings(root, page) {
       notifyCount = items.length;
       statuses();
       notifyList.innerHTML = items.length ? items.map((n) => `
-        <div class="notify-row ${n.enabled ? "" : "off"}" data-id="${n.id}">
+        <div class="notify-row ${n.enabled ? "" : "off"} ${n.enabled && n.last_error ? "failing" : ""}" data-id="${n.id}">
           <span class="kind-badge" aria-hidden="true">${KIND_ICON[n.kind]}</span>
           <span class="name"><b>${esc(n.name)}</b>
             <small>${esc(notifyMeta.kinds[n.kind])} · ${esc(n.events.map((e) => notifyMeta.events[e]).join(", "))}</small>
@@ -2463,6 +2821,117 @@ function Settings(root, page) {
     }
   };
   renderNotifiers();
+
+  // The event log: what Narratarr announced, and where each event went. Refreshes itself while open.
+  const LOG_EVENTS = [["", "All", ""], ["wanted", "Requests", "accent"], ["grabbed", "Started", "info"], ["completed", "Finished", "ok"], ["failed", "Failed", "bad"]];
+  const logState = { event: "", q: "", items: [], more: false, open: new Set(), counts: {}, kept: 500 };
+  const logList = $("#log-list", root);
+  const logStamp = (at) => {
+    const d = new Date(at * 1000);
+    const time = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    return d.toDateString() === new Date().toDateString() ? time : `${d.toLocaleDateString(undefined, { month: "short", day: "numeric" })} ${time}`;
+  };
+  const sentChip = (d) => {
+    const [cls, mark] = { sent: ["ok", "✓"], failed: ["bad", "✕"], sending: ["", "…"] }[d.state] || ["", "–"];
+    return `<span class="sent-chip ${cls}">${esc(d.name)} ${mark}</span>`;
+  };
+  const detailLine = (d) => {
+    const kind = notifyMeta?.kinds?.[d.kind] || d.kind;
+    const text = d.state === "sent" ? `Sent in ${(d.ms / 1000).toFixed(1)} s` : d.state === "failed" ? d.error
+      : d.state === "sending" ? "Sending…" : d.error || "Not sent";
+    return `<div class="log-dest ${d.state === "failed" ? "bad" : d.state === "sent" ? "ok" : ""}"><i aria-hidden="true"></i>
+      <span><b>${esc(d.name)}</b> <small>· ${esc(kind)}</small><br><span class="why">${esc(text)}</span></span>
+      ${d.state === "failed" ? `<button class="btn sm" type="button" data-edit-dest="${d.id}">Edit destination</button>` : ""}</div>`;
+  };
+  const renderLog = () => {
+    const total = Object.values(logState.counts).reduce((a, b) => a + b, 0);
+    $("#log-filters", root).innerHTML = LOG_EVENTS.map(([key, label, tone]) => `
+      <button type="button" role="radio" aria-checked="${logState.event === key}" class="fpill ${logState.event === key ? "on" : ""}" data-log-event="${key}">
+        ${tone ? `<i class="dot ${tone}" aria-hidden="true"></i>` : ""}${label} <small>${key ? logState.counts[key] || 0 : total}</small></button>`).join("");
+    $("#log-kept", root).textContent = `Narratarr keeps the most recent ${logState.kept} events here. Older ones are still in docker logs.`;
+    $("#log-more", root).hidden = !logState.more;
+    logList.innerHTML = logState.items.length ? logState.items.map((e) => {
+      const open = logState.open.has(e.id);
+      const inLib = e.book_id && state.library.some((b) => b.id === e.book_id);
+      return `
+      <li class="log-row ${open ? "open" : ""}" data-eid="${e.id}">
+        <button type="button" class="log-line" aria-expanded="${open}">
+          <time>${esc(logStamp(e.at))}</time>
+          <span class="ev ev-${esc(e.event)}">${esc(e.label)}</span>
+          <span class="msg">${esc(e.message)}</span>
+          <span class="sent">${e.deliveries.length ? e.deliveries.map(sentChip).join("") : '<span class="sent-chip">Log only</span>'}</span>
+          ${I.chevron}
+        </button>
+        ${open ? `<div class="log-detail">
+          <pre>${esc(e.line)}</pre>
+          ${e.deliveries.map(detailLine).join("")}
+          ${inLib ? `<button type="button" class="link" data-open-book="${e.book_id}">Open the book</button>` : ""}
+        </div>` : ""}
+      </li>`;
+    }).join("") : `<li class="log-empty">${logState.q || logState.event ? "Nothing matches." : "Nothing has happened yet. Requests, downloads and failures show up here as they happen."}</li>`;
+  };
+  const loadLog = async (older = false) => {
+    const params = new URLSearchParams({ event: logState.event, q: logState.q, limit: "50" });
+    if (older && logState.items.length) params.set("before", logState.items[logState.items.length - 1].id);
+    try {
+      const r = await api(`/api/settings/notifications/events?${params}`);
+      logState.items = older ? [...logState.items, ...r.items] : r.items;
+      logState.more = r.more;
+      logState.counts = r.counts;
+      logState.kept = r.kept;
+      renderLog();
+    } catch (err) {
+      logList.innerHTML = `<li class="log-empty bad">${esc(err.message)}</li>`;
+    }
+  };
+  $("#log-filters", root).onclick = (e) => {
+    const b = e.target.closest("[data-log-event]");
+    if (!b) return;
+    logState.event = b.dataset.logEvent;
+    loadLog();
+  };
+  let logTimer = 0;
+  const logQ = $("#log-q", root);
+  logQ.oninput = () => { clearTimeout(logTimer); logTimer = setTimeout(() => { logState.q = logQ.value.trim(); loadLog(); }, 300); };
+  logQ.onkeydown = (e) => { if (e.key === "Enter") e.preventDefault(); }; // it lives inside the settings form
+  $("#log-more", root).onclick = () => loadLog(true);
+  $("#log-copy", root).onclick = async (e) => {
+    const btn = e.currentTarget;
+    try {
+      const text = await fetch("/api/settings/notifications/events.log", { credentials: "same-origin" }).then((r) => {
+        if (!r.ok) throw new Error("Couldn’t read the event log.");
+        return r.text();
+      });
+      await navigator.clipboard.writeText(text);
+      toast("Event log copied", { kind: "ok" });
+    } catch (err) {
+      toast(err.message || "Couldn’t copy the event log.", { kind: "err" });
+    }
+    btn.blur();
+  };
+  logList.onclick = (e) => {
+    const edit = e.target.closest("[data-edit-dest]");
+    if (edit) {
+      const n = notifyMeta?.items.find((x) => x.id === Number(edit.dataset.editDest));
+      if (n) { openEditor(n); editor.scrollIntoView({ behavior: "smooth", block: "center" }); }
+      else toast("That destination has been removed.", { kind: "err" });
+      return;
+    }
+    const book = e.target.closest("[data-open-book]");
+    if (book) return openDrawer({ bookId: Number(book.dataset.openBook) });
+    const row = e.target.closest(".log-line");
+    if (!row) return;
+    const id = Number(row.closest("[data-eid]").dataset.eid);
+    if (logState.open.has(id)) logState.open.delete(id); else logState.open.add(id);
+    renderLog();
+  };
+  loadLog();
+  // Live: check for new events every few seconds while the Notifications page is showing.
+  const logLive = setInterval(() => {
+    if (!logList.isConnected) return clearInterval(logLive);
+    if (document.hidden || !logList.offsetParent || logState.items.length > 50) return;
+    loadLog();
+  }, 8000);
 
   // AllDebrid and TorBox: connect with a short code the user enters on their site, or with a pasted key.
   const codeConnect = ({ p, name, client, site, start, check, line }) => {
@@ -2920,6 +3389,7 @@ function libraryLiveHTML(lib) {
     if (isAdmin()) {
       return `<div class="state requested">
           <div class="top"><span>${I.bell} ${who} asked for this</span><span>${esc(ago(lib.updated_at || lib.added_at))}</span></div>
+          ${reqStepsHTML(lib)}
           <p>${picked ? `They picked <b>${esc(picked)}</b>${lib.size ? ` (${esc(lib.size)})` : ""}. Approve it to download that release, or pick another.`
             : "Approve it and Narratarr starts looking for a release, or pick one yourself."}</p>
         </div>
@@ -2931,6 +3401,7 @@ function libraryLiveHTML(lib) {
     }
     return `<div class="state requested">
         <div class="top"><span>${I.bell} Awaiting approval</span><span>${esc(ago(lib.updated_at || lib.added_at))}</span></div>
+        ${reqStepsHTML(lib)}
         <p>${mine(lib) ? "You asked for this" : `${who} asked for this`}${picked ? `, as <b>${esc(picked)}</b>` : ""}. It’ll download once an admin approves it.</p>
       </div>
       ${mine(lib) ? `<div class="cta"><button class="btn ghost danger" data-act="remove" data-mine>${I.trash} Take back request</button></div>` : ""}`;
@@ -2938,6 +3409,7 @@ function libraryLiveHTML(lib) {
   if (lib.status === "wanted" && isCatalog(lib.source)) {
     return `<div class="state wanted">
         <div class="top"><span>${I.bookmark} Wanted</span><span>${lib.last_searched ? esc(ago(lib.last_searched)) : "Not searched yet"}</span></div>
+        ${!isAdmin() && mine(lib) ? reqStepsHTML(lib) : ""}
         <p>${esc(wantedNote(lib))}</p>
       </div>
       <div class="cta">
@@ -3155,6 +3627,31 @@ function updateDrawerLive() {
   live.innerHTML = html;
 }
 
+// Where a request is: Asked → Approval → Downloading → In your library.
+function reqStepsHTML(lib) {
+  const at = lib.status === "requested" ? 1 : lib.status === "completed" ? 4 : 2;
+  return `<ol class="req-steps" aria-label="Where this request is">${["Asked", "Approval", "Downloading", "In your library"].map((label, i) =>
+    `<li class="${i < at ? "done" : i === at ? "now" : ""}"${i === at ? ' aria-current="step"' : ""}><i aria-hidden="true"></i>${label}</li>`).join("")}</ol>`;
+}
+
+// The rest of the series, as far as the library knows it.
+function seriesShelfHTML(b) {
+  const ser = (b.series || [])[0];
+  if (!ser?.title) return "";
+  const same = (x) => (x.series || []).some((s) => (ser.asin && s.asin === ser.asin) || s.title === ser.title);
+  const seq = (x) => parseFloat((x.series || []).find((s) => s.title === ser.title || s.asin === ser.asin)?.sequence) || 999;
+  const here = b.id || b.source_url || b.url;
+  const books = state.library.filter((x) => same(x) && !isEbook(x)).sort((a, c) => seq(a) - seq(c));
+  if (books.length < (books.some((x) => x.id === b.id || x.source_url === here) ? 2 : 1)) return "";
+  return `<div class="series-shelf"><h4>${esc(ser.title)}</h4>${books.map((x) => {
+    const mineHere = x.id === b.id || x.source_url === here;
+    const n = seq(x);
+    return `<button type="button" class="series-row ${mineHere ? "here" : ""}" data-open-book="${x.id}">${coverHTML(x)}
+      <span><b>${esc(x.title)}</b><small>${n !== 999 ? `Book ${n}` : "In the series"}${mineHere ? " · this one" : ""}</small></span>
+      ${stBadge(x).replace("st-badge", "st-badge inline")}</button>`;
+  }).join("")}</div>`;
+}
+
 function drawerHTML(b, loading) {
   const narrators = b.narrators || [];
   const pills = [
@@ -3184,6 +3681,7 @@ function drawerHTML(b, loading) {
       <div id="drawer-live">${loading ? '<div class="cta"><span class="spinner" style="color:var(--text-3)"></span></div>' : ""}</div>
       ${!loading ? followHTML(b) : ""}
       <div id="drawer-releases"></div>
+      ${!loading ? seriesShelfHTML(b) : ""}
       ${desc ? `<div class="about"><h4>About this book</h4><p class="${desc.length > 520 ? "clamped" : ""}">${esc(desc)}</p>${desc.length > 520 ? '<button class="more" data-more>Read more</button>' : ""}</div>` : ""}
       ${!loading ? `<dl>
         ${(b.series || []).length ? `<dt>Series</dt><dd>${b.series.map((x) => esc(x.sequence ? `${x.title} #${x.sequence}` : x.title)).join(" · ")}</dd>` : ""}

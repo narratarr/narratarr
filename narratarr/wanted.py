@@ -369,7 +369,14 @@ def follow_counts(f: dict, books: list[dict]) -> dict:
         mine = [b for b in books if name in [normalize(a) for a in re.split(r",|&| and ", b["author"] or "")]]
     else:
         mine = [b for b in books if any(s.get("asin") == f["asin"] for s in b.get("series") or [])]
+    newest = sorted(mine, key=lambda b: b.get("added_at") or 0, reverse=True)
     return {
         "in_library": sum(b["status"] == "completed" for b in mine),
         "wanted": sum(b["status"] not in ("completed",) for b in mine),
+        "downloading": sum(b["status"] in db.ACTIVE for b in mine),
+        "requested": sum(b["status"] == "requested" for b in mine),
+        # A book of theirs that turned up in the last month, for a "New book" tag.
+        "new": any(time.time() - (b.get("added_at") or 0) < 30 * 86400 and b["source"] in CATALOGS for b in mine),
+        # Up to three of their covers, newest first, for the series cards.
+        "covers": [f"/api/library/{b['id']}/cover" if b.get("path") else b.get("cover_url") or "" for b in newest[:3]],
     }

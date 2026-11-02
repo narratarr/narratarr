@@ -1290,6 +1290,21 @@ async def notifications():
     }
 
 
+@app.get("/api/settings/notifications/events")
+async def notification_events(event: str = "", q: str = "", before: int | None = None, limit: int = 50):
+    """The event log: what Narratarr announced (the lines in docker logs), and where each one was sent."""
+    if event and event not in notify.EVENTS:
+        raise HTTPException(400, "Unknown event.")
+    return notify.events(event, q, before, limit)
+
+
+@app.get("/api/settings/notifications/events.log")
+async def notification_events_log():
+    stamp = time.strftime("%Y-%m-%d")
+    return Response(notify.events_log(), media_type="text/plain; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="narratarr-events-{stamp}.log"'})
+
+
 @app.post("/api/settings/notifications")
 async def add_notifier(body: NotifierIn):
     try:

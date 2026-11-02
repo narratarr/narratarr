@@ -21,7 +21,7 @@ from urllib.parse import urlparse, urlunparse
 
 import httpx
 
-from . import config
+from . import config, db
 
 log = logging.getLogger("narratarr.notify")
 
@@ -222,32 +222,91 @@ def _record(nid: int, error: str) -> None:
     _save(items)
 
 
-async def _send_all(targets: list[dict], ctx: dict) -> None:
-    results = await asyncio.gather(*(deliver(n, ctx) for n in targets), return_exceptions=True)
-    for n, result in zip(targets, results):
-        error = f"Unexpected error: {result}" if isinstance(result, BaseException) else result
-        if error:
-            log.warning("Notification to %s (%s) failed: %s", n["name"], KINDS[n["kind"]], error)
-        _record(n["id"], error)
+async def _send_one(n: dict, ctx: dict, event_id: int | None) -> None:
+    started = time.monotonic()
+    try:
+        error = await deliver(n, ctx)
+    except Exception as e:  # noqa: BLE001 - whatever it was, it's noted, never raised
+        error = f"Unexpected error: {e}"
+    if error:
+        log.warning("Notification to %s (%s) failed: %s", n["name"], KINDS[n["kind"]], error)
+    _record(n["id"], error)
+    if event_id:
+        _note_delivery(event_id, n["id"], state="failed" if error else "sent", error=error,
+                       ms=int((time.monotonic() - started) * 1000))
+
+
+async def _send_all(targets: list[dict], ctx: dict, event_id: int | None = None) -> None:
+    await asyncio.gather(*(_send_one(n, ctx, event_id) for n in targets))
+
+
+def _log_line(at: float, ctx: dict) -> str:
+    """The line as the log shows it (Narratarr's log format), for the event log in Settings."""
+    stamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(at)) + f",{int(at * 1000) % 1000:03d}"
+    return f"{stamp} INFO {log.name}: [{ctx['event']}] {ctx['message']} (book {ctx['bookId'] or '?'})"
+
+
+def _keep(at: float, ctx: dict, targets: list[dict]) -> int | None:
+    """Add the event to the event log. Never lets a database problem get in the way."""
+    try:
+        deliveries = [{"id": n["id"], "name": n["name"], "kind": n["kind"], "state": "sending", "error": "", "ms": 0}
+                      for n in targets]
+        book_id = int(ctx["bookId"]) if str(ctx["bookId"]).isdigit() else None
+        return db.add_event(at, ctx["event"], book_id, ctx["message"], _log_line(at, ctx), deliveries)
+    except Exception:  # noqa: BLE001
+        log.debug("Couldn't add the event to the event log", exc_info=True)
+        return None
+
+
+def _note_delivery(event_id: int, dest_id: int, **changes) -> None:
+    try:
+        db.update_delivery(event_id, dest_id, **changes)
+    except Exception:  # noqa: BLE001
+        log.debug("Couldn't note a delivery in the event log", exc_info=True)
 
 
 def emit(event: str, book: dict, username: str = "", error: str = "") -> None:
-    """Something happened to a book: log it, and notify every destination that wants this event."""
+    """Something happened to a book: log it, keep it for the event log, and notify every destination that
+    wants this event."""
     try:
         ctx = context(event, book, username, error)
         log.info("[%s] %s (book %s)", event, ctx["message"], ctx["bookId"] or "?")
         targets = [n for n in load() if n.get("enabled", True) and event in (n.get("events") or [])]
-        if not targets:
-            return
-        loop = asyncio.get_running_loop()
-    except RuntimeError:  # no event loop (a script, or a test without one): logging was enough
-        return
     except Exception:  # a notification must never break what triggered it
         log.exception("Couldn't prepare the %s notification", event)
         return
-    task = loop.create_task(_send_all(targets, ctx))
+    event_id = _keep(time.time(), ctx, targets)
+    if not targets:
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:  # no event loop (a script, or a test without one): logging was enough
+        if event_id:
+            for n in targets:
+                _note_delivery(event_id, n["id"], state="not sent", error="Narratarr wasn't running its sender.")
+        return
+    task = loop.create_task(_send_all(targets, ctx, event_id))
     _tasks.add(task)
     task.add_done_callback(_tasks.discard)
+
+
+def events(event: str = "", query: str = "", before: int | None = None, limit: int = 50) -> dict:
+    """The event log, newest first, for Settings → Notifications."""
+    rows = db.list_events(event, query.strip()[:100], before, min(max(limit, 1), 200) + 1)
+    more = len(rows) > limit
+    items = [{**r, "label": EVENTS.get(r["event"], r["event"])} for r in rows[:limit]]
+    return {"items": items, "more": more, "counts": db.event_counts(), "kept": db.EVENTS_KEPT}
+
+
+def events_log() -> str:
+    """Every event kept, oldest first, as log lines; failed sends follow the line they belong to."""
+    out = []
+    for r in reversed(db.list_events(limit=db.EVENTS_KEPT)):
+        out.append(r["line"])
+        for d in r["deliveries"]:
+            if d.get("state") == "failed":
+                out.append(f"    {d.get('name')} ({KINDS.get(d.get('kind'), d.get('kind'))}): {d.get('error')}")
+    return "\n".join(out) + ("\n" if out else "")
 
 
 # ---- the destinations themselves (Settings → Notifications) ------------------------------

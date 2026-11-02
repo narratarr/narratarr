@@ -227,3 +227,54 @@ def test_settings_api_round_trip(client, monkeypatch):
 def test_only_admins_manage_notifications():
     assert auth.admin_only("GET", "/api/settings/notifications")
     assert auth.admin_only("POST", "/api/settings/notifications/3/test")
+
+
+# ---- the event log --------------------------------------------------------------------------
+
+
+async def test_events_are_kept_with_where_they_went(isolated_data, monkeypatch):
+    phone = dest(name="Phone", events=["wanted", "completed"])
+    dest(name="Family", kind="discord", url="https://discord.com/api/webhooks/1/x", events=["completed"])
+
+    async def fake_deliver(n, ctx, transport=None):
+        return "Nothing at that address (404)." if n["kind"] == "discord" else ""
+
+    monkeypatch.setattr(notify, "deliver", fake_deliver)
+    notify.emit("wanted", BOOK, "alice")
+    notify.emit("completed", BOOK, "alice")
+    notify.emit("grabbed", BOOK, "alice")  # nobody wants this one: log only
+    await asyncio.gather(*notify._tasks)
+
+    log = notify.events()
+    assert [e["event"] for e in log["items"]] == ["grabbed", "completed", "wanted"]
+    grabbed, completed, wanted = log["items"]
+    assert grabbed["deliveries"] == [] and grabbed["label"] == "Download started"
+    assert {d["name"]: d["state"] for d in completed["deliveries"]} == {"Phone": "sent", "Family": "failed"}
+    assert "404" in next(d for d in completed["deliveries"] if d["name"] == "Family")["error"]
+    assert wanted["line"].endswith('INFO narratarr.notify: [wanted] alice wants The "Martian" by Andy Weir (book 4)')
+    assert wanted["deliveries"][0]["id"] == phone["id"] and log["counts"] == {"wanted": 1, "completed": 1, "grabbed": 1}
+
+    assert [e["event"] for e in notify.events("completed")["items"]] == ["completed"]
+    assert notify.events(query="martian")["items"] and not notify.events(query="dune")["items"]
+    assert notify.events(query="100%")["items"] == []  # LIKE wildcards are matched literally
+    text = notify.events_log()
+    assert text.splitlines()[0].endswith("(book 4)") and "    Family (Discord): Nothing at that address (404)." in text
+
+
+def test_the_event_log_keeps_only_the_newest(isolated_data, monkeypatch):
+    monkeypatch.setattr(db, "EVENTS_KEPT", 3)
+    for i in range(5):
+        notify.emit("grabbed", {**BOOK, "id": i + 1})
+    page = notify.events(limit=2)
+    assert [e["book_id"] for e in page["items"]] == [5, 4] and page["more"]
+    assert [e["book_id"] for e in notify.events(before=page["items"][-1]["id"])["items"]] == [3]
+
+
+def test_event_log_api(client):
+    notify.emit("failed", BOOK, error="disk full")
+    got = client.get("/api/settings/notifications/events").json()
+    assert got["items"][0]["message"].endswith("couldn't download: disk full")
+    assert client.get("/api/settings/notifications/events", params={"event": "nope"}).status_code == 400
+    log = client.get("/api/settings/notifications/events.log")
+    assert log.headers["content-disposition"].startswith("attachment") and "[failed]" in log.text
+    assert auth.admin_only("GET", "/api/settings/notifications/events")

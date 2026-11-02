@@ -2,6 +2,16 @@
 
 All notable changes to Narratarr. The app shows this under **Settings → Updates**.
 
+## Unreleased
+
+- **A fresh look for Discover.** The search bar now says where it's looking ("in Audible catalog ▾") and switches sources from there. Sources are grouped by what they do (free downloads, your indexers, catalogs) with a dot showing which are ready. Audiobooks or Ebooks sits beside the heading. While you browse, one book gets a **Spotlight**, with what you already have by the same author, and a **New from authors you follow** shelf runs above the grid. Every cover shows where the book stands: In library, Downloading 42%, Awaiting approval, Wanted or Failed.
+- **The Library** opens with any requests waiting for approval, which an admin can approve, give a release, or decline right there (a listener sees their own and can take them back). Then Continue listening, then everything, with new filters (Listening, Finished), a sort (recently added, recently listened, title, author), and a line under each book saying how far you are, who asked for it, or why it failed.
+- **Authors & series**: each author shows how much of their work you have ("14 of 19 in your library") with tags like New book, Downloading or All caught up; followed series show as stacked covers. An author's page groups their books by series, in reading order, with the ones you don't have yet dimmed and one click from Wanted.
+- **Activity** shows how many are downloading, waiting and finished today, who each download is for, and finished books grouped by day, with Try again on failures. A side panel shows requests waiting for approval and when Narratarr will next look for Wanted books.
+- **The event log.** Settings → Notifications now shows the events Narratarr writes to `docker logs`, newest first, with where each one was sent: ✓ for delivered, ✕ with the reason when a destination failed, or "Log only". Filter by requests, starts, finishes or failures, search for a book or person, copy it, or download it as a `.log` file. It updates by itself while open, and keeps the most recent 500 events. A destination whose last send failed is highlighted.
+- A book's details show a request's progress (Asked, Approval, Downloading, In your library) and the rest of its series in your library.
+- Time left no longer reads "3h 60m".
+
 ## 0.8.1 — 2026-11-01
 
 - **Approve what listeners ask for.** A listener's request now waits under **Library → Awaiting approval** until an admin approves it. Nothing is searched for or downloaded before then. If the listener picked a release, approving downloads exactly that one; otherwise Narratarr starts looking. Admins see a badge on Library, and the **Added to Wanted** notification goes out for every listener request, including a release they picked themselves, saying it's waiting. Requests made through the app API wait too, and still show as `wanted` to apps. This is on by default; turn it off under **Settings → Users → Requests**. While it's on, only admins follow authors and series, since following adds books by itself.

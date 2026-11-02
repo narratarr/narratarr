@@ -222,7 +222,9 @@ async def test_follow_author_adds_only_upcoming_books(monkeypatch):
     assert await wanted.refresh(db.get_follow(f["id"])) == 1
     assert await wanted.refresh(db.get_follow(f["id"])) == 0
     counts = wanted.follow_counts(db.get_follow(f["id"]), db.list_books())
-    assert counts == {"in_library": 0, "wanted": 2}
+    assert {k: counts[k] for k in ("in_library", "wanted", "downloading", "requested", "new")} == {
+        "in_library": 0, "wanted": 2, "downloading": 0, "requested": 0, "new": True}
+    assert len(counts["covers"]) == 2
 
 
 async def test_audible_pages_count_from_zero():

@@ -75,7 +75,7 @@ No other app needed. You get chapters (including the chapter markers inside `.m4
 - **Light and dark** themes that follow your system
 - Plugs into your **\*arr stack**: **Prowlarr** (or any **Torznab** indexer, such as **Jackett**) for search; **SABnzbd** or **NZBGet** for Usenet; **qBittorrent**, **Transmission**, **Deluge**, Real-Debrid, AllDebrid, TorBox or Premiumize for torrents
 - **Wanted list** that fills itself: follow **authors and series** and new releases are found and downloaded automatically
-- **Notifications** to **ntfy**, **Gotify**, **Discord** or any **webhook** when someone adds a book to Wanted, and when downloads start, finish or fail
+- **Notifications** to **ntfy**, **Gotify**, **Discord** or any **webhook** when someone adds a book to Wanted, and when downloads start, finish or fail, plus an **event log** in Settings showing every event (the same lines as `docker logs`) and where each one was sent
 - **Ebooks too:** want any book as an audiobook, an ebook or both, and read EPUBs right in Narratarr. The ebook lands next to its audiobook, so Audiobookshelf shows them as one book
 - **Import** the audiobooks you already have, or point it at an existing Audiobookshelf library
 - **Audiobookshelf** in a click: Narratarr finds your server (on this machine, in Docker, across your network, or at a public address), you sign in once, and it rescans after every download
@@ -363,7 +363,7 @@ Add people under **Settings → Users**:
 | **Admin** | Everything: settings, download clients, imports, removing books, and managing users |
 | **Listener** | Browse, search, request books, take back their own requests, and listen. Each listener has their own place in every book and their own Continue listening shelf |
 
-**Approving requests.** By default, what a listener asks for waits under **Library → Awaiting approval** until an admin approves it: nothing is searched for or downloaded before then, and if they picked a release, approving downloads exactly that one. Admins get a badge on Library, and the "Added to Wanted" notification says the request is waiting. Turn this off under **Settings → Users → Requests** to let listeners download straight away (and follow authors, which adds books by itself).
+**Approving requests.** By default, what a listener asks for waits under **Library → Awaiting approval** until an admin approves it (admins can approve straight from the top of the Library): nothing is searched for or downloaded before then, and if they picked a release, approving downloads exactly that one. Admins get a badge on Library, and the "Added to Wanted" notification says the request is waiting. Turn this off under **Settings → Users → Requests** to let listeners download straight away (and follow authors, which adds books by itself).
 
 Everyone can change their own password from the account button at the bottom of the sidebar. Forgot the admin password? Reset it from a terminal on the machine running Narratarr:
 

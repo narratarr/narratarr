@@ -136,6 +136,15 @@ CREATE TABLE IF NOT EXISTS progress (           -- each person's place in each b
     finished    INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (user_id, book_id)
 );
+CREATE TABLE IF NOT EXISTS events (             -- what Narratarr announced, and where it was sent (Settings → Notifications)
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    at         REAL NOT NULL,
+    event      TEXT NOT NULL,
+    book_id    INTEGER,
+    message    TEXT NOT NULL,
+    line       TEXT NOT NULL,                   -- exactly as written to the log
+    deliveries TEXT NOT NULL DEFAULT '[]'       -- [{id, name, kind, state: sending|sent|failed|not sent, error, ms}]
+);
 """
 
 # Whose listening progress book rows carry: set per request to the signed-in user.
@@ -344,3 +353,55 @@ def delete_follow(follow_id: int) -> None:
     with connect() as conn:
         conn.execute("DELETE FROM follows WHERE id=?", (follow_id,))
 
+
+
+# ---- the event log ------------------------------------------------------------------------
+
+EVENTS_KEPT = 500
+
+
+def add_event(at: float, event: str, book_id: int | None, message: str, line: str, deliveries: list[dict]) -> int:
+    with connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO events (at, event, book_id, message, line, deliveries) VALUES (?,?,?,?,?,?)",
+            (at, event, book_id, message, line, json.dumps(deliveries)),
+        )
+        conn.execute("DELETE FROM events WHERE id <= ?", (cur.lastrowid - EVENTS_KEPT,))
+        return cur.lastrowid
+
+
+def update_delivery(event_id: int, dest_id: int, **changes) -> None:
+    """Record how sending one event to one destination went."""
+    with connect() as conn:
+        row = conn.execute("SELECT deliveries FROM events WHERE id=?", (event_id,)).fetchone()
+        if not row:
+            return
+        items = json.loads(row["deliveries"] or "[]")
+        for d in items:
+            if d.get("id") == dest_id:
+                d.update(changes)
+        conn.execute("UPDATE events SET deliveries=? WHERE id=?", (json.dumps(items), event_id))
+
+
+def list_events(event: str = "", query: str = "", before: int | None = None, limit: int = 50) -> list[dict]:
+    """Newest first. `query` matches the message (a book or a person), case-insensitively."""
+    sql, args = "SELECT * FROM events WHERE 1=1", []
+    if event:
+        sql += " AND event=?"
+        args.append(event)
+    if query:
+        sql += " AND message LIKE ? ESCAPE '\\'"
+        args.append("%" + query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%")
+    if before:
+        sql += " AND id < ?"
+        args.append(before)
+    sql += " ORDER BY id DESC LIMIT ?"
+    args.append(limit)
+    with connect() as conn:
+        rows = conn.execute(sql, args).fetchall()
+    return [{**dict(r), "deliveries": json.loads(r["deliveries"] or "[]")} for r in rows]
+
+
+def event_counts() -> dict[str, int]:
+    with connect() as conn:
+        return {r["event"]: r["n"] for r in conn.execute("SELECT event, COUNT(*) AS n FROM events GROUP BY event")}
