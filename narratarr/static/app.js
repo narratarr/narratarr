@@ -2342,18 +2342,23 @@ function Settings(root, page) {
       </section>
 
       <section class="panel" data-page="search">
-        <div class="ph"><h3>Ratings</h3><p class="desc">Where the star pill on every Discover card comes from. Ratings are read from a local cache, never fetched while a page loads: a book with no rating yet is filled in the background and shows up on your next search.</p></div>
+        <div class="ph"><h3>Rating metadata</h3><p class="desc">The star pill on every Discover card. Ratings are read from a local cache, never fetched while a page loads: a book with no rating yet is filled in the background and appears on your next search.</p></div>
         <div class="body">
-          <div class="field">
-            <label>Show ratings from</label>
-            <div class="segmented" data-choice="ratings_provider" role="radiogroup" aria-label="Ratings provider">
-              <button type="button" role="radio" data-v="bookmarks">Bookmarks</button>
-              <button type="button" role="radio" data-v="goodreads">Goodreads (unofficial)</button>
-              <button type="button" role="radio" data-v="">Off</button>
-            </div>
-            <input type="hidden" name="ratings_provider" value="${esc(s.ratings_provider ?? "bookmarks")}" />
-            <span class="hint">A book is only scored when its title and author both match exactly, and a near miss shows nothing rather than the wrong score. Where the source reports how many ratings a score is built on, scores under 50 are hidden and the order is weighted, so a book with a dozen ratings cannot outrank one with two million.</span>
-            <span class="hint"><b>Goodreads</b> is unofficial: their terms forbid collecting listings with extraction tools, so it is off by default and enabling it is your own call, not something Narratarr recommends.</span>
+          <div class="set-row">
+            <label for="ratings_provider"><b>Ratings provider</b><small>A book is only scored when its title and author both match exactly; a near miss shows <b>No Rating</b> rather than the wrong score.</small></label>
+            <select class="select" id="ratings_provider" name="ratings_provider">
+              ${[["audnex", "Audnex (Audible)"], ["bookmarks", "Bookmarks"], ["goodreads", "Goodreads (unofficial)"], ["", "Off"]]
+                .map(([v, l]) => `<option value="${v}" ${(s.ratings_provider ?? "audnex") === v ? "selected" : ""}>${l}</option>`).join("")}
+            </select>
+          </div>
+          <div class="set-row">
+            <label><b>Audible storefronts</b><small>Ratings only exist in the regions where a title is sold, so each storefront is tried in turn and the first that has the book wins. More regions means more coverage and more requests. The one that answered is remembered for that book.</small></label>
+            <div id="audnex-regions"></div>
+            <input type="hidden" name="audnex_regions" value="${esc((s.audnex_regions || ["uk"]).join(","))}" />
+            <div><button class="btn" type="button" id="add-region">Add a region</button></div>
+          </div>
+          <div class="set-row">
+            <label><b>Goodreads</b><small>Unofficial: their terms forbid collecting listings with extraction tools, so enabling it is your own call, not something Narratarr recommends.</small></label>
           </div>
         </div>
       </section>
@@ -2579,6 +2584,76 @@ function Settings(root, page) {
     choose(seg.dataset.choice, form[seg.dataset.choice].value);
     seg.onclick = (e) => { const b = e.target.closest("[data-v]"); if (b) choose(seg.dataset.choice, b.dataset.v); };
   });
+
+  // Audible storefronts: an ordered list, because availability is per item and the order is the
+  // search order. Up/down move a row, Test asks that storefront about one known book.
+  const CODES = ["us", "uk", "ca", "au", "in", "de", "fr", "it", "es", "jp"];
+  const NAMES = { us: "United States", uk: "United Kingdom", ca: "Canada", au: "Australia",
+    in: "India", de: "Germany", fr: "France", it: "Italy", es: "Spain", jp: "Japan" };
+  const regionBox = $("#audnex-regions", root);
+  const loadRegions = () => (String(form.audnex_regions.value || "uk").split(",").map((r) => r.trim()).filter(Boolean));
+  const storeRegions = (list) => { form.audnex_regions.value = list.join(","); dirty(); };
+
+  const drawRegions = () => {
+    const list = loadRegions();
+    regionBox.innerHTML = list.map((code, i) => `
+      <div class="region-row" data-i="${i}" style="display:flex;align-items:center;gap:6px;margin:4px 0">
+        <select class="select" data-region style="max-width:220px" aria-label="Storefront for row ${i + 1}">
+          ${CODES.map((c) => `<option value="${c}" ${c === code ? "selected" : ""}>${esc(NAMES[c])} (${c})</option>`).join("")}
+        </select>
+        <button class="btn" type="button" data-act="up" ${i === 0 ? "disabled" : ""} aria-label="Move up">↑</button>
+        <button class="btn" type="button" data-act="down" ${i === list.length - 1 ? "disabled" : ""} aria-label="Move down">↓</button>
+        <button class="btn" type="button" data-act="test">Test</button>
+        <button class="btn" type="button" data-act="del" aria-label="Remove">✕</button>
+        <span class="hint" data-out></span>
+      </div>`).join("");
+  };
+
+  regionBox.onclick = async (e) => {
+    const btn = e.target.closest("[data-act]");
+    if (!btn) return;
+    const row = btn.closest("[data-i]");
+    const i = Number(row.dataset.i);
+    const list = loadRegions();
+    const act = btn.dataset.act;
+    if (act === "del") { list.splice(i, 1); storeRegions(list.length ? list : ["uk"]); drawRegions(); return; }
+    if (act === "up" && i > 0) { [list[i - 1], list[i]] = [list[i], list[i - 1]]; storeRegions(list); drawRegions(); return; }
+    if (act === "down" && i < list.length - 1) { [list[i + 1], list[i]] = [list[i], list[i + 1]]; storeRegions(list); drawRegions(); return; }
+    if (act === "test") {
+      const out = $("[data-out]", row);
+      spinBtn(btn, true);
+      try {
+        const got = await api("/api/settings/test-audnex-region", { method: "POST", body: { region: list[i] } });
+        out.innerHTML = got.ok
+          ? `<div class="rd-result"><span>${got.rating ? `<b>${esc(got.rating)}</b> average` : "no ratings yet"}</span></div>`
+          : `<div class="rd-result bad">${got.reason === "region unavailable"
+              ? "Region unavailable, this book isn&#39;t sold here" : esc(got.reason)}</div>`;
+      } catch (err) {
+        out.innerHTML = `<div class="rd-result bad">${esc(err.message)}</div>`;
+      }
+      spinBtn(btn, false);
+    }
+  };
+
+  regionBox.onchange = (e) => {
+    const sel = e.target.closest("[data-region]");
+    if (!sel) return;
+    const list = loadRegions();
+    const i = Number(sel.closest("[data-i]").dataset.i);
+    if (list.includes(sel.value)) { sel.value = list[i]; return; }  // no duplicates: it is an order
+    list[i] = sel.value;
+    storeRegions(list);
+    drawRegions();
+  };
+
+  $("#add-region", root).onclick = () => {
+    const list = loadRegions();
+    const spare = CODES.find((c) => !list.includes(c));
+    if (!spare) return;
+    storeRegions([...list, spare]);
+    drawRegions();
+  };
+  drawRegions();
   $("#open-import", root).onclick = async () => { await save(true); openImport(form.import_folder.value); };
   $("#whats-new", root).onclick = () => openWhatsNew();
   $("#check-updates", root).onclick = async (e) => {

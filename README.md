@@ -305,6 +305,23 @@ Narratarr searches category `3030` (*Audio › Audiobook*) for audiobooks and `7
 >
 > **qBittorrent in Docker:** keep `WEBUI_PORT` the same as the port you publish (e.g. `8080:8080`). qBittorrent refuses connections that arrive on a different port.
 
+### Ratings on the cards
+
+Discover can show a star score for each book. It comes from one of three providers, set in
+**Settings → Rating metadata**: Audnex (Audible's own average), Bookmarks, or Goodreads (off by
+default, and unofficial — their terms forbid extracting listings, so it is your call).
+
+A score is only shown when the book we found is the book we asked for: the title must match
+exactly and the surname must match. A near miss leaves the card reading **No Rating**. A wrong
+score is worse than a blank one.
+
+Audible sells different titles in different countries, and Audnex only answers for the storefront
+that carries the book, so the settings take an **ordered list** of storefronts. They are tried in
+turn and the first that has the book wins; that choice is remembered for the book. Each row has a
+**Test** button that asks that storefront about a known title and tells you whether it answers, so
+you can see which regions work for you instead of guessing from blank cards. More regions means
+more coverage and more requests.
+
 ### Wanted books and following authors
 
 Some books aren't out yet, or aren't on your indexers yet. Put them on your **Wanted** list and Narratarr keeps looking for you.

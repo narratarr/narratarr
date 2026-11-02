@@ -46,6 +46,14 @@ class AudnexUnavailable(Exception):
     """The mirror did not answer. Says nothing about the book, so it is never cached."""
 
 
+class RegionUnavailable(Exception):
+    """404: this ASIN is not sold in this region. A miss, not an error — try the next region."""
+
+
+class RateLimited(Exception):
+    """429: documented as RATE_LIMIT_EXCEEDED. Real, temporary, and worth retrying later."""
+
+
 def parse_score(record: dict | None) -> float | None:
     """The rating as a number, or None.
 
@@ -78,19 +86,32 @@ class AudnexProvider:
     name = "audnex"
     label = "Audible"
 
-    def __init__(self, store, client: httpx.AsyncClient | None = None, region: str | None = None):
+    def __init__(self, store, client: httpx.AsyncClient | None = None, regions: list[str] | None = None):
         self.store = store
         self._client = client
-        self._region = region
+        self._regions = regions
+
+    @property
+    def regions(self) -> list[str]:
+        """The user's ordered search list, `uk` if somehow empty."""
+        if self._regions:
+            return [r for r in self._regions if r in TLDS] or ["uk"]
+        from .. import config
+
+        configured = getattr(config.load(), "audnex_regions", None) or ["uk"]
+        return [r for r in configured if r in TLDS] or ["uk"]
 
     @property
     def region(self) -> str:
-        if self._region:
-            return self._region
-        from .. import config
+        """The first configured region — what a URL built without a sweep should assume."""
+        return self.regions[0]
 
-        r = getattr(config.load(), "audnex_region", "uk") or "uk"
-        return r if r in TLDS else "uk"
+    def _cached_region(self, asin: str) -> str:
+        row = self.store.get_resolved(f"region:{asin}") or {}
+        return row.get("remote_id", "")
+
+    def _remember_region(self, asin: str, region: str) -> None:
+        self.store.put_resolved(f"region:{asin}", remote_id=region)
 
     @property
     def enabled(self) -> bool:
@@ -188,31 +209,60 @@ class AudnexProvider:
 
     # ---- pacing ------------------------------------------------------------------------------
 
-    def _regions_to_try(self) -> list[str]:
-        """The configured region first, then the marketplace the ASIN actually came from.
+    def _regions_to_try(self, asin: str) -> list[str]:
+        """The region that answered for this ASIN last time, then the user's list in order.
 
-        Measured: a region that does not match an ASIN's marketplace answers 404 for it, and the
-        reverse is true of ASINs from the other catalogue. Since every ASIN we hold came out of
-        `audible.py`, its region is a fact we have rather than a guess — so a 404 in the configured
-        region is worth one retry there before calling the book unknown.
+        Availability is per item, so a sweep is the only honest way to ask. The winner is cached
+        against the ASIN, which means the common case is one request, not one per region.
+
+        Last of all comes the storefront the ASIN itself came from, when it is not already in the
+        list. That is not a guess: every ASIN we hold was minted by `audible.py`, which knows its
+        own region, and without it a `us`-catalogue ASIN would 404 through a `uk`-only list.
         """
-        regions = [self.region]
+        ordered: list[str] = []
+        cached = self._cached_region(asin)
+        if cached:
+            ordered.append(cached)
+        for region in self.regions:
+            if region not in ordered:
+                ordered.append(region)
         try:
             from .. import audible
 
             home = audible.region()
-        except Exception:  # noqa: BLE001 - config unavailable: configured region only
+        except Exception:  # noqa: BLE001 - config unavailable: configured list only
             home = ""
-        if home and home not in regions:
-            regions.append(home)
-        return regions
+        if home and home in TLDS and home not in ordered:
+            ordered.append(home)
+        return ordered
 
     async def _get_book(self, asin: str) -> dict | None:
-        for region in self._regions_to_try():
-            found = await self._get_book_in(asin, region)
+        for region in self._regions_to_try(asin):
+            try:
+                found = await self._get_book_in(asin, region)
+            except RegionUnavailable:
+                continue  # not sold here; the next region may have it
             if found is not None:
+                if region != self._cached_region(asin):
+                    self._remember_region(asin, region)
                 return found
         return None
+
+    async def check_region(self, asin: str, region: str) -> dict:
+        """One region, one request, for the Test button: what does this storefront actually answer?"""
+        try:
+            record = await self._get_book_in(asin, region)
+        except RegionUnavailable:
+            return {"region": region, "ok": False, "reason": "region unavailable"}
+        except RateLimited:
+            return {"region": region, "ok": False, "reason": "RATE_LIMIT_EXCEEDED"}
+        except AudnexUnavailable as e:
+            return {"region": region, "ok": False, "reason": str(e)}
+        score = parse_score(record)
+        if score is None:
+            return {"region": region, "ok": True, "rating": None,
+                    "note": "the book is here but has no ratings yet"}
+        return {"region": region, "ok": True, "rating": f"{score:.1f}"}
 
     async def _get_book_in(self, asin: str, region: str) -> dict | None:
         global _last_request, _lock
@@ -238,7 +288,11 @@ class AudnexProvider:
                 backoff = min(backoff * 2, MAX_BACKOFF)
                 continue
             if resp.status_code == 404:
-                return None  # not in this region; the caller may try the ASIN's own
+                raise RegionUnavailable(f"{asin} is not sold in {region}")
+            if resp.status_code == 400:
+                # Audnex rejects a code it does not serve. Saving one is prevented, but a settings
+                # file edited by hand can still carry one, and it must not look like a miss.
+                raise AudnexUnavailable(f"unsupported region code '{region}'")
             if resp.status_code in (403, 429) or resp.status_code >= 500:
                 await asyncio.sleep(backoff + random.random())
                 backoff = min(backoff * 2, MAX_BACKOFF)
@@ -249,4 +303,4 @@ class AudnexProvider:
                 return resp.json()
             except ValueError:
                 raise AudnexUnavailable("not JSON")
-        raise AudnexUnavailable("no answer after retries")
+        raise RateLimited(f"{region}: still rate-limited after retries")

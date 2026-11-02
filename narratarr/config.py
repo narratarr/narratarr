@@ -5,7 +5,8 @@ from __future__ import annotations
 import json
 import os
 import threading
-from dataclasses import asdict, dataclass, fields
+import re
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -81,7 +82,9 @@ class Settings:
     audible_region: str = "us"
     check_updates: bool = True  # one request a day to GitHub's releases API
     ratings_provider: str = "audnex"  # "audnex", "bookmarks", "goodreads" (unofficial), "" for none
-    audnex_region: str = "uk"  # Audnex resolves per region; most ASINs only answer for one
+    # Audible storefronts Audnex serves, in the order they are tried. `br` is not here: the API
+    # rejects it as an unsupported code, and a code that can only fail should not be offered.
+    audnex_regions: list[str] = field(default_factory=lambda: ["uk"])
     auth_local_bypass: bool = False  # skip sign-in for requests from this machine and the home network
     listener_approval: bool = True  # a listener's request waits for an admin before anything is searched or downloaded
     languages: str = ""  # the languages books should be in, e.g. "German, English" (blank: any)
@@ -121,7 +124,6 @@ CHOICES = {
     "torrent_client": ("realdebrid", "alldebrid", "torbox", "premiumize", "qbittorrent", "transmission", "deluge"),
     "audible_region": ("us", "uk", "ca", "au", "in", "de", "fr", "it", "es", "jp"),
     "ratings_provider": ("audnex", "bookmarks", "goodreads", ""),
-    "audnex_region": ("us", "uk", "ca", "au", "in", "de", "fr", "it", "es", "jp"),
 }
 # Each service's secrets. Changing the service's address to a different host clears them, so a
 # saved key can never be sent to a machine the user didn't enter it for.
@@ -187,7 +189,9 @@ def update(changes: dict) -> Settings:
                     for secret in SERVICE_SECRETS[k]:
                         if secret not in fresh:
                             setattr(s, secret, "")
-            if k == "max_concurrent":
+            if k == "audnex_regions":
+                v = parse_regions(v)
+            elif k == "max_concurrent":
                 v = max(1, min(int(v), 8))
             elif k == "auto_search_hours":
                 v = max(1, min(int(v), 168))
@@ -214,6 +218,32 @@ def update(changes: dict) -> Settings:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         _write_private(SETTINGS_FILE, json.dumps(asdict(s), indent=2))
     return s
+
+
+AUDNEX_REGIONS = ("us", "uk", "ca", "au", "in", "de", "fr", "it", "es", "jp")
+
+
+def parse_regions(value) -> list[str]:
+    """An ordered, de-duplicated list of storefront codes, or a ValueError naming the bad one.
+
+    The order is the user's: availability is per item, so the list is a search order, not a set.
+    A code the API does not serve is refused here rather than saved and quietly 400-ing later.
+    """
+    if isinstance(value, str):
+        raw = [x for x in re.split(r"[,\s]+", value.strip()) if x]
+    elif isinstance(value, (list, tuple)):
+        raw = [str(x).strip() for x in value if str(x).strip()]
+    else:
+        raw = []
+    out: list[str] = []
+    for code in raw:
+        code = code.lower()
+        if code not in AUDNEX_REGIONS:
+            raise ValueError(
+                f"'{code}' isn't an Audible storefront Audnex serves. Use one of: {', '.join(AUDNEX_REGIONS)}.")
+        if code not in out:
+            out.append(code)
+    return out or ["uk"]
 
 
 def _host(url: str) -> str:

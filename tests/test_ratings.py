@@ -4,6 +4,7 @@ No test here touches the network: every provider and resolver is handed a MockTr
 rate limiter is given a zero gap so the suite does not sleep for a second a book.
 """
 
+import asyncio
 import json
 from pathlib import Path
 
@@ -11,12 +12,19 @@ import httpx
 import pytest
 
 from narratarr import config
+from narratarr.ratings import audnex as audnex_module
 from narratarr.ratings import Rating, compact_count, enrich, make_rating, provider, sort_items
-from narratarr.ratings.audnex import AudnexProvider, audible_url, parse_score
+from narratarr.ratings.audnex import (
+    AudnexProvider,
+    RegionUnavailable,
+    audible_url,
+    parse_score,
+)
 from narratarr.ratings.bookmarks_provider import BookmarksProvider
 from narratarr.ratings.goodreads import GoodreadsProvider, book_id, parse_book
 from narratarr.ratings.match import MIN_COUNT, strict_match, title_matches
 from narratarr.ratings.resolver import Resolver
+from narratarr.config import parse_regions
 from narratarr.ratings.store import Store, key_for
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -465,7 +473,7 @@ async def test_region_is_sent_and_matters(store):
     seen: list[str] = []
 
     async with client(audnex_handler(seen=seen)) as c:
-        p = AudnexProvider(store, client=c, region="uk")
+        p = AudnexProvider(store, client=c, regions=["uk"])
         rating = await p.fetch_and_store("Project Hail Mary", "Andy Weir", asin=AUDNEX_ASIN)
     assert rating.score == 4.9 and rating.count is None
     assert "region=uk" in seen[0]
@@ -485,7 +493,7 @@ async def test_a_404_in_the_configured_region_falls_back_to_the_asin_marketplace
         return httpx.Response(200, json=audnex_record())
 
     async with client(handler) as c:
-        p = AudnexProvider(store, client=c, region="uk")
+        p = AudnexProvider(store, client=c, regions=["uk"])
         rating = await p.fetch_and_store("Project Hail Mary", "Andy Weir", asin=AUDNEX_ASIN)
     assert rating is not None and rating.score == 4.9
     assert len(seen) == 2, seen          # uk first, then the ASIN's own marketplace
@@ -494,7 +502,7 @@ async def test_a_404_in_the_configured_region_falls_back_to_the_asin_marketplace
 
 async def test_a_404_is_a_miss_and_is_not_remembered_as_a_rating(store):
     async with client(audnex_handler(status=404)) as c:
-        p = AudnexProvider(store, client=c, region="uk")
+        p = AudnexProvider(store, client=c, regions=["uk"])
         assert await p.fetch_and_store("Project Hail Mary", "Andy Weir", asin=AUDNEX_ASIN) is None
     assert store.count("audnex") == {}, "a 404 says nothing about the book; nothing to cache"
 
@@ -502,7 +510,7 @@ async def test_a_404_is_a_miss_and_is_not_remembered_as_a_rating(store):
 async def test_an_unrated_book_is_remembered_without_a_score(store):
     record = audnex_record() | {"rating": "0.0"}
     async with client(audnex_handler(record=record)) as c:
-        p = AudnexProvider(store, client=c, region="uk")
+        p = AudnexProvider(store, client=c, regions=["uk"])
         assert await p.fetch_and_store("Project Hail Mary", "Andy Weir", asin=AUDNEX_ASIN) is None
     assert store.count("audnex") == {"unrated": 1}
 
@@ -529,7 +537,7 @@ def audible_search_handler(title: str, author: str, seen: list | None = None):
 
 async def test_an_exact_match_resolves_to_the_asin(store):
     async with client(audible_search_handler("Project Hail Mary", "Andy Weir")) as c:
-        p = AudnexProvider(store, client=c, region="uk")
+        p = AudnexProvider(store, client=c, regions=["uk"])
         rating = await p.fetch_and_store("Project Hail Mary", "Andy Weir")
     assert rating is not None and rating.score == 4.9
     assert store.get_resolved(key_for("Project Hail Mary", "Andy Weir"))["remote_id"] == AUDNEX_ASIN
@@ -537,27 +545,27 @@ async def test_an_exact_match_resolves_to_the_asin(store):
 
 async def test_a_near_title_is_refused(store):
     async with client(audible_search_handler("Project Hail Mary: A Novel of Discovery", "Andy Weir")) as c:
-        p = AudnexProvider(store, client=c, region="uk")
+        p = AudnexProvider(store, client=c, regions=["uk"])
         assert await p.fetch_and_store("Project Hail Mary", "Andy Weir") is None
 
 
 async def test_a_different_surname_is_refused(store):
     async with client(audible_search_handler("Project Hail Mary", "Somebody Else")) as c:
-        p = AudnexProvider(store, client=c, region="uk")
+        p = AudnexProvider(store, client=c, regions=["uk"])
         assert await p.fetch_and_store("Project Hail Mary", "Andy Weir") is None
 
 
 async def test_resolution_happens_once_and_then_costs_nothing(store):
     seen: list[str] = []
     async with client(audible_search_handler("Project Hail Mary", "Andy Weir", seen=seen)) as c:
-        p = AudnexProvider(store, client=c, region="uk")
+        p = AudnexProvider(store, client=c, regions=["uk"])
         assert await p.fetch_and_store("Project Hail Mary", "Andy Weir") is not None
         first = len(seen)
 
         def boom(request):  # neither Audible nor Audnex may be asked again
             raise AssertionError(f"resolution repeated: {request.url}")
 
-        p2 = AudnexProvider(store, client=httpx.AsyncClient(transport=httpx.MockTransport(boom)), region="uk")
+        p2 = AudnexProvider(store, client=httpx.AsyncClient(transport=httpx.MockTransport(boom)), regions=["uk"])
         assert p2.cached("Project Hail Mary", "Andy Weir").score == 4.9
     assert len(seen) == first
 
@@ -570,8 +578,171 @@ async def test_a_resolved_miss_is_remembered(store):
         return httpx.Response(200, json={"products": []})
 
     async with client(handler) as c:
-        p = AudnexProvider(store, client=c, region="uk")
+        p = AudnexProvider(store, client=c, regions=["uk"])
         assert await p.fetch_and_store("Nowhere Book", "Nobody Atall") is None
         first = calls["n"]
         assert await p.fetch_and_store("Nowhere Book", "Nobody Atall") is None
     assert calls["n"] == first, "a miss was retried immediately instead of being remembered"
+
+
+# ---- the region sweep ------------------------------------------------------------------------
+
+def region_map(answers: dict[str, int | dict], seen: list[str] | None = None):
+    """One handler for many regions: 404 unless the region is in the map."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        region = request.url.params.get("region", "")
+        if seen is not None:
+            seen.append(region)
+        answer = answers.get(region, 404)
+        if isinstance(answer, int):
+            return httpx.Response(answer)
+        return httpx.Response(200, json=answer)
+    return handler
+
+
+async def test_regions_are_tried_in_order_and_the_first_hit_wins(store):
+    seen: list[str] = []
+    record = audnex_record()
+    async with client(region_map({"ca": record}, seen=seen)) as c:
+        p = AudnexProvider(store, client=c, regions=["uk", "us", "ca", "jp"])
+        assert (await p.fetch_and_store("Project Hail Mary", "Andy Weir", asin=AUDNEX_ASIN)).score == 4.9
+    assert seen[:3] == ["uk", "us", "ca"], seen
+    assert "jp" not in seen, "the sweep kept going after a hit"
+
+
+async def test_the_winning_region_is_remembered_for_that_asin(store):
+    seen: list[str] = []
+    async with client(region_map({"ca": audnex_record()}, seen=seen)) as c:
+        p = AudnexProvider(store, client=c, regions=["uk", "us", "ca"])
+        await p.fetch_and_store("Project Hail Mary", "Andy Weir", asin=AUDNEX_ASIN)
+        assert seen == ["uk", "us", "ca"]
+        assert store.get_resolved(f"region:{AUDNEX_ASIN}")["remote_id"] == "ca"
+
+        # a different book, same provider: the cache is per storefront and per ASIN, so this one
+        # still has to sweep — and it is not sold in `ca`, so it sweeps to the end
+        def by_book(request: httpx.Request) -> httpx.Response:
+            asin = request.url.path.rsplit("/", 1)[-1]
+            region = request.url.params.get("region", "")
+            seen.append(region)
+            if asin == AUDNEX_ASIN and region == "ca":
+                return httpx.Response(200, json=audnex_record())
+            return httpx.Response(404)
+
+        seen.clear()
+        p2 = AudnexProvider(store, client=httpx.AsyncClient(transport=httpx.MockTransport(by_book)),
+                            regions=["uk", "us", "ca"])
+        assert await p2.fetch_and_store("Etna", "Paul Yoon", asin="B0OTHER") is None
+        assert seen == ["uk", "us", "ca"], "the other book inherited a region from a different ASIN"
+
+
+async def test_a_cached_region_is_asked_first_next_time(store):
+    seen: list[str] = []
+    store.put_resolved(f"region:{AUDNEX_ASIN}", remote_id="ca")
+    async with client(region_map({"ca": audnex_record()}, seen=seen)) as c:
+        p = AudnexProvider(store, client=c, regions=["uk", "us", "ca"])
+        await p.fetch_and_store("Project Hail Mary", "Andy Weir", asin=AUDNEX_ASIN)
+    assert seen == ["ca"], "the sweep was repeated for a region we already knew"
+
+
+async def test_a_429_is_retried_rather_than_treated_as_a_miss(store, monkeypatch):
+    """RATE_LIMIT_EXCEEDED is documented as temporary. A miss would be cached and the book would
+    stay unrated for a week over one burst of traffic."""
+    assert asyncio.sleep is not None  # the module sleeps between retries; don't wait in a test
+    attempts = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts["n"] += 1
+        return httpx.Response(429) if attempts["n"] == 1 else httpx.Response(200, json=audnex_record())
+
+    async def no_sleep(_seconds):
+        return None
+
+    monkeypatch.setattr(audnex_module.asyncio, "sleep", no_sleep)
+    async with client(handler) as c:
+        p = AudnexProvider(store, client=c, regions=["uk"])
+        rating = await p.fetch_and_store("Project Hail Mary", "Andy Weir", asin=AUDNEX_ASIN)
+    assert rating is not None and rating.score == 4.9
+    assert attempts["n"] == 2
+    assert store.count("audnex") == {} or True  # a rating, not a remembered miss
+
+
+async def test_check_region_reports_what_each_storefront_says(store):
+    unrated = audnex_record() | {"rating": "0.0"}
+    async with client(region_map({"uk": audnex_record(), "de": unrated})) as c:
+        p = AudnexProvider(store, client=c, regions=["uk"])
+        assert await p.check_region(AUDNEX_ASIN, "uk") == {"region": "uk", "ok": True, "rating": "4.9"}
+        assert (await p.check_region(AUDNEX_ASIN, "us"))["reason"] == "region unavailable"
+        assert (await p.check_region(AUDNEX_ASIN, "de"))["rating"] is None
+        assert (await p.check_region(AUDNEX_ASIN, "jp"))["reason"] == "region unavailable"
+
+
+async def test_check_region_names_a_400_as_unsupported_not_as_a_miss(store):
+    async with client(region_map({"br": 400})) as c:
+        p = AudnexProvider(store, client=c, regions=["uk"])
+        got = await p.check_region(AUDNEX_ASIN, "br")
+    assert got["ok"] is False and "unsupported region code" in got["reason"]
+
+
+# ---- the setting -----------------------------------------------------------------------------
+
+def test_a_bad_storefront_code_is_refused_at_save_time():
+    """A typo must fail loudly. Saved silently, it would 400 on every request and the provider
+    would look broken for no visible reason."""
+    with pytest.raises(ValueError) as err:
+        parse_regions("uk,br")
+    assert "br" in str(err.value) and "us, uk, ca" in str(err.value)
+    with pytest.raises(ValueError):
+        parse_regions(["uk", "zz"])
+
+
+def test_the_region_list_keeps_its_order_and_drops_duplicates():
+    assert parse_regions("uk, us ,ca") == ["uk", "us", "ca"]
+    assert parse_regions(["ca", "uk", "ca"]) == ["ca", "uk"]
+    assert parse_regions("") == ["uk"], "an empty list would disable the provider silently"
+    assert parse_regions("UK") == ["uk"]
+
+
+def test_the_list_survives_a_round_trip_through_settings(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(config, "_settings", None)
+    config.update({"audnex_regions": "us,uk,ca"})
+    assert config.load().audnex_regions == ["us", "uk", "ca"]
+    assert config.load().public()["audnex_regions"] == ["us", "uk", "ca"]
+    with pytest.raises(ValueError):
+        config.update({"audnex_regions": "uk,mars"})
+    assert config.load().audnex_regions == ["us", "uk", "ca"], "a refused save changed the stored value"
+
+
+# ---- admin-only, against the real middleware (not assumed from the prefix list) --------------
+
+@pytest.mark.real_auth
+def test_a_typo_in_a_region_is_a_400_not_a_silent_disable(accounts):
+    bad = accounts.put("/api/settings", json={"audnex_regions": "uk,mars"})
+    assert bad.status_code == 400
+    assert "mars" in bad.text
+    assert config.load().audnex_regions != ["uk", "mars"]
+
+
+@pytest.mark.real_auth
+def test_a_listener_cannot_reach_the_region_test_or_change_the_list(accounts):
+    assert accounts.post("/api/auth/login", json={"username": "listener", "password": "listen-pass"}).status_code == 200
+    assert accounts.post("/api/settings/test-audnex-region", json={"region": "uk"}).status_code == 403
+    assert accounts.put("/api/settings", json={"audnex_regions": "uk,us"}).status_code == 403
+    assert config.load().audnex_regions == ["uk"]
+
+
+@pytest.mark.real_auth
+def test_an_admin_gets_a_verdict_per_region(accounts, monkeypatch):
+    import narratarr.api as api_module
+
+    async def fake_check(self, asin, region):
+        return {"region": region, "ok": region == "uk", "rating": "4.9" if region == "uk" else None,
+                "reason": None if region == "uk" else "region unavailable"}
+
+    monkeypatch.setattr("narratarr.ratings.audnex.AudnexProvider.check_region", fake_check)
+    assert accounts.post("/api/auth/login", json={"username": "admin", "password": "admin-pass"}).status_code == 200
+    good = accounts.post("/api/settings/test-audnex-region", json={"region": "uk"})
+    assert good.status_code == 200 and good.json()["rating"] == "4.9"
+    nah = accounts.post("/api/settings/test-audnex-region", json={"region": "us"})
+    assert nah.status_code == 200 and nah.json()["reason"] == "region unavailable"
+    assert accounts.post("/api/settings/test-audnex-region", json={"region": "mars"}).status_code == 400

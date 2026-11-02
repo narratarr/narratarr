@@ -43,6 +43,8 @@ log = logging.getLogger("narratarr.api")
 
 
 STATIC = Path(__file__).parent / "static"
+# A book Audnex serves from `uk` (Project Hail Mary). Its rating anchors the region Test button.
+PROBE_ASIN = "B08GB2RLKM"
 COVER_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".gif": "image/gif"}
 
 
@@ -1081,6 +1083,25 @@ async def test_prowlarr():
         return await Prowlarr(s.prowlarr_url, s.prowlarr_api_key).status(s.prowlarr_ebook_categories)
     except ProwlarrError as e:
         raise HTTPException(400, str(e))
+
+
+class RegionProbe(BaseModel):
+    region: str = ""
+
+
+@app.post("/api/settings/test-audnex-region")
+async def test_audnex_region(body: RegionProbe):
+    """Fetch one known ASIN from one storefront, so a user can see which of their regions answer."""
+    from .ratings.audnex import AudnexProvider, AudnexUnavailable
+
+    region = (body.region or "").strip().lower()
+    if region not in config.AUDNEX_REGIONS:
+        raise HTTPException(400, f"'{region}' isn't an Audible storefront Audnex serves.")
+    provider = AudnexProvider(ratings.get_store(), regions=[region])
+    try:
+        return await provider.check_region(PROBE_ASIN, region)
+    except AudnexUnavailable as e:
+        return {"region": region, "ok": False, "reason": str(e)}
 
 
 @app.post("/api/settings/test-torznab")
