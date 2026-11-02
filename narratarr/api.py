@@ -216,7 +216,7 @@ async def sources():
 
 @app.get("/api/discover")
 async def discover(q: str = "", category: str = "", page: int = 1, source: str = "librivox",
-                   kind: Literal["audiobook", "ebook"] = "audiobook"):
+                   kind: Literal["audiobook", "ebook"] = "audiobook", sort: str = ""):
     try:
         src = get_source(source)
     except ValueError:
@@ -257,6 +257,15 @@ async def discover(q: str = "", category: str = "", page: int = 1, source: str =
             languages.detect(item.get("title") or "") if src.name in ("prowlarr", "torznab", "audiobookbay") else "")
         item["lang_ok"] = languages.allowed(item["language"], want)
         item["library"] = {"id": (b or e)["id"], "status": (b or e)["status"]} if b or e else None
+    # Bookmarks ratings enrichment
+    try:
+        from . import bookmarks as _bm
+        for item in data["items"]:
+            _bm.enrich_item(item)
+        if sort == "rating":
+            data["items"].sort(key=lambda x: (x.get("bookmarks_rating") or {}).get("R", -1), reverse=True)
+    except Exception:
+        pass
     if src.name == "prowlarr" and kind == "ebook" and not data["items"]:
         data["note"] = await _no_ebook_indexers(src)
     return data

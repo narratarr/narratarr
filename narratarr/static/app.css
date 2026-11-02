@@ -282,6 +282,9 @@ img { display: block; }
 .card .author { color: var(--text-2); font-size: 13.5px; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .card .facts { display: flex; gap: 6px; margin-top: 8px; color: var(--text-3); font-size: 12px; font-weight: 500; flex-wrap: wrap; }
 .card .facts span + span::before { content: "·"; margin-right: 6px; }
+.bm-rating { display: block; margin-top: 6px; font-size: 12.5px; color: var(--text-2); text-decoration: none; }
+.bm-rating:hover { color: var(--accent); text-decoration: underline; }
+.bm-rating.empty { color: var(--text-3); font-style: italic; }
 
 .status-tag {
   position: absolute; left: 10px; top: 10px; z-index: 2;

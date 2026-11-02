@@ -346,8 +346,16 @@ function cardHTML(item, lib, i = 0) {
         <div class="title">${esc(item.title)}</div>
         <div class="author">${esc(item.author || (item.indexer ? `via ${item.indexer}` : "Unknown author"))}</div>
         ${facts.length ? `<div class="facts">${facts.map((f) => `<span>${esc(f)}</span>`).join("")}</div>` : ""}
+        ${bmRatingHTML(item)}
       </div>
     </article>`;
+}
+
+function bmRatingHTML(item) {
+  const r = item.bookmarks_rating;
+  if (r && r.display) return `<a class="bm-rating" href="${esc(r.url)}" target="_blank" rel="noopener" title="View on Bookmarks">${esc(r.display)}</a>`;
+  if (r === null || r === undefined) return "";
+  return `<span class="bm-rating empty">No Bookmarks rating yet</span>`;
 }
 
 const shortLength = (len) => (len || "").replace(/ hours?/, "h").replace(/ and /, " ").replace(/ minutes?/, "m");
@@ -511,7 +519,8 @@ function Discover(root) {
     <div id="dym"></div>
     <div id="lang-note"></div>
     <div class="grid" id="grid"></div>
-    <div class="load-more" id="sentinel"></div>`;
+    <div class="load-more" id="sentinel"></div>
+    <div class="muted" style="margin-top:18px;font-size:12px;text-align:center">Ratings from Bookmarks, courtesy Lit Hub</div>`;
 
   const grid = $("#grid", root);
   const sentinel = $("#sentinel", root);
@@ -534,7 +543,7 @@ function Discover(root) {
     // The unsorted order is whatever the source gave us: relevance, popularity or recency.
     const listedNewest = !d.q && (["torrent", "indexer"].includes(src.delivery) || d.category === "new");
     const natural = d.q ? "Best match" : listedNewest ? "Newest first" : "Most popular";
-    const sorts = [["", natural], ["newest", "Newest first"], ["largest", "Largest"], ["smallest", "Smallest"], ["title", "Title A–Z"]]
+    const sorts = [["", natural], ["rating", "Rating"], ["newest", "Newest first"], ["largest", "Largest"], ["smallest", "Smallest"], ["title", "Title A–Z"]]
       .filter(([v]) => !(v === "newest" && listedNewest));
     const shown = visibleItems().length;
     $("#refine", root).innerHTML = !d.items.length ? "" : `
@@ -553,6 +562,7 @@ function Discover(root) {
     let items = d.items.filter((i) => (!d.lang || i.language === d.lang) && (!d.fmt || i.format.toUpperCase() === d.fmt))
       .filter((i) => d.allLangs || i.lang_ok !== false);
     const by = {
+      rating: (a, b) => ((b.bookmarks_rating?.R ?? -1) - (a.bookmarks_rating?.R ?? -1)),
       newest: (a, b) => (Date.parse(b.posted) || 0) - (Date.parse(a.posted) || 0),
       largest: (a, b) => sizeOf(b.size) - sizeOf(a.size),
       smallest: (a, b) => sizeOf(a.size) - sizeOf(b.size),
@@ -610,6 +620,7 @@ function Discover(root) {
     try {
       const params = new URLSearchParams({ q: d.q, category: d.category, page: d.page + 1, source: d.source });
       if (src.name === "prowlarr") params.set("kind", d.kind);
+      if (d.sort === "rating") params.set("sort", "rating");
       const res = await api(`/api/discover?${params}`);
       if (token !== d.token) return;
       const seen = new Set(d.items.map((i) => i.url));
