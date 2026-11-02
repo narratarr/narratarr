@@ -19,7 +19,22 @@ import html
 import re
 import unicodedata
 
+# LibriVox writes the author into the title: "Alice's Adventures in Wonderland, by Lewis Carroll".
+# It is their formatting, not part of the name, and left in it makes a famous book refuse to match.
+BY_SUFFIX = re.compile(r",\s*by\s+[^,]+$", re.IGNORECASE)
+
 MIN_COUNT = 50
+
+
+def clean_query_title(title: str, source: str = "") -> str:
+    """Drop LibriVox's trailing ", by <author>" before the title is compared.
+
+    Nothing else is removed and the comparison stays a strict equality afterwards: this fixes the
+    query, not the gate.
+    """
+    if source == "librivox":
+        return BY_SUFFIX.sub("", title or "").strip()
+    return title or ""
 
 _DIGIT = re.compile(r"\d")
 _TRAILING_GROUP = re.compile(r"\s*[\(\[][^\)\]]*[\)\]]\s*$")

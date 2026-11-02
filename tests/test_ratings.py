@@ -23,7 +23,7 @@ from narratarr.ratings.audnex import (
 )
 from narratarr.ratings.bookmarks_provider import BookmarksProvider
 from narratarr.ratings.goodreads import GoodreadsProvider, book_id, parse_book
-from narratarr.ratings.match import MIN_COUNT, strict_match, title_matches
+from narratarr.ratings.match import MIN_COUNT, clean_query_title, normalise, strict_match, title_matches
 from narratarr.ratings.resolver import Resolver
 from narratarr.config import parse_regions
 from narratarr.ratings.store import Store, key_for
@@ -246,14 +246,15 @@ def test_compact_count():
     assert compact_count(None) == ""
 
 
-def test_a_dozen_votes_do_not_outrank_two_million():
-    """The weight is the point: a 12-rating 5.0 must not top a 4.3 backed by two million."""
+def test_a_dozen_votes_are_refused_and_the_sort_is_the_raw_score():
+    """The floor is what stops thin evidence. The sort is the raw score, because the pill prints
+    the raw score: anything else shows a column of numbers that does not descend."""
     assert make_rating(5.0, 12, "u", "goodreads") is None       # under the floor
     thin_ok = make_rating(5.0, 60, "u", "goodreads").to_dict()
     solid = make_rating(4.3, 2_000_000, "u", "goodreads").to_dict()
-    assert thin_ok["score"] > solid["score"]
-    assert thin_ok["bayes"] < solid["bayes"], "the score is higher but the evidence is not"
-    assert sort_items([{"rating": thin_ok}, {"rating": solid}])[0]["rating"]["score"] == 4.3
+    assert thin_ok["bayes"] < solid["bayes"], "the weight still exists, it just does not order"
+    ranked = [i["rating"]["score"] for i in sort_items([{"rating": solid}, {"rating": thin_ok}])]
+    assert ranked == [5.0, 4.3]
 
 
 def test_the_vote_floor_is_per_source_not_global():
@@ -781,3 +782,48 @@ def test_an_admin_gets_a_verdict_per_region(accounts, monkeypatch):
     nah = accounts.post("/api/settings/test-audnex-region", json={"region": "us"})
     assert nah.status_code == 200 and nah.json()["reason"] == "region unavailable"
     assert accounts.post("/api/settings/test-audnex-region", json={"region": "mars"}).status_code == 400
+
+
+# ---- LibriVox's title formatting -------------------------------------------------------------
+
+def test_a_librivox_title_loses_its_by_suffix_and_the_match_stays_strict():
+    """Both strings are real LibriVox titles from archive.org's own metadata."""
+    raw = "Alice's Adventures in Wonderland, by Lewis Carroll"
+    assert clean_query_title(raw, "librivox") == "Alice's Adventures in Wonderland"
+
+    # the strip fixes the query, not the gate: a different edition still refuses
+    assert normalise(clean_query_title(raw, "librivox")) == normalise("Alice's Adventures in Wonderland")
+    assert not title_matches(clean_query_title(raw, "librivox"), "Alice's Adventures Underground")
+    assert not title_matches(clean_query_title(raw, "librivox"), "Through the Looking-Glass")
+
+    # only LibriVox formats titles this way; every other source is passed through untouched
+    assert clean_query_title(raw, "audiobookbay") == raw
+    assert clean_query_title(raw, "") == raw
+
+
+def test_a_by_suffix_only_goes_when_it_is_the_last_thing_in_the_title():
+    assert clean_query_title("The Man, by the River, by Someone Else", "librivox") == "The Man, by the River"
+    assert clean_query_title("Pride and Prejudice", "librivox") == "Pride and Prejudice"
+    assert clean_query_title("", "librivox") == ""
+    assert clean_query_title(None, "librivox") == ""
+
+
+async def test_enrich_asks_the_provider_with_the_cleaned_title(store, monkeypatch):
+    """The clean happens in the one funnel every card goes through, so the cache lookup and the
+    background fetch both see the same title."""
+    asked = []
+
+    class Probe:
+        name = "audnex"
+        enabled = True
+
+        def cached(self, title, author, asin=""):
+            asked.append(title)
+            return None
+
+    monkeypatch.setattr("narratarr.ratings.provider", lambda settings=None: Probe())
+    item = {"title": "Alice's Adventures in Wonderland, by Lewis Carroll", "author": "Lewis Carroll",
+            "source": "librivox"}
+    enrich(item)
+    assert asked == ["Alice's Adventures in Wonderland"], asked
+    assert "rating" in item

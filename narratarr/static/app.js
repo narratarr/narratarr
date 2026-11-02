@@ -578,7 +578,7 @@ function Discover(root) {
     let items = d.items.filter((i) => (!d.lang || i.language === d.lang) && (!d.fmt || i.format.toUpperCase() === d.fmt))
       .filter((i) => d.allLangs || i.lang_ok !== false);
     const by = {
-      rating: (a, b) => { const s = (x) => x.rating?.bayes ?? x.bookmarks_rating?.R ?? null; const av = s(a), bv = s(b); if (av == null && bv == null) return 0; if (av == null) return 1; if (bv == null) return -1; return bv - av; },
+      rating: (a, b) => { const s = (x) => x.rating?.score ?? x.bookmarks_rating?.R ?? null; const av = s(a), bv = s(b); if (av == null && bv == null) return 0; if (av == null) return 1; if (bv == null) return -1; return bv - av; },
       newest: (a, b) => (Date.parse(b.posted) || 0) - (Date.parse(a.posted) || 0),
       largest: (a, b) => sizeOf(b.size) - sizeOf(a.size),
       smallest: (a, b) => sizeOf(a.size) - sizeOf(b.size),

@@ -18,7 +18,7 @@ import asyncio
 import logging
 from dataclasses import dataclass, field
 
-from .match import MIN_COUNT
+from .match import MIN_COUNT, clean_query_title
 from .store import Store
 
 log = logging.getLogger("narratarr.ratings")
@@ -197,29 +197,30 @@ def enrich(item: dict, provider_obj=None, settings=None) -> dict:
     p = provider_obj if provider_obj is not None else provider(settings)
     if p is None:
         return item
+    title = clean_query_title(item.get("title") or "", item.get("source") or "")
     try:
-        rating = p.cached(item.get("title") or "", item.get("author") or "", item.get("asin") or "")
+        rating = p.cached(title, item.get("author") or "", item.get("asin") or "")
     except Exception as e:  # a ratings problem must never fail a search
         log.warning("ratings lookup failed for %r: %s", item.get("title"), e)
         return item
     if rating is not None:
         item["rating"] = rating.to_dict()
     elif p.enabled:
-        _enqueue(item.get("title") or "", item.get("author") or "", item.get("asin") or "")
+        _enqueue(title, item.get("author") or "", item.get("asin") or "")
     return item
 
 
 def sort_items(items: list[dict]) -> list[dict]:
-    """Ordered by the weighted score, unrated last.
+    """Highest score first, unrated last.
 
-    The weight is what stops a twelve-vote 5.0 outranking two million votes at 4.3. Where a source
-    publishes no count every rating from it carries the same weight, so ordering among those falls
-    back to the score itself — which is the right answer, and the reason a weighted sort and a raw
-    one agree for that provider alone.
+    The raw score, because the pill prints the raw score. Ordering by the weighted `bayes` value
+    would show a column of numbers that do not descend — 4.9 above 4.3 above 5.0 — and any user
+    reads that as a broken sort. `Rating.bayes` stays on the object for a ranked view that does not
+    print the score.
     """
     def key(item):
-        weight = (item.get("rating") or {}).get("bayes")
-        return (weight is None, -(weight or 0.0))
+        score = (item.get("rating") or {}).get("score")
+        return (score is None, -(score or 0.0))
 
     return sorted(items, key=key)
 
