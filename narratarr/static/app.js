@@ -6,6 +6,8 @@ import { openAbsGuide } from "./guide.js";
 import { reader } from "./reader.js";
 
 
+// Narratarr's community: help, ideas and release news.
+const DISCORD_URL = "https://discord.gg/kB5EgmfBrA";
 const ACTIVE = ["queued", "resolving", "caching", "downloading", "organizing"];
 const STATUS = {
   requested: "Awaiting approval",
@@ -1133,7 +1135,8 @@ async function openWhatsNew() {
     <div class="modal whatsnew" role="dialog" aria-modal="true" aria-labelledby="wn-title">
       <h3 id="wn-title">${newer ? `Narratarr ${esc(latest.version)} is out` : "What’s new"}</h3>
       <div class="ver"><b>You have ${esc(u.current || "")}</b>${latest ? `<span>Latest ${esc(latest.version)}${latest.published ? ` · ${esc(latest.published)}` : ""}</span>` : ""}
-        ${latest ? `<a href="${esc(latest.url)}" target="_blank" rel="noopener noreferrer" style="color:var(--accent)">On GitHub ↗</a>` : ""}</div>
+        ${latest ? `<a href="${esc(latest.url)}" target="_blank" rel="noopener noreferrer" style="color:var(--accent)">On GitHub ↗</a>` : ""}
+        <a href="${DISCORD_URL}" target="_blank" rel="noopener noreferrer" style="color:var(--accent)">Talk about it on Discord ↗</a></div>
       <div class="notes" id="wn-notes"><span class="spinner"></span></div>
       <div id="wn-progress"></div>
       <div class="actions">
@@ -2007,6 +2010,7 @@ function Settings(root, page) {
           <div class="cta-row" style="justify-content:flex-start">
             <button class="btn" type="button" id="check-updates">${I.retry} Check now</button>
             <button class="btn" type="button" id="whats-new">${I.list} What’s new</button>
+            <a class="btn" href="${DISCORD_URL}" target="_blank" rel="noopener noreferrer">${I.chat} Join the Discord</a>
           </div>
           <div id="update-result"></div>
         </div>
@@ -4017,7 +4021,9 @@ function openAccount() {
     body: u.role === "admin"
       ? "Admin: runs settings, downloads and who can sign in."
       : "Listener: browses, requests and listens. Your place in every book is your own.",
-    fields: `<div class="apps-block" id="my-apps" hidden>
+    fields: `<a class="community-row" href="${DISCORD_URL}" target="_blank" rel="noopener noreferrer">${I.chat}
+        <span><b>Join the Narratarr Discord</b><small>Help, ideas and news about new versions</small></span><span class="go" aria-hidden="true">↗</span></a>
+      <div class="apps-block" id="my-apps" hidden>
         <h4>Apps signed in</h4>
         <div class="app-list" id="app-list"></div>
         <span class="hint">Apps like Fable Frog sign in with your account to request books. Disconnecting one stops it at once; changing your password disconnects them all.</span>

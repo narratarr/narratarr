@@ -1821,3 +1821,15 @@ button.link { border: 0; background: none; padding: 0; min-height: 32px; color: 
 .lang-chips .fpill { height: 36px; }
 .rel.other-lang { opacity: 0.62; }
 .rel.other-lang:hover { opacity: 1; }
+/* The community link: sidebar on desktop, the account dialog everywhere */
+.community-link, .community-row { display: flex; align-items: center; gap: 11px; padding: 10px 12px; border-radius: 14px; border: 1px solid var(--border); background: var(--surface); color: inherit; text-decoration: none; transition: background 0.2s, border-color 0.2s; }
+.community-link:hover, .community-row:hover { background: var(--surface-2); border-color: var(--border-strong); }
+.community-link svg, .community-row svg { width: 20px; height: 20px; flex: none; fill: none; stroke: #8b93f8; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.community-link span, .community-row span { display: grid; min-width: 0; }
+.community-link b, .community-row b { font-size: 13.5px; font-weight: 600; }
+.community-link small, .community-row small { font-size: 12px; color: var(--text-3); }
+.community-row { margin: 4px 0 18px; }
+.community-row .go { margin-left: auto; color: var(--text-3); }
+.cta-row a.btn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+@media (max-width: 860px) { .sidebar .community-link { display: none; } }
+@media (prefers-color-scheme: light) { .community-link svg, .community-row svg { stroke: #5865f2; } }
