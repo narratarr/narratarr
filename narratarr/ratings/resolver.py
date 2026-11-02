@@ -2,9 +2,11 @@
 
 1. **ISBN** — ask Open Library for the book's ISBN, then use `/book/isbn/<isbn>`, which redirects to
    the canonical page. This is the only step that can be *right* rather than merely plausible.
-2. **Wikidata** — Goodreads ids are a property there (P2969), so this is a lookup, not a guess.
-3. **Local** — a book already in the cache with a matching title and surname, which costs nothing
+2. **Local** — a book already in the cache with a matching title and author, which costs nothing
    and cannot be wrong about a book we have already seen.
+
+There used to be a Wikidata hop between those two. It was removed: a third way to be wrong, for
+little gain, and every extra step is another chance to confidently rate the wrong novel.
 
 Goodreads' own search is not used: it is disallowed by their robots.txt and answers a redirect
 loop to anyone unauthenticated. Every result is cached, including dead ends, so a book is never
@@ -20,13 +22,13 @@ from urllib.parse import quote
 
 import httpx
 
+from .match import strict_match
+
 log = logging.getLogger("narratarr.ratings.resolver")
 
 OPENLIBRARY = "https://openlibrary.org/search.json"
-WIKIDATA_API = "https://www.wikidata.org/w/api.php"
 UA = "Narratarr/0.0 (self-hosted audiobook manager; ratings resolver)"
 TIMEOUT = httpx.Timeout(20, connect=8)
-GOODREADS_ID = "P2969"  # the Wikidata property that holds a Goodreads book id
 
 _last_request = 0.0
 _lock: asyncio.Lock | None = None
@@ -38,20 +40,6 @@ class Unavailable(Exception):
     The difference matters: caching "could not ask" as "no such book" turns a flaky minute at Open
     Library into a week of missing ratings for every book searched during it.
     """
-
-
-def _surname(name: str) -> str:
-    parts = (name or "").replace(",", " ").split()
-    return parts[-1].lower() if parts else ""
-
-
-def _looks_like(title: str, author: str, other_title: str, other_author: str) -> bool:
-    """The same surname gate the Bookmarks matcher uses, so the two agree on what "same book" means."""
-    from rapidfuzz.fuzz import token_sort_ratio
-
-    if author and other_author and _surname(author) != _surname(other_author):
-        return False
-    return token_sort_ratio((title or "").lower(), (other_title or "").lower()) >= 88
 
 
 class Resolver:
@@ -85,11 +73,6 @@ class Resolver:
             except Unavailable:
                 unavailable = True
         if not found:
-            try:
-                found = await self._by_wikidata(title, author)
-            except Unavailable:
-                unavailable = True
-        if not found:
             found = self._by_local(title, author)
 
         if found or not unavailable:
@@ -106,8 +89,7 @@ class Resolver:
             params["author"] = author
         data = await self._get_json(OPENLIBRARY, params)
         for doc in (data or {}).get("docs", []):
-            if not _looks_like(title, author, doc.get("title", ""),
-                               (doc.get("author_name") or [""])[0]):
+            if not strict_match(title, author, doc.get("title", ""), doc.get("author_name") or []):
                 continue
             isbns = [i for i in (doc.get("isbn") or []) if i.replace("X", "").isdigit()]
             if not isbns:
@@ -117,35 +99,7 @@ class Resolver:
             return {"url": f"https://www.goodreads.com/book/isbn/{isbn}", "isbn": isbn, "via": "openlibrary"}
         return None
 
-    # ---- 2. Wikidata ------------------------------------------------------------------------
-
-    async def _by_wikidata(self, title: str, author: str) -> dict | None:
-        search = await self._get_json(
-            WIKIDATA_API,
-            {"action": "wbsearchentities", "search": f"{title} {author}".strip(),
-             "language": "en", "format": "json", "limit": 5, "type": "item"},
-        )
-        for hit in (search or {}).get("search", []):
-            qid = hit.get("id")
-            if not qid:
-                continue
-            entity = await self._get_json(
-                WIKIDATA_API,
-                {"action": "wbgetentities", "ids": qid, "props": "claims", "format": "json"},
-            )
-            claims = (((entity or {}).get("entities") or {}).get(qid) or {}).get("claims") or {}
-            for claim in claims.get(GOODREADS_ID, []):
-                try:
-                    value = claim["mainsnak"]["datavalue"]["value"]
-                except (KeyError, TypeError):
-                    continue
-                if isinstance(value, str) and value.strip():
-                    remote = value.strip()
-                    return {"url": f"https://www.goodreads.com/book/show/{remote}",
-                            "isbn": "", "remote_id": remote, "via": "wikidata"}
-        return None
-
-    # ---- 3. what we have already seen --------------------------------------------------------
+    # ---- 2. what we have already seen --------------------------------------------------------
 
     def _by_local(self, title: str, author: str) -> dict | None:
         """A book resolved earlier for a different spelling of the same title costs nothing to reuse."""
@@ -157,7 +111,7 @@ class Resolver:
             return None
         for row in rows:
             other_title, _, other_author = row["key"].partition("|")
-            if _looks_like(title, author, other_title, other_author):
+            if strict_match(title, author, other_title, other_author):
                 if row["remote_id"]:
                     return {"url": f"https://www.goodreads.com/book/show/{row['remote_id']}",
                             "isbn": row["isbn"], "remote_id": row["remote_id"], "via": "local"}

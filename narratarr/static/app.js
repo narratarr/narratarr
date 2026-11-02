@@ -2348,12 +2348,14 @@ function Settings(root, page) {
           <div class="field">
             <label>Show ratings from</label>
             <div class="segmented" data-choice="ratings_provider" role="radiogroup" aria-label="Ratings provider">
+              <button type="button" role="radio" data-v="googlebooks">Google Books</button>
               <button type="button" role="radio" data-v="bookmarks">Bookmarks</button>
-              <button type="button" role="radio" data-v="goodreads">Goodreads</button>
+              <button type="button" role="radio" data-v="goodreads">Goodreads (unofficial)</button>
               <button type="button" role="radio" data-v="">Off</button>
             </div>
-            <input type="hidden" name="ratings_provider" value="${esc(s.ratings_provider ?? "bookmarks")}" />
-            <span class="hint">Goodreads averages are shown with the number of ratings behind them, and sorted by a weighted score, so a book with a dozen ratings cannot outrank one with two million. Scores under 50 ratings are hidden. Finding a book uses Open Library and Wikidata, then Goodreads' own book pages &mdash; never their search, which they ask automated clients not to use.</span>
+            <input type="hidden" name="ratings_provider" value="${esc(s.ratings_provider ?? "googlebooks")}" />
+            <span class="hint">Scores are shown with the number of ratings behind them, and sorted by a weighted score, so a book with a dozen ratings cannot outrank one with two million. Anything under 50 ratings is hidden, and a book is only scored when its title and author both match exactly &mdash; a near miss shows nothing rather than the wrong score.</span>
+            <span class="hint"><b>Google Books</b> needs a free API key in <code>GOOGLE_BOOKS_API_KEY</code>; without one, ratings stay blank. <b>Goodreads</b> is unofficial: their terms forbid collecting listings with extraction tools, so it is off by default and enabling it is your own call, not something Narratarr recommends.</span>
           </div>
         </div>
       </section>

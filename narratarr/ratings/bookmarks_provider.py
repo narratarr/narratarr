@@ -4,6 +4,11 @@ The loader, the fuzzy matcher and the surname gate all stay in `narratarr/bookma
 thin adapter that turns one of its entries into a `Rating`. Nothing about the Bookmarks result may
 change, so the score stays on its 0–4 scale, no vote count is shown, and the second half of the pill
 is still the consensus line.
+
+It deliberately does not go through `make_rating`: the 50-vote floor exists to stop a handful of
+ratings topping a list, but a Bookmarks R is already a weighted figure built from a critique
+consensus, and the dataset is curated. Applying the floor here would blank every existing rating,
+which is exactly what "existing behaviour must not change" forbids.
 """
 
 from __future__ import annotations
@@ -38,7 +43,6 @@ class BookmarksProvider:
             url=entry.get("url", ""),
             label=entry.get("consensus", ""),
             tooltip=f"{r:.1f} from {reviews} critics on Bookmarks — {entry.get('consensus', '')}".strip(" —"),
-            # The sort compares like with like across providers by putting both on a 5-point scale.
             extra={"R": r, "consensus": entry.get("consensus", ""), "flags": flags},
         )
 

@@ -11,9 +11,11 @@ import httpx
 import pytest
 
 from narratarr import config
-from narratarr.ratings import MIN_COUNT, Rating, compact_count, enrich, sort_items
+from narratarr.ratings import Rating, compact_count, enrich, make_rating, provider, sort_items
 from narratarr.ratings.bookmarks_provider import BookmarksProvider
+from narratarr.ratings.googlebooks import GoogleBooksProvider, best_volume
 from narratarr.ratings.goodreads import GoodreadsProvider, book_id, parse_book
+from narratarr.ratings.match import MIN_COUNT, strict_match, title_matches
 from narratarr.ratings.resolver import Resolver
 from narratarr.ratings.store import Store, key_for
 
@@ -44,7 +46,8 @@ def client(handler):
 
 def test_parser_reads_the_book_block_not_the_first_script():
     got = parse_book(BOOK_HTML)
-    assert got == {"score": 4.3, "count": 5044634, "name": "Project Hail Mary", "isbn": "9780593135204"}
+    assert got == {"score": 4.3, "count": 5044634, "name": "Project Hail Mary",
+                   "authors": [], "isbn": "9780593135204"}
 
 
 def test_parser_returns_nothing_for_a_page_without_a_rating():
@@ -78,23 +81,7 @@ async def test_resolver_prefers_the_isbn_from_open_library(store):
     assert hit["via"] == "openlibrary"
     assert hit["isbn"] == "9780593135204"
     assert hit["url"] == "https://www.goodreads.com/book/isbn/9780593135204"
-    assert seen == ["openlibrary.org"]  # wikidata was never needed
-
-
-async def test_resolver_falls_through_to_wikidata(store):
-    def handler(request: httpx.Request) -> httpx.Response:
-        url = str(request.url)
-        if "openlibrary.org" in url:
-            return httpx.Response(200, json={"docs": []})
-        if "wbsearchentities" in url:
-            return httpx.Response(200, json={"search": [{"id": "Q123", "label": "Project Hail Mary"}]})
-        return httpx.Response(200, json={"entities": {"Q123": {"claims": {
-            "P2969": [{"mainsnak": {"datavalue": {"value": "54493401"}}}]}}}})
-
-    async with client(handler) as c:
-        hit = await Resolver(store, client=c, gap=0).resolve("Project Hail Mary", "Andy Weir")
-    assert hit["via"] == "wikidata"
-    assert hit["url"] == "https://www.goodreads.com/book/show/54493401"
+    assert seen == ["openlibrary.org"]  # one request, no fallbacks
 
 
 async def test_resolver_rejects_a_different_author(store):
@@ -105,7 +92,7 @@ async def test_resolver_rejects_a_different_author(store):
             return httpx.Response(200, json={"docs": [{"title": "Project Hail Mary",
                                                        "author_name": ["Someone Else"],
                                                        "isbn": ["9780000000000"]}]})
-        return httpx.Response(200, json={"search": []})
+        raise AssertionError(f"unexpected request: {request.url}")
 
     async with client(handler) as c:
         hit = await Resolver(store, client=c, gap=0).resolve("Project Hail Mary", "Andy Weir")
@@ -124,22 +111,20 @@ async def test_a_book_we_have_already_resolved_costs_nothing(store):
     assert hit["url"].endswith("/54493401")
 
 
-async def test_the_local_match_is_third_not_first(store):
-    """A differently-spelled author still tries the network first — the cheap local match is the
-    last resort, so a stale local row can never override a real lookup."""
+async def test_the_local_match_is_a_fallback_not_the_first_answer(store):
+    """A differently-spelled author still asks Open Library first — the local row is the last resort,
+    so a stale entry can never override a real lookup."""
     store.put_resolved(key_for("Project Hail Mary", "Andy Weir"), remote_id="54493401")
     tried = []
 
     def handler(request: httpx.Request) -> httpx.Response:
-        url = str(request.url)
-        tried.append("openlibrary" if "openlibrary" in url else "wikidata")
-        if "openlibrary" in url:
-            return httpx.Response(200, json={"docs": []})
-        return httpx.Response(200, json={"search": []})
+        tried.append("openlibrary")
+        return httpx.Response(200, json={"docs": []})
 
     async with client(handler) as c:
-        hit = await Resolver(store, client=c, gap=0).resolve("Project Hail Mary", "A. Weir")
-    assert tried == ["openlibrary", "wikidata"], "the local match must come after both lookups"
+        # A different spelling of the title, not of the author: a surname alone is no longer a match.
+        hit = await Resolver(store, client=c, gap=0).resolve("Project Hail Mary (Unabridged)", "Andy Weir")
+    assert tried == ["openlibrary"], "Open Library must be tried before the local row"
     assert hit["via"] == "local"
     assert hit["url"].endswith("/54493401")
 
@@ -150,9 +135,8 @@ async def test_a_transient_failure_is_not_remembered_as_a_missing_book(store):
 
     def handler(request: httpx.Request) -> httpx.Response:
         calls["n"] += 1
-        if "openlibrary" in str(request.url):
-            return httpx.Response(503)          # the site is having a bad minute
-        return httpx.Response(200, json={"search": []})
+        assert "openlibrary" in str(request.url), request.url
+        return httpx.Response(503)              # the site is having a bad minute
 
     async with client(handler) as c:
         r = Resolver(store, client=c, gap=0)
@@ -165,11 +149,13 @@ async def test_a_transient_failure_is_not_remembered_as_a_missing_book(store):
 
 
 async def test_a_dead_end_is_remembered_so_it_is_not_retried(store):
+    """A definite "no such book" is worth remembering; otherwise every search re-asks about it."""
     calls = {"n": 0}
 
     def handler(request: httpx.Request) -> httpx.Response:
         calls["n"] += 1
-        return httpx.Response(200, json={"docs": []} if "openlibrary" in str(request.url) else {"search": []})
+        assert "openlibrary" in str(request.url), request.url
+        return httpx.Response(200, json={"docs": []})
 
     async with client(handler) as c:
         r = Resolver(store, client=c, gap=0)
@@ -287,3 +273,105 @@ def test_enrich_never_blocks_and_always_sets_the_key(monkeypatch, tmp_path):
     item = enrich({"title": "Unknown Book", "author": "Nobody"})
     assert item["rating"] is None
     assert called["n"] == 1, "a miss should be queued for the background filler"
+
+
+# ---- the strict gate: one place, every refusal ---------------------------------------------
+
+def test_near_titles_and_series_neighbours_are_refused():
+    """The one test that proves "refuse rather than guess". Each line is a way to be plausibly wrong."""
+    # exact, and exact through cosmetic differences
+    assert strict_match("Catch 22", "Joseph Heller", "Catch-22", ["Joseph Heller"])
+    assert strict_match("Devil's Fjord", "David Hewson", "Devil&apos;s Fjord", ["David Hewson"])
+    assert strict_match("Etna", "Paul Yoon", "Etna: A Novel", ["Paul Yoon"])  # subtitle without a digit
+    assert strict_match("Project Hail Mary", "Weir, Andy", "Project Hail Mary", ["Andy Weir"]), \
+        "an inverted author name is the same author"
+
+    # a different book
+    assert not strict_match("Etna", "Paul Yoon", "Etna Rising", ["Paul Yoon"]), "near title"
+    assert not strict_match("Etna", "Paul Yoon", "Etna (Book 2)", ["Paul Yoon"]), "series neighbour"
+    assert not strict_match("Etna", "Paul Yoon", "Etna (The Etna Saga, #1)", ["Paul Yoon"]), "series suffix"
+    assert not strict_match("Dune", "Frank Herbert", "Dune Messiah", ["Frank Herbert"]), "next in series"
+
+    # the right book, the wrong person
+    assert not strict_match("Etna", "Paul Yoon", "Etna", ["Yoon"]), "surname only"
+    assert not strict_match("Etna", "Paul Yoon", "Etna", ["Paul Auster"]), "different author"
+    assert not strict_match("Etna", "Paul Yoon", "Etna", []), "no author at all is not a match"
+
+
+# ---- Google Books ---------------------------------------------------------------------------
+
+def googlebooks_payload() -> dict:
+    return json.loads((FIXTURES / "googlebooks_etna.json").read_text())
+
+
+def test_googlebooks_picks_the_right_volume_out_of_a_ranked_list():
+    """The API returns candidates in its own order; the first is a near title, the second a series
+    neighbour, and only the third is the book that was asked for."""
+    got = best_volume(googlebooks_payload(), "Etna", "Paul Yoon")
+    assert got["count"] == 512 and got["score"] == 4.2
+    assert got["isbn"] == "9781668081234"
+    assert got["url"].endswith("id=therightbook")
+
+
+def test_googlebooks_refuses_when_only_wrong_volumes_come_back():
+    payload = googlebooks_payload()
+    payload["items"] = payload["items"][:2]  # the near title and the series neighbour
+    assert best_volume(payload, "Etna", "Paul Yoon") is None
+
+
+async def test_googlebooks_is_unconfigured_without_a_key(monkeypatch, store):
+    monkeypatch.delenv("GOOGLE_BOOKS_API_KEY", raising=False)
+
+    def handler(request: httpx.Request) -> httpx.Response:  # no request may be made
+        raise AssertionError(f"asked Google Books without a key: {request.url}")
+
+    async with client(handler) as c:
+        p = GoogleBooksProvider(store, client=c)
+        assert p.enabled is False
+        assert p.cached("Etna", "Paul Yoon") is None
+        assert await p.fetch_and_store("Etna", "Paul Yoon") is None
+
+
+async def test_googlebooks_stores_and_then_serves_from_cache(monkeypatch, store):
+    monkeypatch.setenv("GOOGLE_BOOKS_API_KEY", "test-key")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.params["key"] == "test-key"
+        assert 'intitle:"Etna"' in request.url.params["q"]
+        return httpx.Response(200, json=googlebooks_payload())
+
+    async with client(handler) as c:
+        p = GoogleBooksProvider(store, client=c)
+        rating = await p.fetch_and_store("Etna", "Paul Yoon")
+        assert rating.score == 4.2 and rating.count == 512
+        assert rating.label == "512"
+        assert rating.tooltip == "4.20 average from 512 ratings on Google Books"
+        assert rating.url.endswith("id=therightbook")
+
+        def boom(request):  # any request now is a failure
+            raise AssertionError(f"cache miss: {request.url}")
+
+        p2 = GoogleBooksProvider(store, client=httpx.AsyncClient(transport=httpx.MockTransport(boom)))
+        assert p2.cached("Etna", "Paul Yoon").score == 4.2
+
+
+async def test_googlebooks_remembers_a_definite_no(monkeypatch, store):
+    monkeypatch.setenv("GOOGLE_BOOKS_API_KEY", "test-key")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = googlebooks_payload()
+        payload["items"] = payload["items"][:2]
+        return httpx.Response(200, json=payload)
+
+    async with client(handler) as c:
+        p = GoogleBooksProvider(store, client=c)
+        assert await p.fetch_and_store("Etna", "Paul Yoon") is None
+    assert store.count("googlebooks") == {"unrated": 1}
+
+
+# ---- the floor lives in one place -----------------------------------------------------------
+
+def test_the_vote_floor_is_applied_once():
+    assert make_rating(5.0, 12, "u", "googlebooks") is None, "12 ratings is noise"
+    assert make_rating(3.2, MIN_COUNT, "u", "googlebooks") is not None
+    assert make_rating(None, 5000, "u", "googlebooks") is None, "no score is not a zero score"

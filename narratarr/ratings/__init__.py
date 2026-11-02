@@ -18,11 +18,11 @@ import asyncio
 import logging
 from dataclasses import dataclass, field
 
+from .match import MIN_COUNT
 from .store import Store
 
 log = logging.getLogger("narratarr.ratings")
 
-MIN_COUNT = 50          # below this many votes, a score is noise
 PRIOR_SCORE = 3.9       # the average a new book is treated as having, so few votes pull toward it
 PRIOR_WEIGHT = 1000     # how many real votes the prior is worth
 
@@ -86,7 +86,32 @@ def compact_count(n: int | None) -> str:
 
 def available() -> dict[str, str]:
     """Provider keys the user can pick in Settings."""
-    return {"goodreads": "Goodreads", "bookmarks": "Bookmarks"}
+    return {"googlebooks": "Google Books", "bookmarks": "Bookmarks", "goodreads": "Goodreads (unofficial)"}
+
+
+def make_rating(score, count, url: str, source: str, label: str = "", tooltip: str = "") -> Rating | None:
+    """The one place a score becomes a rating, and the one place the vote floor is applied.
+
+    Below MIN_COUNT ratings a score is noise, and a thin 5.0 outranks a solid 4.3 on any honest
+    list. Refusing here means no caller has to remember the rule.
+    """
+    try:
+        count = int(count or 0)
+    except (TypeError, ValueError):
+        count = 0
+    if score is None or count < MIN_COUNT:
+        return None
+    source_label = {"googlebooks": "Google Books", "goodreads": "Goodreads", "bookmarks": "Bookmarks"}.get(
+        source, source)
+    return Rating(
+        score=float(score),
+        count=count,
+        scale=5.0 if source != "bookmarks" else 4.0,
+        source=source,
+        url=url or "",
+        label=label or compact_count(count),
+        tooltip=tooltip or f"{float(score):.2f} average from {count:,} ratings on {source_label}",
+    )
 
 
 def provider(settings=None):
@@ -100,6 +125,10 @@ def provider(settings=None):
         from .bookmarks_provider import BookmarksProvider
 
         return BookmarksProvider(store)
+    if name == "googlebooks":
+        from .googlebooks import GoogleBooksProvider
+
+        return GoogleBooksProvider(store)
     if name == "goodreads":
         from .goodreads import GoodreadsProvider
 

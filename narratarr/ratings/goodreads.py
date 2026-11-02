@@ -23,7 +23,8 @@ import time
 
 import httpx
 
-from . import MIN_COUNT, Rating, compact_count
+from . import Rating, compact_count, make_rating
+from .match import strict_match, title_matches
 from .resolver import Resolver
 
 log = logging.getLogger("narratarr.ratings.goodreads")
@@ -80,10 +81,18 @@ def parse_book(html: str) -> dict | None:
                 count = int(float(aggregate.get("ratingCount") or 0))
             except (TypeError, ValueError):
                 count = 0
+            author = candidate.get("author")
+            if isinstance(author, dict):
+                author = [author.get("name") or ""]
+            elif isinstance(author, list):
+                author = [(a.get("name") if isinstance(a, dict) else str(a)) for a in author]
+            else:
+                author = [str(author)] if author else []
             return {
                 "score": score,
                 "count": count,
                 "name": (candidate.get("name") or "").strip(),
+                "authors": [a for a in author if a],
                 "isbn": (candidate.get("isbn") or "").strip(),
             }
     return None
@@ -94,23 +103,26 @@ def book_id(url: str) -> str:
     return m.group(1) if m else ""
 
 
-def _rating(score: float, count: int, url: str) -> Rating | None:
-    if count < MIN_COUNT:
-        return None  # too few votes to mean anything
-    return Rating(
-        score=score,
-        count=count,
-        scale=5.0,
-        source="goodreads",
-        url=url,
-        label=compact_count(count),
-        tooltip=f"{score:.2f} average from {count:,} ratings on Goodreads",
-    )
+def _rating(score: float, count: int, url: str, parsed: dict, title: str, author: str) -> Rating | None:
+    """Only a page whose own title (and author, when it states one) is this book may score it."""
+    if not title_matches(title, parsed.get("name", "")):
+        return None
+    if parsed.get("authors") and not strict_match(title, author, parsed.get("name", ""), parsed["authors"]):
+        return None
+    return make_rating(score, count, url, "goodreads")
 
 
 class GoodreadsProvider:
+    """Unofficial. Never the default.
+
+    Goodreads' Terms of Use forbid collecting their listings with extraction tools, and robots.txt
+    disallows their search outright. This provider therefore exists for someone who has read that
+    and decided for themselves; it is not the resolver of record, it is not enabled by default, and
+    its pages are only ever reached through an ISBN we already resolved.
+    """
+
     name = "goodreads"
-    label = "Goodreads"
+    label = "Goodreads (unofficial)"
 
     def __init__(self, store, client: httpx.AsyncClient | None = None, gap: float = REQUEST_GAP):
         self.store = store
@@ -128,7 +140,7 @@ class GoodreadsProvider:
         row = self.store.get(self._key(title, author), self.name)
         if not row or row.get("state") != "rated":
             return None
-        return _rating(row["score"], row["count"] or 0, row["url"])
+        return make_rating(row["score"], row["count"] or 0, row["url"], "goodreads")
 
     def _key(self, title: str, author: str) -> str:
         from .store import key_for
@@ -159,7 +171,7 @@ class GoodreadsProvider:
             self.store.put(key, self.name, state="unrated", isbn=hit.get("isbn", ""))
             return None
 
-        rating = _rating(parsed["score"], parsed["count"], final_url or hit["url"])
+        rating = _rating(parsed["score"], parsed["count"], final_url or hit["url"], parsed, title, author)
         if rating is None:  # real, but too few votes: remember it so we stop asking
             self.store.put(
                 key, self.name, state="unrated", isbn=hit.get("isbn", ""),
@@ -182,7 +194,7 @@ class GoodreadsProvider:
         parsed = parse_book(html or "")
         if not parsed:
             return None
-        return _rating(parsed["score"], parsed["count"], final_url or hit["url"])
+        return _rating(parsed["score"], parsed["count"], final_url or hit["url"], parsed, title, author)
 
     async def _get(self, url: str) -> tuple[str | None, str]:
         global _last_request, _lock
