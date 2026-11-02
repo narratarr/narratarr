@@ -13,7 +13,6 @@ import pytest
 from narratarr import config
 from narratarr.ratings import Rating, compact_count, enrich, make_rating, provider, sort_items
 from narratarr.ratings.bookmarks_provider import BookmarksProvider
-from narratarr.ratings.googlebooks import GoogleBooksProvider, best_volume
 from narratarr.ratings.goodreads import GoodreadsProvider, book_id, parse_book
 from narratarr.ratings.match import MIN_COUNT, strict_match, title_matches
 from narratarr.ratings.resolver import Resolver
@@ -298,80 +297,33 @@ def test_near_titles_and_series_neighbours_are_refused():
     assert not strict_match("Etna", "Paul Yoon", "Etna", []), "no author at all is not a match"
 
 
-# ---- Google Books ---------------------------------------------------------------------------
-
-def googlebooks_payload() -> dict:
-    return json.loads((FIXTURES / "googlebooks_etna.json").read_text())
-
-
-def test_googlebooks_picks_the_right_volume_out_of_a_ranked_list():
-    """The API returns candidates in its own order; the first is a near title, the second a series
-    neighbour, and only the third is the book that was asked for."""
-    got = best_volume(googlebooks_payload(), "Etna", "Paul Yoon")
-    assert got["count"] == 512 and got["score"] == 4.2
-    assert got["isbn"] == "9781668081234"
-    assert got["url"].endswith("id=therightbook")
-
-
-def test_googlebooks_refuses_when_only_wrong_volumes_come_back():
-    payload = googlebooks_payload()
-    payload["items"] = payload["items"][:2]  # the near title and the series neighbour
-    assert best_volume(payload, "Etna", "Paul Yoon") is None
-
-
-async def test_googlebooks_is_unconfigured_without_a_key(monkeypatch, store):
-    monkeypatch.delenv("GOOGLE_BOOKS_API_KEY", raising=False)
-
-    def handler(request: httpx.Request) -> httpx.Response:  # no request may be made
-        raise AssertionError(f"asked Google Books without a key: {request.url}")
-
-    async with client(handler) as c:
-        p = GoogleBooksProvider(store, client=c)
-        assert p.enabled is False
-        assert p.cached("Etna", "Paul Yoon") is None
-        assert await p.fetch_and_store("Etna", "Paul Yoon") is None
-
-
-async def test_googlebooks_stores_and_then_serves_from_cache(monkeypatch, store):
-    monkeypatch.setenv("GOOGLE_BOOKS_API_KEY", "test-key")
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.params["key"] == "test-key"
-        assert 'intitle:"Etna"' in request.url.params["q"]
-        return httpx.Response(200, json=googlebooks_payload())
-
-    async with client(handler) as c:
-        p = GoogleBooksProvider(store, client=c)
-        rating = await p.fetch_and_store("Etna", "Paul Yoon")
-        assert rating.score == 4.2 and rating.count == 512
-        assert rating.label == "512"
-        assert rating.tooltip == "4.20 average from 512 ratings on Google Books"
-        assert rating.url.endswith("id=therightbook")
-
-        def boom(request):  # any request now is a failure
-            raise AssertionError(f"cache miss: {request.url}")
-
-        p2 = GoogleBooksProvider(store, client=httpx.AsyncClient(transport=httpx.MockTransport(boom)))
-        assert p2.cached("Etna", "Paul Yoon").score == 4.2
-
-
-async def test_googlebooks_remembers_a_definite_no(monkeypatch, store):
-    monkeypatch.setenv("GOOGLE_BOOKS_API_KEY", "test-key")
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        payload = googlebooks_payload()
-        payload["items"] = payload["items"][:2]
-        return httpx.Response(200, json=payload)
-
-    async with client(handler) as c:
-        p = GoogleBooksProvider(store, client=c)
-        assert await p.fetch_and_store("Etna", "Paul Yoon") is None
-    assert store.count("googlebooks") == {"unrated": 1}
-
-
 # ---- the floor lives in one place -----------------------------------------------------------
 
 def test_the_vote_floor_is_applied_once():
-    assert make_rating(5.0, 12, "u", "googlebooks") is None, "12 ratings is noise"
-    assert make_rating(3.2, MIN_COUNT, "u", "googlebooks") is not None
-    assert make_rating(None, 5000, "u", "googlebooks") is None, "no score is not a zero score"
+    assert make_rating(5.0, 12, "u", "goodreads") is None, "12 ratings is noise"
+    assert make_rating(3.2, MIN_COUNT, "u", "goodreads") is not None
+    assert make_rating(None, 5000, "u", "goodreads") is None, "no score is not a zero score"
+
+
+def test_a_rating_with_no_count_is_expressible():
+    """Audnex returns a bare number with no count behind it. The contract has to carry that, and
+    the vote floor must not throw it away: a floor needs a count to apply to."""
+    r = make_rating(4.9, None, "https://api.audnex.us/books/B00TEST", "audnex")
+    assert r is not None and r.score == 4.9 and r.count is None
+    assert r.tooltip == "4.90 average on audnex"          # no invented count
+    d = r.to_dict()
+    assert d["count"] is None and d["label"] == ""        # the pill shows the score alone
+    assert d["display"]
+
+
+def test_an_unknown_count_still_sorts_sensibly():
+    """Unknown weight is weak evidence, not zero evidence: it must not dump every count-less book
+    at the prior, where they would all tie."""
+    unknown_high = make_rating(4.9, None, "u", "audnex").to_dict()
+    unknown_low = make_rating(3.1, None, "u", "audnex").to_dict()
+    thin_known = make_rating(5.0, 60, "u", "goodreads").to_dict()
+    solid = make_rating(4.3, 2_000_000, "u", "goodreads").to_dict()
+    assert unknown_high["bayes"] > unknown_low["bayes"], "unknown counts must not collapse into a tie"
+    assert unknown_high["bayes"] < solid["bayes"], "and must not outrank two million ratings"
+    assert sort_items([{"rating": unknown_low}, {"rating": unknown_high},
+                       {"rating": thin_known}, {"rating": solid}])[0]["rating"]["score"] == 4.3

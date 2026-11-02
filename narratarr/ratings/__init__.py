@@ -25,6 +25,7 @@ log = logging.getLogger("narratarr.ratings")
 
 PRIOR_SCORE = 3.9       # the average a new book is treated as having, so few votes pull toward it
 PRIOR_WEIGHT = 1000     # how many real votes the prior is worth
+UNKNOWN_COUNT_WEIGHT = 100  # what a rating with no count is worth: real, but weak evidence
 
 
 @dataclass
@@ -46,8 +47,13 @@ class Rating:
         A raw average cannot rank: twelve people giving 5.0 would beat two million giving 4.3. The
         prior is worth PRIOR_WEIGHT votes at PRIOR_SCORE, so a thinly-rated book is pulled towards
         the mean and only separates from it once it has real weight behind it.
+
+        Some sources give a bare number and no count (Audnex returns "4.9" and nothing else). That
+        is real evidence with unknown weight, so it is treated as a small fixed number of votes
+        rather than as zero — zero would bury every such book at the prior and make the sort
+        meaningless for the whole provider.
         """
-        n = self.count or 0
+        n = UNKNOWN_COUNT_WEIGHT if self.count is None else self.count
         return (PRIOR_WEIGHT * PRIOR_SCORE + n * float(self.score)) / (PRIOR_WEIGHT + n)
 
     def to_dict(self) -> dict:
@@ -86,7 +92,7 @@ def compact_count(n: int | None) -> str:
 
 def available() -> dict[str, str]:
     """Provider keys the user can pick in Settings."""
-    return {"googlebooks": "Google Books", "bookmarks": "Bookmarks", "goodreads": "Goodreads (unofficial)"}
+    return {"bookmarks": "Bookmarks", "goodreads": "Goodreads (unofficial)"}
 
 
 def make_rating(score, count, url: str, source: str, label: str = "", tooltip: str = "") -> Rating | None:
@@ -95,14 +101,24 @@ def make_rating(score, count, url: str, source: str, label: str = "", tooltip: s
     Below MIN_COUNT ratings a score is noise, and a thin 5.0 outranks a solid 4.3 on any honest
     list. Refusing here means no caller has to remember the rule.
     """
-    try:
-        count = int(count or 0)
-    except (TypeError, ValueError):
-        count = 0
-    if score is None or count < MIN_COUNT:
+    if score is None:
         return None
-    source_label = {"googlebooks": "Google Books", "goodreads": "Goodreads", "bookmarks": "Bookmarks"}.get(
-        source, source)
+    # A count is optional: some sources publish a bare average. The vote floor can only be applied
+    # to a count we actually have, so a missing one is not a reason to throw the score away.
+    if count is not None:
+        try:
+            count = int(count)
+        except (TypeError, ValueError):
+            count = None
+    if count is not None and count < MIN_COUNT:
+        return None
+    source_label = {"goodreads": "Goodreads", "bookmarks": "Bookmarks"}.get(source, source)
+    if tooltip:
+        pass
+    elif count is None:
+        tooltip = f"{float(score):.2f} average on {source_label}"
+    else:
+        tooltip = f"{float(score):.2f} average from {count:,} ratings on {source_label}"
     return Rating(
         score=float(score),
         count=count,
@@ -110,7 +126,7 @@ def make_rating(score, count, url: str, source: str, label: str = "", tooltip: s
         source=source,
         url=url or "",
         label=label or compact_count(count),
-        tooltip=tooltip or f"{float(score):.2f} average from {count:,} ratings on {source_label}",
+        tooltip=tooltip,
     )
 
 
@@ -125,10 +141,6 @@ def provider(settings=None):
         from .bookmarks_provider import BookmarksProvider
 
         return BookmarksProvider(store)
-    if name == "googlebooks":
-        from .googlebooks import GoogleBooksProvider
-
-        return GoogleBooksProvider(store)
     if name == "goodreads":
         from .goodreads import GoodreadsProvider
 
