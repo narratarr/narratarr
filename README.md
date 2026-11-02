@@ -178,6 +178,20 @@ docker run -d --name narratarr --restart unless-stopped \
 
 </details>
 
+### On Unraid
+
+Narratarr has an Unraid template. Until it's in Community Applications, add it once by hand:
+
+1. Open Unraid's **Terminal** (the `>_` icon at the top right) and run:
+   ```bash
+   wget -O /boot/config/plugins/dockerMan/templates-user/my-Narratarr.xml \
+     https://raw.githubusercontent.com/narratarr/narratarr/main/unraid/narratarr.xml
+   ```
+2. In **Docker**, choose **Add Container**, and pick **Narratarr** from the **Template** list (under User templates).
+3. Check the **Audiobooks** share (Audiobookshelf should use the same one), and if you use qBittorrent, Transmission, Deluge, SABnzbd or NZBGet, add their **Downloads** share. Then **Apply**, and open the Web UI.
+
+It runs as Unraid's usual `nobody:users` (PUID 99, PGID 100), so the files it writes fit in with your other containers.
+
 ### Option 3: With uv, or from source
 
 ```bash
@@ -350,7 +364,11 @@ When a book doesn't have one of these, that part is left out along with the word
 | `{author}/{series}/Vol. {series_number} - {title}` | `Frank Herbert/Dune Chronicles/Vol. 1 - Dune` | `Andy Weir/Project Hail Mary` |
 | `{author}/{title} ({year})` | `Frank Herbert/Dune (1965)` | `Andy Weir/Project Hail Mary (2021)` |
 
-The second one is how Audiobookshelf likes series laid out. Series and year come from the Audible catalog for Wanted books, and from the file's tags (`SERIES`, `SERIES-PART`, the date) for imports. Settings shows a live preview as you type. Changing the layout applies to books downloaded from then on; books already in your library stay where they are.
+Settings has one-click presets for these, including an **Audiobookshelf style** one, `{author}/{series}/Vol {series_number} - {year} - {title} {{narrator}}`, which gives `Frank Herbert/Dune Chronicles/Vol 1 - 1965 - Dune {Scott Brick}`: Audiobookshelf reads the series, volume, year and narrator straight from that name. (Double braces keep a brace in the name; an empty narrator leaves the braces out too.) The second layout above is how Audiobookshelf likes series laid out. Series and year come from the Audible catalog for Wanted books, and from the file's tags (`SERIES`, `SERIES-PART`, the date) for imports. Settings shows a live preview as you type. Changing the layout applies to books downloaded from then on; books already in your library stay where they are.
+
+### Languages
+
+Under **Settings → Search & sources → Languages**, pick the languages your books should be in. Discover then hides books it can tell are in another language (one click shows them again), and automatic search won't grab a release in another language; you can still pick one yourself. Narratarr reads the language from the source when it says, and otherwise from the release name (`[German]`, `.GER.`, `Hörbuch`, `livre audio`…), ignoring words that are part of the book's own title. A book whose language it can't tell is never hidden. For the Audible catalog, also choose the Audible store in that language (Germany, France…), since each store lists its own language.
 
 ### Accounts
 

@@ -507,6 +507,7 @@ function Discover(root) {
       ${src.categories.map((c) => `<button class="chip ${!d.q && d.category === c.slug ? "on" : ""}" data-cat="${esc(c.slug)}">${esc(c.name)}</button>`).join("")}
     </div>
     <div id="dym"></div>
+    <div id="lang-note"></div>
     <div class="grid" id="grid"></div>
     <div class="load-more" id="sentinel"></div>`;
 
@@ -547,7 +548,8 @@ function Discover(root) {
   };
 
   function visibleItems() {
-    let items = d.items.filter((i) => (!d.lang || i.language === d.lang) && (!d.fmt || i.format.toUpperCase() === d.fmt));
+    let items = d.items.filter((i) => (!d.lang || i.language === d.lang) && (!d.fmt || i.format.toUpperCase() === d.fmt))
+      .filter((i) => d.allLangs || i.lang_ok !== false);
     const by = {
       newest: (a, b) => (Date.parse(b.posted) || 0) - (Date.parse(a.posted) || 0),
       largest: (a, b) => sizeOf(b.size) - sizeOf(a.size),
@@ -570,6 +572,9 @@ function Discover(root) {
     $("#spotlight", root).innerHTML = spot ? spotlightHTML(spot, libFor(lib, spot.url), src) : "";
     $("#follow-shelf", root).innerHTML = d.q ? "" : followShelfHTML();
     if (spot) items = items.filter((i) => i !== spot);
+    const others = d.allLangs ? 0 : d.items.filter((i) => i.lang_ok === false).length;
+    $("#lang-note", root).innerHTML = others ? `<p class="dym">${others} book${others === 1 ? "" : "s"} in other languages hidden (you chose ${esc(state.settings?.languages || "")}) · <button data-all-langs>Show them</button></p>`
+      : d.allLangs && d.items.some((i) => i.lang_ok === false) ? `<p class="dym">Showing every language · <button data-all-langs>Only mine</button></p>` : "";
     grid.innerHTML = items.map((it, i) => cardHTML(it, libFor(lib, it.url), i)).join("");
     if (!items.length && !d.loading) {
       const filtered = d.items.length > 0;
@@ -745,6 +750,7 @@ function Discover(root) {
 
   root.onclick = async (e) => {
     if (e.target.closest("[data-more]")) return load(false);
+    if (e.target.closest("[data-all-langs]")) { d.allLangs = !d.allLangs; renderItems(); refine(); return; }
     if (e.target.closest("[data-retry]")) return load(true);
     if (e.target.closest("[data-literal]")) {
       // Re-run without typo correction by searching the exact phrase.
@@ -1759,6 +1765,16 @@ const LAYOUT_VARS = [
   ["author", "The author"], ["title", "The book's title"], ["narrator", "The narrator (up to two)"],
   ["series", "The series name"], ["series_number", "The book's number in its series, like 1 or 2.5"], ["year", "The year it came out"],
 ];
+// The languages offered under Settings → Search & sources (as narratarr/languages.py COMMON).
+const LANGUAGES = ["English", "German", "French", "Spanish", "Italian", "Dutch", "Portuguese", "Polish", "Swedish", "Danish",
+  "Norwegian", "Finnish", "Czech", "Hungarian", "Russian", "Japanese", "Chinese", "Korean"];
+
+// One click to a layout that works well: the default, by series, and the one Audiobookshelf reads most from.
+const LAYOUT_PRESETS = [
+  ["Author / Title", "{author}/{title}"],
+  ["Author / Series / Title", "{author}/{series}/{series_number} - {title}"],
+  ["Audiobookshelf style", "{author}/{series}/Vol {series_number} - {year} - {title} {{narrator}}"],
+];
 const LAYOUT_SAMPLE = { author: "Frank Herbert", title: "Dune", narrator: "Scott Brick", series: "Dune Chronicles", series_number: "1", year: "1965" };
 const LAYOUT_SAMPLE_SOLO = { author: "Andy Weir", title: "Project Hail Mary", narrator: "Ray Porter", series: "", series_number: "", year: "2021" };
 const LAYOUT_EDGES = /^[\s\-–—_.,;:#~]+|[\s\-–—_.,;:#~]+$/g;
@@ -1774,7 +1790,8 @@ function layoutFolders(template, book) {
     if (!part.trim()) continue;
     const bits = part.split(/\{([^{}]*)\}/);
     const literals = bits.filter((_, i) => i % 2 === 0);
-    const vals = bits.filter((_, i) => i % 2 === 1).map((n) => layoutClean(book[n] || "") || fallback[n] || "");
+    const alone = bits.length === 3 && !(bits[0] + bits[2]).trim(); // "{narrator}" alone may say "Unknown Narrator"
+    const vals = bits.filter((_, i) => i % 2 === 1).map((n) => layoutClean(book[n] || "") || (alone && fallback[n]) || "");
     let text = part;
     if (vals.length) {
       const keep = literals.map(() => true);
@@ -1894,12 +1911,15 @@ function Settings(root, page) {
           </div>
           <div class="field">
             <label for="folder_template">Folder layout</label>
+            <div class="layout-presets" role="group" aria-label="Start from a layout">
+              ${LAYOUT_PRESETS.map(([name, t]) => `<button type="button" class="fpill ${s.folder_template === t ? "on" : ""}" data-preset="${esc(t)}" aria-pressed="${s.folder_template === t}">${esc(name)}</button>`).join("")}
+            </div>
             <input class="input mono" id="folder_template" name="folder_template" value="${esc(s.folder_template)}" />
             <div class="preview-path" id="path-preview"></div>
             <div class="layout-vars" role="group" aria-label="Add a variable">
               ${LAYOUT_VARS.map(([v, tip]) => `<button type="button" class="fill-in" data-var="${v}" title="${esc(tip)}">{${v}}</button>`).join("")}
             </div>
-            <span class="hint">Put <code>/</code> between folders. If a book has no series or year, that part is left out, along with the words around it. Ebooks go into the same folder as their audiobook.</span>
+            <span class="hint">Put <code>/</code> between folders. If a book has no series or year, that part is left out, along with the words around it. Double braces keep braces in the name: <code>{{narrator}}</code> becomes <code>{Ray Porter}</code>, which Audiobookshelf reads as the narrator. Ebooks go into the same folder as their audiobook.</span>
           </div>
           <div class="set-row">
             <label for="max_concurrent"><b>Downloads at once</b><small>More finish sooner, but share your bandwidth.</small></label>
@@ -2254,6 +2274,22 @@ function Settings(root, page) {
       </section>
 
       <section class="panel" data-page="search">
+        <div class="ph"><h3>Languages</h3><p class="desc">The languages your books should be in. Leave them all off for any language.</p></div>
+        <div class="body">
+          <div class="field">
+          <input type="hidden" name="languages" id="languages" value="${esc(s.languages)}" />
+          <div class="lang-chips" id="lang-chips" role="group" aria-label="Languages">
+            ${[...new Set([...LANGUAGES, ...(s.languages ? s.languages.split(/,\s*/) : [])])].map((l) => {
+              const on = (s.languages || "").split(/,\s*/).includes(l);
+              return `<button type="button" class="fpill ${on ? "on" : ""}" data-lang="${esc(l)}" aria-pressed="${on}">${esc(l)}</button>`;
+            }).join("")}
+          </div>
+          <span class="hint">Discover hides books in other languages (one click shows them), and automatic search won’t grab them. A book whose language Narratarr can’t tell is never hidden. For the Audible catalog, also choose the Audible store in that language under Wanted &amp; following.</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" data-page="search">
         <div class="ph"><h3>Wanted &amp; following</h3><p class="desc">Books you want but don’t have yet, and new books from authors and series you follow.</p></div>
         <div class="body">
           <div class="set-row">
@@ -2438,7 +2474,29 @@ function Settings(root, page) {
     input.setSelectionRange(at + text.length, at + text.length);
     input.dispatchEvent(new Event("input", { bubbles: true }));
   }));
-  form.folder_template.oninput = preview;
+  $("#lang-chips", root).onclick = (e) => {
+    const b = e.target.closest("[data-lang]");
+    if (!b) return;
+    const on = b.getAttribute("aria-pressed") !== "true";
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-pressed", String(on));
+    form.languages.value = $$("[data-lang][aria-pressed=true]", root).map((x) => x.dataset.lang).join(", ");
+    form.languages.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+
+  const presetsBox = $(".layout-presets", root);
+  const markPreset = () => $$("[data-preset]", presetsBox).forEach((b) => {
+    const on = b.dataset.preset === form.folder_template.value.trim();
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-pressed", String(on));
+  });
+  presetsBox.onclick = (e) => {
+    const b = e.target.closest("[data-preset]");
+    if (!b) return;
+    form.folder_template.value = b.dataset.preset;
+    form.folder_template.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+  form.folder_template.oninput = () => { preview(); markPreset(); };
   form.library_dir.oninput = preview;
   preview();
 
@@ -3506,8 +3564,8 @@ function releasesHTML(res) {
     ${res.items.map((r, i) => {
       const quality = r.match >= res.auto_match ? "good" : r.match >= 75 ? "ok" : "weak";
       const facts = [label(r), r.protocol === "usenet" ? "Usenet" : r.protocol === "torrent" ? "Torrent" : "Direct",
-        r.format, r.size, r.seeders != null ? `${r.seeders} seeder${r.seeders === 1 ? "" : "s"}` : "", r.posted].filter(Boolean);
-      return `<div class="rel">
+        r.format, r.size, r.language, r.seeders != null ? `${r.seeders} seeder${r.seeders === 1 ? "" : "s"}` : "", r.posted].filter(Boolean);
+      return `<div class="rel ${r.language_ok === false ? "other-lang" : ""}" ${r.language_ok === false ? 'title="Not in your languages: automatic search skips it, but you can still grab it"' : ""}>
         <div class="rel-main"><b title="${esc(r.release || r.title)}">${esc(r.release || r.title)}</b>
           <small>${facts.map(esc).join(" · ")}</small></div>
         <span class="match ${quality}" title="How closely it matches the title and author">${r.match}%</span>

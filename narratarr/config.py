@@ -9,7 +9,7 @@ from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from urllib.parse import urlparse
 
-from . import layout
+from . import languages, layout
 
 DATA_DIR = Path(os.environ.get("NARRATARR_DATA", Path.home() / ".narratarr"))
 SETTINGS_FILE = DATA_DIR / "settings.json"
@@ -82,6 +82,7 @@ class Settings:
     check_updates: bool = True  # one request a day to GitHub's releases API
     auth_local_bypass: bool = False  # skip sign-in for requests from this machine and the home network
     listener_approval: bool = True  # a listener's request waits for an admin before anything is searched or downloaded
+    languages: str = ""  # the languages books should be in, e.g. "German, English" (blank: any)
 
     def public(self) -> dict:
         """Settings safe to send to the browser (secrets masked)."""
@@ -192,6 +193,8 @@ def update(changes: dict) -> Settings:
                 v = str(v).strip().rstrip("/")
             elif isinstance(v, str):
                 v = v.strip()
+            if k == "languages":
+                v = ", ".join(languages.parse(str(v)))
             if k == "folder_template":
                 v = v.strip("/") or "{author}/{title}"
                 if bad := layout.unknown(v):

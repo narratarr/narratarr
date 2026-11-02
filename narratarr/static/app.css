@@ -1814,3 +1814,10 @@ button.link { border: 0; background: none; padding: 0; min-height: 32px; color: 
 }
 /* A drawn cover (no image) prints the author at the top; a status badge sits there instead. */
 .cover-wrap:has(.st-badge) .faux small { visibility: hidden; }
+/* 0.8.6: folder layout presets, languages, releases in other languages */
+.layout-presets { display: flex; flex-wrap: wrap; gap: 8px; margin: 2px 0 10px; }
+.layout-presets .fpill { height: 36px; font-size: 13px; }
+.lang-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.lang-chips .fpill { height: 36px; }
+.rel.other-lang { opacity: 0.62; }
+.rel.other-lang:hover { opacity: 1; }

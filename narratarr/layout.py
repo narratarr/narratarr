@@ -64,7 +64,10 @@ def _fill(part: str, filled: dict[str, str]) -> str:
     literals, names = bits[0::2], bits[1::2]
     if not names:
         return part
-    vals = [filled.get(n, "") or (FALLBACKS.get(n, "") if n in FALLBACKS else "") for n in names]
+    # "Unknown Author" and friends only stand in for a folder that's nothing but that variable;
+    # inside a name ("... {{narrator}}") an empty variable is simply left out.
+    alone = len(names) == 1 and not "".join(literals).strip()
+    vals = [filled.get(n, "") or (FALLBACKS.get(n, "") if alone else "") for n in names]
     keep = [True] * len(literals)  # literal i sits between variable i-1 and variable i
     i = 0
     while i < len(vals):

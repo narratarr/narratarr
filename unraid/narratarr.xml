@@ -1,0 +1,30 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>Narratarr</Name>
+  <Repository>ghcr.io/narratarr/narratarr:latest</Repository>
+  <Registry>https://github.com/narratarr/narratarr/pkgs/container/narratarr</Registry>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/narratarr/narratarr/issues</Support>
+  <Project>https://github.com/narratarr/narratarr</Project>
+  <Overview>An *arr-style audiobook (and ebook) manager with its own player and reader. Find books on LibriVox, Old-Time Radio, your Prowlarr or Torznab indexers, or the Audible catalog; download them through Real-Debrid, AllDebrid, TorBox, Premiumize, qBittorrent, Transmission, Deluge, SABnzbd or NZBGet; and they're filed as Author/Title with the cover, the way Audiobookshelf expects. Point Audiobookshelf at the same Audiobooks share and Narratarr can ask it to rescan after every download.</Overview>
+  <Category>Downloaders: MediaApp:Books</Category>
+  <WebUI>http://[IP]:[PORT:8484]/</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/narratarr/narratarr/main/unraid/narratarr.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/narratarr/narratarr/main/narratarr/static/icon-512.png</Icon>
+  <ExtraParams/>
+  <PostArgs/>
+  <CPUset/>
+  <DateInstalled/>
+  <DonateText/>
+  <DonateLink/>
+  <Requires/>
+  <Config Name="Web UI port" Target="8484" Default="8484" Mode="tcp" Description="The port Narratarr's web page is on." Type="Port" Display="always" Required="true" Mask="false">8484</Config>
+  <Config Name="Audiobooks" Target="/audiobooks" Default="/mnt/user/media/audiobooks" Mode="rw" Description="Where finished books go, as Author/Title. Give Audiobookshelf this same share." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/media/audiobooks</Config>
+  <Config Name="Downloads" Target="/downloads" Default="" Mode="rw" Description="Optional. Only if you use qBittorrent, Transmission, Deluge, SABnzbd or NZBGet: the share they download to, so Narratarr can pick finished books up (put it on the same disk as Audiobooks and torrents are hard-linked, so they keep seeding). In Settings, map your client's path to /downloads." Type="Path" Display="always" Required="false" Mask="false"/>
+  <Config Name="Config" Target="/config" Default="/mnt/user/appdata/narratarr" Mode="rw" Description="Settings and the library database." Type="Path" Display="advanced" Required="true" Mask="false">/mnt/user/appdata/narratarr</Config>
+  <Config Name="PUID" Target="PUID" Default="99" Mode="" Description="The user files are written as (99 is Unraid's 'nobody')." Type="Variable" Display="advanced" Required="false" Mask="false">99</Config>
+  <Config Name="PGID" Target="PGID" Default="100" Mode="" Description="The group files are written as (100 is Unraid's 'users')." Type="Variable" Display="advanced" Required="false" Mask="false">100</Config>
+</Container>

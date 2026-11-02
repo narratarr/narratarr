@@ -19,7 +19,7 @@ from urllib.parse import urlencode
 
 from rapidfuzz import fuzz
 
-from . import audible, config, db, downloaders, ebooks
+from . import audible, config, db, downloaders, ebooks, languages
 from .search import clean_title, normalize
 from .sources import CATALOGS, ProwlarrError, TorznabError, ebook_indexers, ebook_torznab, get_source
 
@@ -93,6 +93,7 @@ async def find_releases(book: dict) -> list[dict]:
     kind = kind_of(book)
     title, author = main_title(book["title"]), first_author(book["author"])
     query = f"{title} {author}".strip()
+    wanted_languages = languages.parse(s.languages)
     jobs = {}
     if kind == "audiobook":
         jobs["librivox"] = get_source("librivox").find(title, author)
@@ -114,17 +115,21 @@ async def find_releases(book: dict) -> list[dict]:
                 continue  # an indexer filed it under the wrong category
             item["match"] = match(book, item)
             item["usable"] = usable(item, s)
+            # What language it's in, from the source or the release name (the book's own words don't count).
+            item["language"] = languages.name(item.get("language")) or languages.detect(
+                item.get("release") or item.get("title") or "", ignore=f"{book['title']} {book['author']}")
+            item["language_ok"] = languages.allowed(item["language"], wanted_languages)
             if item["match"] >= 60:
                 found.append(item)
     if not found and errors:
         raise ProwlarrError(errors[0])
-    found.sort(key=lambda i: (i["usable"], *_preference(i, kind)), reverse=True)
+    found.sort(key=lambda i: (i["usable"], i["language_ok"], *_preference(i, kind)), reverse=True)
     return found
 
 
 def best(found: list[dict]) -> dict | None:
     for item in found:
-        if item["usable"] and item["match"] >= AUTO_MATCH and item.get("seeders") != 0:
+        if item["usable"] and item.get("language_ok", True) and item["match"] >= AUTO_MATCH and item.get("seeders") != 0:
             return item
     return None
 

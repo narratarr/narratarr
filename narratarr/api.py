@@ -30,7 +30,7 @@ from . import (apiv1, audible, audiobookshelf, auth, brave, config, db, download
                tokens, updates, users, wanted)
 from .audiobookshelf import Audiobookshelf, AudiobookshelfError
 from .downloaders import ClientError
-from . import alldebrid, notify
+from . import alldebrid, languages, notify
 from .alldebrid import AllDebrid, AllDebridError
 from . import torbox
 from .premiumize import Premiumize, PremiumizeError
@@ -248,9 +248,14 @@ async def discover(q: str = "", category: str = "", page: int = 1, source: str =
         raise HTTPException(502, str(e))
     books = db.list_books()
     owned = {b["release_url"]: b for b in books if b["release_url"]} | {b["source_url"]: b for b in books}
+    want = languages.parse(config.load().languages)
     for item in data["items"]:
         b, e = owned.get(item["url"]), owned.get(wanted.url_for(item["url"], "ebook"))
         item["source"] = src.name
+        # Indexers rarely say what language a release is in; its name often does ("[German]", "Hörbuch").
+        item["language"] = languages.name(item.get("language")) or (
+            languages.detect(item.get("title") or "") if src.name in ("prowlarr", "torznab", "audiobookbay") else "")
+        item["lang_ok"] = languages.allowed(item["language"], want)
         item["library"] = {"id": (b or e)["id"], "status": (b or e)["status"]} if b or e else None
     if src.name == "prowlarr" and kind == "ebook" and not data["items"]:
         data["note"] = await _no_ebook_indexers(src)
@@ -1029,7 +1034,7 @@ LISTENER_SETTINGS = (
     "rd_configured", "ad_configured", "tb_configured", "pm_configured", "brave_configured", "prowlarr_configured", "torznab_configured", "indexer_configured",
     "usenet_configured", "torrent_configured",
     "usenet_client", "torrent_client", "smart_search", "search_provider", "audible_region", "check_updates",
-    "auto_search", "auto_search_hours", "listener_approval",
+    "auto_search", "auto_search_hours", "listener_approval", "languages",
 )
 
 
