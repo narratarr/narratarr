@@ -36,6 +36,136 @@ TORRENT_CLIENTS = {
 }
 
 
+# ---- client entries ------------------------------------------------------------------------
+#
+# A client used to be inferred from flat settings: `torrent_client` said which one, and its fields
+# sat next to it. That allows exactly one client per protocol. Routing needs a list, so a client is
+# now a record with an id, and the flat settings become a one-time migration into it.
+#
+# DELIVERY decides which pipeline a grab takes: usenet hands an NZB to a downloader, torrent hands a
+# magnet or .torrent to one, and a debrid service fetches the torrent and gives us the files.
+
+DELIVERY = {
+    "sabnzbd": "usenet", "nzbget": "usenet",
+    "qbittorrent": "torrent", "transmission": "torrent", "deluge": "torrent",
+    "realdebrid": "torrent", "alldebrid": "torrent", "torbox": "torrent", "premiumize": "torrent",
+}
+LABELS = {**USENET_CLIENTS, **TORRENT_CLIENTS}
+# Where a debrid service keeps its "delete after" preference, so one client entry can differ from another.
+DELETE_SETTINGS = {
+    "realdebrid": "delete_from_rd_after", "alldebrid": "delete_from_ad_after",
+    "torbox": "delete_from_tb_after", "premiumize": "delete_from_pm_after",
+}
+
+
+@dataclass
+class ClientEntry:
+    """One download client the user has configured."""
+
+    id: str
+    type: str
+    url: str = ""
+    username: str = ""
+    password: str = ""
+    api_key: str = ""
+    category: str = ""
+    save_path: str = ""  # as the client sees it; "" means the client's own default
+
+    @property
+    def label(self) -> str:
+        return LABELS.get(self.type, self.type)
+
+    @property
+    def delivery(self) -> str:
+        return DELIVERY.get(self.type, "")
+
+    @property
+    def is_debrid(self) -> bool:
+        return self.type in DEBRID
+
+    @property
+    def configured(self) -> bool:
+        """Enough to build a client. A missing url is the usual reason nothing works."""
+        if self.type == "sabnzbd":
+            return bool(self.url and self.api_key)
+        if self.type in DEBRID:
+            return bool(self.api_key)
+        return bool(self.url)
+
+    def public(self) -> dict:
+        return {
+            "id": self.id, "type": self.type, "label": self.label, "delivery": self.delivery,
+            "url": self.url, "username": self.username,
+            "password": config._mask(self.password, "x_password"), "api_key": config._mask(self.api_key, "x_api_key"),
+            "category": self.category, "save_path": self.save_path,
+            "configured": self.configured,
+        }
+
+
+def entry_from_dict(raw: dict) -> ClientEntry | None:
+    """A stored client record, or None if it names a type Narratarr does not speak."""
+    if not isinstance(raw, dict):
+        return None
+    kind = str(raw.get("type") or "").strip().lower()
+    if kind not in DELIVERY:
+        return None
+    return ClientEntry(
+        id=str(raw.get("id") or kind).strip() or kind,
+        type=kind,
+        url=str(raw.get("url") or "").strip(),
+        username=str(raw.get("username") or ""),
+        password=str(raw.get("password") or ""),
+        api_key=str(raw.get("api_key") or ""),
+        category=str(raw.get("category") or ""),
+        save_path=str(raw.get("save_path") or ""),
+    )
+
+
+def entries(settings: config.Settings) -> list[ClientEntry]:
+    return [e for e in (entry_from_dict(r) for r in (settings.clients or [])) if e]
+
+
+def client_for(entry: ClientEntry, transport: httpx.AsyncBaseTransport | None = None):
+    """The client object behind an entry."""
+    if entry.type == "sabnzbd":
+        from .sabnzbd import SABnzbd
+
+        return SABnzbd(entry.url, entry.api_key, transport=transport)
+    if entry.type == "nzbget":
+        from .nzbget import NZBGet
+
+        return NZBGet(entry.url, entry.username, entry.password, transport=transport)
+    if entry.type == "qbittorrent":
+        from .qbittorrent import QBittorrent
+
+        return QBittorrent(entry.url, entry.username, entry.password, transport=transport)
+    if entry.type == "transmission":
+        from .transmission import Transmission
+
+        return Transmission(entry.url, entry.username, entry.password, transport=transport)
+    if entry.type == "deluge":
+        from .deluge import Deluge
+
+        return Deluge(entry.url, entry.password, transport=transport)
+    if entry.type == "alldebrid":
+        from .alldebrid import AllDebrid
+
+        return AllDebrid(entry.api_key, transport=transport)
+    if entry.type == "torbox":
+        from .torbox import TorBox
+
+        return TorBox(entry.api_key, transport=transport)
+    if entry.type == "premiumize":
+        from .premiumize import Premiumize
+
+        return Premiumize(entry.api_key, transport=transport)
+    if entry.type == "realdebrid":
+        from .realdebrid import RealDebrid
+
+        return RealDebrid(entry.api_key, transport=transport)
+    raise ClientError(f"{entry.label} isn't a client Narratarr can hand a release to.")
+
+
 def usenet_configured(s: config.Settings, name: str | None = None) -> bool:
     name = name or s.usenet_client
     if name == "nzbget":

@@ -2,6 +2,7 @@
 
 import base64
 import json
+import logging
 from pathlib import Path
 from urllib.parse import parse_qs
 
@@ -416,3 +417,94 @@ def test_settings_carry_over_old_sabnzbd_path_mapping(isolated_data, monkeypatch
     assert config.update({"torrent_client": "bogus"}).torrent_client == "realdebrid"
     pub = config.update({"torrent_client": "qbittorrent", "qbittorrent_url": "http://q", "qbittorrent_password": "secret1"}).public()
     assert pub["torrent_configured"] and "secret" not in pub["qbittorrent_password"]
+
+
+# ---- routing at grab time --------------------------------------------------------------------
+
+def routed_transmission(original, rules):
+    """Transmission as the routed client, qBittorrent as the default, so the two are distinguishable."""
+    return config.update({
+        "clients": [{"id": "transmission", "type": "transmission", "url": "http://transmission:9091",
+                     "category": "books"},
+                    {"id": "qbittorrent", "type": "qbittorrent", "url": "http://qbit:8080"}],
+        "default_client": "qbittorrent",
+        "client_routes": {"version": 1, "rules": rules},
+        "path_remote": "/data/torrents", "path_local": str(original.parent),
+    })
+
+
+async def test_a_rule_decides_the_client_and_its_own_label_and_path(isolated_data):
+    original = finished_download(isolated_data)
+    routed_transmission(original, [{"match": {"indexers": ["The Pirate Bay"]}, "client": "transmission",
+                                    "label": "kids", "save_path": "/data/kids"}])
+    fake = FakeTransmission(original)
+    book = torrent_book(indexer="The Pirate Bay")
+
+    await Worker(transport=httpx.MockTransport(fake)).process(book["id"])
+
+    assert fake.added["download-dir"] == "/data/kids", "the route's save path wins over the client's"
+    assert "kids" in fake.labels
+    assert db.get(book["id"])["download_client"] == "transmission"
+
+
+async def test_without_a_rule_the_grab_takes_the_same_path_it_always_did(isolated_data):
+    original = finished_download(isolated_data)
+    config.update({
+        "clients": [{"id": "transmission", "type": "transmission", "url": "http://transmission:9091",
+                     "category": "books"}],
+        "default_client": "transmission", "client_routes": {"version": 1, "rules": []},
+        "torrent_client": "transmission",
+        "path_remote": "/data/torrents", "path_local": str(original.parent),
+    })
+    fake = FakeTransmission(original)
+    book = torrent_book()
+
+    await Worker(transport=httpx.MockTransport(fake)).process(book["id"])
+
+    assert db.get(book["id"])["status"] == "completed"
+    assert db.get(book["id"])["download_client"] == "transmission"
+    assert fake.labels[0] == f"narratarr-{book['id']}"  # the client's own category when no route
+
+
+async def test_every_grab_says_why_in_the_log(isolated_data, caplog):
+    """A file landing somewhere unexpected has to be explainable without guesswork."""
+    original = finished_download(isolated_data)
+    routed_transmission(original, [{"match": {"indexers": ["The Pirate Bay"]}, "client": "transmission"}])
+    fake = FakeTransmission(original)
+    matched = torrent_book(indexer="The Pirate Bay")
+
+    with caplog.at_level(logging.INFO, logger="narratarr.worker"):
+        await Worker(transport=httpx.MockTransport(fake)).process(matched["id"])
+    text = " | ".join(r.getMessage() for r in caplog.records)
+    assert "rule 1 matched" in text and "transmission" in text
+
+
+async def test_a_grab_with_no_matching_rule_says_so_in_the_log(isolated_data, caplog):
+    original = finished_download(isolated_data)
+    routed_transmission(original, [{"match": {"indexers": ["The Pirate Bay"]}, "client": "transmission"}])
+    config.update({"default_client": "transmission"})  # so the fall-through lands on a reachable one
+    fake = FakeTransmission(original)
+    book = torrent_book(indexer="Some Other Tracker")
+
+    with caplog.at_level(logging.INFO, logger="narratarr.worker"):
+        await Worker(transport=httpx.MockTransport(fake)).process(book["id"])
+
+    text = " | ".join(r.getMessage() for r in caplog.records)
+    assert "no rule matched" in text and "Some Other Tracker" in text
+
+
+async def test_a_route_to_a_deleted_client_is_reported_and_the_default_takes_it(isolated_data, caplog):
+    """A stale rule must not stop the download, and must not be silent either."""
+    original = finished_download(isolated_data)
+    routed_transmission(original, [{"match": {"indexers": ["The Pirate Bay"]}, "client": "gone"}])
+    config.update({"default_client": "transmission"})
+    fake = FakeTransmission(original)
+    book = torrent_book(indexer="The Pirate Bay")
+
+    with caplog.at_level(logging.INFO, logger="narratarr.worker"):
+        await Worker(transport=httpx.MockTransport(fake)).process(book["id"])
+
+    warnings = " | ".join(r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING)
+    assert "'gone'" in warnings and "not a client you have any more" in warnings
+    assert db.get(book["id"])["status"] == "completed"
+    assert db.get(book["id"])["download_client"] == "transmission"
