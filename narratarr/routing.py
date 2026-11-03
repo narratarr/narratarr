@@ -15,6 +15,7 @@ Two things matter more than the model:
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass, field
 
@@ -171,6 +172,11 @@ def validate(value, settings: config.Settings) -> dict:
     """
     from .downloaders import entries
 
+    if isinstance(value, str):  # the settings form posts hidden inputs as text
+        try:
+            value = json.loads(value or "{}")
+        except ValueError:
+            raise ValueError("routes has to be an object with a version and a list of rules")
     if value in (None, "", []):
         return {"version": VERSION, "rules": []}
     if isinstance(value, list):

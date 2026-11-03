@@ -288,7 +288,10 @@ async function refreshLibrary() {
 function updateRdPill() {
   const pill = $("#rd-pill");
   const st = state.settings || {};
-  const ready = [st.torrent_configured && CLIENTS[st.torrent_client], st.usenet_configured && CLIENTS[st.usenet_client]].filter(Boolean);
+  // Name the clients the list actually holds, not the flat setting it replaced.
+  const ready = (st.clients || []).filter((c) => c.configured).map((c) => c.label)
+    .concat([st.torrent_configured && !(st.clients || []).length && CLIENTS[st.torrent_client],
+             st.usenet_configured && !(st.clients || []).length && CLIENTS[st.usenet_client]]).filter(Boolean);
   pill.className = `rd-pill ${ready.length ? "ok" : "missing"}`;
   $("span", pill).textContent = ready.length ? `${ready.join(" · ")} ready` : "Connect a downloader";
 }
@@ -346,8 +349,17 @@ function cardHTML(item, lib, i = 0) {
         <div class="title">${esc(item.title)}</div>
         <div class="author">${esc(item.author || (item.indexer ? `via ${item.indexer}` : "Unknown author"))}</div>
         ${facts.length ? `<div class="facts">${facts.map((f) => `<span>${esc(f)}</span>`).join("")}</div>` : ""}
+        ${clientChip(item)}
       </div>
     </article>`;
+}
+
+function clientChip(item) {
+  // Which client takes this result if you grab it. Re-resolved at grab time, because a rule can
+  // change between seeing a row and clicking it.
+  const c = item.client;
+  if (!c || !c.label) return "";
+  return `<div class="client-chip" title="This release would go to ${esc(c.label)}${c.rule === null ? " (no rule matched, so the default)" : ""}">${esc(c.label)}</div>`;
 }
 
 const shortLength = (len) => (len || "").replace(/ hours?/, "h").replace(/ and /, " ").replace(/ minutes?/, "m");
@@ -2075,7 +2087,10 @@ function settingsStatus(key, users, notifiers) {
     return on.length ? [`${on.join(" · ")} connected`, "ok"] : ["No indexer connected", ""];
   }
   if (key === "downloads") {
-    const ready = [st.torrent_configured && CLIENTS[st.torrent_client], st.usenet_configured && CLIENTS[st.usenet_client]].filter(Boolean);
+    // Name the clients the list actually holds, not the flat setting it replaced.
+  const ready = (st.clients || []).filter((c) => c.configured).map((c) => c.label)
+    .concat([st.torrent_configured && !(st.clients || []).length && CLIENTS[st.torrent_client],
+             st.usenet_configured && !(st.clients || []).length && CLIENTS[st.usenet_client]]).filter(Boolean);
     return ready.length ? [ready.join(" · "), "ok"] : ["Set up a download client", "warn"];
   }
   if (key === "abs") return st.audiobookshelf_url && st.audiobookshelf_token ? ["Connected", "ok"] : ["Not connected", ""];
@@ -2333,181 +2348,32 @@ function Settings(root, page) {
       </section>
 
       <section class="panel" data-page="downloads">
-        <div class="ph"><h3>Torrents</h3><p class="desc">Real-Debrid, AllDebrid, TorBox and Premiumize fetch them for you, so nothing is shared from your computer. qBittorrent, Transmission and Deluge download on your own machine and keep seeding, which shows your IP address to other peers; many people run them behind a VPN.</p></div>
+        <div class="ph"><h3>Clients</h3><p class="desc">What takes your downloads. The order here does not matter; which one gets a release is decided under Routing, and anything with no rule goes to the default.</p></div>
         <div class="body">
-          <div class="tile-groups" data-choice="torrent_client" role="radiogroup" aria-label="Download torrents with">
-            <div class="tile-group"><span class="tile-label" aria-hidden="true">In the cloud</span>
-              <div class="choice-tiles">${tile("realdebrid", "Real-Debrid", "Premium account")}${tile("alldebrid", "AllDebrid", "Premium account")}${tile("torbox", "TorBox", "TorBox account")}${tile("premiumize", "Premiumize", "Premium account")}</div></div>
-            <div class="tile-group"><span class="tile-label" aria-hidden="true">On this machine</span>
-              <div class="choice-tiles">${tile("qbittorrent", "qBittorrent", "Seeds from here")}${tile("transmission", "Transmission", "Seeds from here")}${tile("deluge", "Deluge", "Seeds from here")}</div></div>
+          <div id="client-list"></div>
+          <div class="row-actions">
+            <button class="btn" type="button" id="add-client">Add a client</button>
+            <span class="hint">A client is tested from its own row, before or after saving.</span>
           </div>
-          <input type="hidden" name="torrent_client" value="${esc(s.torrent_client)}" />
-          <div class="client-fields" data-for="torrent_client:realdebrid">
-            <div class="field">
-              <label for="rd_api_key">Real-Debrid API key</label>
-              <div class="input-row">
-                <input class="input mono" id="rd_api_key" name="rd_api_key" type="password" placeholder="Paste your private API token" value="${esc(s.rd_api_key)}" />
-                <button class="btn" type="button" id="test-rd">Test</button>
-              </div>
-              <span class="hint">Find it at <a href="https://real-debrid.com/apitoken" target="_blank" rel="noopener" style="color:var(--accent)">real-debrid.com/apitoken</a>.</span>
-            </div>
-            <div id="rd-result"></div>
-            <label class="switch"><input type="checkbox" name="delete_from_rd_after" ${s.delete_from_rd_after ? "checked" : ""}><i></i>Remove torrents from Real-Debrid after downloading</label>
-          </div>
-          <div class="client-fields" data-for="torrent_client:alldebrid">
-            ${codeCardHTML("ad", "AllDebrid", "alldebrid.com/pin", "https://alldebrid.com/pin/")}
-            <div id="ad-result"></div>
-            <details class="set-more">
-              <summary>Use an API key instead</summary>
-              <div class="field">
-                <label for="ad_api_key">AllDebrid API key</label>
-                <div class="input-row">
-                  <input class="input mono" id="ad_api_key" name="ad_api_key" type="password" placeholder="Paste an API key" value="${esc(s.ad_api_key)}" />
-                  <button class="btn" type="button" data-ad-test>Test</button>
-                </div>
-                <span class="hint">Create one at <a href="https://alldebrid.com/apikeys" target="_blank" rel="noopener" style="color:var(--accent)">alldebrid.com/apikeys</a>.</span>
-              </div>
-            </details>
-            <label class="switch"><input type="checkbox" name="delete_from_ad_after" ${s.delete_from_ad_after ? "checked" : ""}><i></i>Remove torrents from AllDebrid after downloading</label>
-          </div>
-          <div class="client-fields" data-for="torrent_client:torbox">
-            ${codeCardHTML("tb", "TorBox", "TorBox’s sign-in page", "https://torbox.app/")}
-            <div id="tb-result"></div>
-            <details class="set-more">
-              <summary>Use an API key instead</summary>
-              <div class="field">
-                <label for="tb_api_key">TorBox API key</label>
-                <div class="input-row">
-                  <input class="input mono" id="tb_api_key" name="tb_api_key" type="password" placeholder="Paste an API key" value="${esc(s.tb_api_key)}" />
-                  <button class="btn" type="button" data-tb-test>Test</button>
-                </div>
-                <span class="hint">Find it in TorBox under <a href="https://torbox.app/settings" target="_blank" rel="noopener" style="color:var(--accent)">Settings → API key</a>.</span>
-              </div>
-            </details>
-            <label class="switch"><input type="checkbox" name="delete_from_tb_after" ${s.delete_from_tb_after ? "checked" : ""}><i></i>Remove torrents from TorBox after downloading</label>
-          </div>
-          <div class="client-fields" data-for="torrent_client:premiumize">
-            <div class="field">
-              <label for="pm_api_key">Premiumize API key</label>
-              <div class="input-row">
-                <input class="input mono" id="pm_api_key" name="pm_api_key" type="password" placeholder="Paste your API key" value="${esc(s.pm_api_key)}" />
-                <button class="btn" type="button" id="test-pm">Test</button>
-              </div>
-              <span class="hint">Find it at <a href="https://www.premiumize.me/account" target="_blank" rel="noopener" style="color:var(--accent)">premiumize.me/account</a>.</span>
-            </div>
-            <div id="pm-result"></div>
-            <label class="switch"><input type="checkbox" name="delete_from_pm_after" ${s.delete_from_pm_after ? "checked" : ""}><i></i>Remove torrents and their files from Premiumize after downloading</label>
-          </div>
-          <div class="client-fields" data-for="torrent_client:qbittorrent">
-            <div class="field">
-              <label for="qbittorrent_url">qBittorrent Web UI address</label>
-              <div class="input-row">
-                <input class="input mono" id="qbittorrent_url" name="qbittorrent_url" placeholder="http://localhost:8080" value="${esc(s.qbittorrent_url)}" />
-                <button class="btn" type="button" data-test-client="qbittorrent">Test</button>
-              </div>
-              <div data-result="qbittorrent"></div>
-            </div>
-            <div class="set-grid three">
-              <div class="field"><label for="qbittorrent_username">Username</label><input class="input mono" id="qbittorrent_username" name="qbittorrent_username" value="${esc(s.qbittorrent_username)}" autocomplete="off" /></div>
-              <div class="field"><label for="qbittorrent_password">Password</label><input class="input mono" id="qbittorrent_password" name="qbittorrent_password" type="password" value="${esc(s.qbittorrent_password)}" /></div>
-              <div class="field"><label for="qbittorrent_category">Category</label><input class="input mono" id="qbittorrent_category" name="qbittorrent_category" value="${esc(s.qbittorrent_category)}" /></div>
-            </div>
-            <div class="field">
-              <label for="qbittorrent_folder">Download folder</label>
-              <input class="input mono" id="qbittorrent_folder" name="qbittorrent_folder" placeholder="qBittorrent’s default" value="${esc(s.qbittorrent_folder)}" />
-              <span class="hint">Optional. Where qBittorrent saves Narratarr’s books, as qBittorrent sees it, e.g. <code>/data/torrents/books</code>. Keeps them apart from your other downloads.</span>
-            </div>
-          </div>
-          <div class="client-fields" data-for="torrent_client:transmission">
-            <div class="field">
-              <label for="transmission_url">Transmission address</label>
-              <div class="input-row">
-                <input class="input mono" id="transmission_url" name="transmission_url" placeholder="http://localhost:9091" value="${esc(s.transmission_url)}" />
-                <button class="btn" type="button" data-test-client="transmission">Test</button>
-              </div>
-              <div data-result="transmission"></div>
-            </div>
-            <div class="set-grid">
-              <div class="field"><label for="transmission_username">Username</label><input class="input mono" id="transmission_username" name="transmission_username" value="${esc(s.transmission_username)}" autocomplete="off" placeholder="If you set one" /></div>
-              <div class="field"><label for="transmission_password">Password</label><input class="input mono" id="transmission_password" name="transmission_password" type="password" value="${esc(s.transmission_password)}" /></div>
-            </div>
-            <div class="field">
-              <label for="transmission_label">Label</label>
-              <input class="input mono" id="transmission_label" name="transmission_label" value="${esc(s.transmission_label)}" />
-              <span class="hint">Optional. Added to every torrent Narratarr sends, so you can filter them in Transmission 3.0 or later.</span>
-            </div>
-            <div class="field">
-              <label for="transmission_folder">Download folder</label>
-              <input class="input mono" id="transmission_folder" name="transmission_folder" placeholder="Transmission’s default" value="${esc(s.transmission_folder)}" />
-              <span class="hint">Optional. Where Transmission saves Narratarr’s books, as Transmission sees it, e.g. <code>/data/torrents/books</code>. Keeps them apart from your other downloads.</span>
-            </div>
-          </div>
-          <div class="client-fields" data-for="torrent_client:deluge">
-            <div class="field">
-              <label for="deluge_url">Deluge Web UI address</label>
-              <div class="input-row">
-                <input class="input mono" id="deluge_url" name="deluge_url" placeholder="http://localhost:8112" value="${esc(s.deluge_url)}" />
-                <button class="btn" type="button" data-test-client="deluge">Test</button>
-              </div>
-              <div data-result="deluge"></div>
-            </div>
-            <div class="field">
-              <label for="deluge_password">Password</label>
-              <input class="input mono" id="deluge_password" name="deluge_password" type="password" value="${esc(s.deluge_password)}" />
-              <span class="hint">Deluge’s web password (it has no username). Set it under Preferences → Interface → Password.</span>
-            </div>
-            <div class="field">
-              <label for="deluge_folder">Download folder</label>
-              <input class="input mono" id="deluge_folder" name="deluge_folder" placeholder="Deluge’s default" value="${esc(s.deluge_folder)}" />
-              <span class="hint">Optional. Where Deluge saves Narratarr’s books, as Deluge sees it, e.g. <code>/data/torrents/books</code>. Keeps them apart from your other downloads.</span>
-            </div>
+          <div class="field">
+            <label for="default_client">Default client</label>
+            <select class="select" id="default_client" name="default_client"></select>
+            <span class="hint">Anything no routing rule matches goes here. A book with a protocol of its own (Usenet or torrent) prefers the client you already use for that protocol, so an upgrade never moves a download.</span>
           </div>
         </div>
       </section>
 
       <section class="panel" data-page="downloads">
-        <div class="ph ph-row">
-          <div><h3>Usenet</h3><p class="desc">For the Usenet results Prowlarr finds.</p></div>
-          <div class="segmented" data-choice="usenet_client" role="radiogroup" aria-label="Download Usenet releases with">
-            <button type="button" role="radio" data-v="sabnzbd">SABnzbd</button>
-            <button type="button" role="radio" data-v="nzbget">NZBGet</button>
-          </div>
-        </div>
+        <div class="ph"><h3>Routing</h3><p class="desc">Ordered rules: the first one that matches decides the client. Unmatched releases go to the default client, which is what happened before routing existed.</p></div>
         <div class="body">
-          <input type="hidden" name="usenet_client" value="${esc(s.usenet_client)}" />
-          <div class="client-fields" data-for="usenet_client:sabnzbd">
-            <div class="set-grid">
-              <div class="field"><label for="sabnzbd_url">SABnzbd address</label><input class="input mono" id="sabnzbd_url" name="sabnzbd_url" placeholder="http://localhost:8080" value="${esc(s.sabnzbd_url)}" /></div>
-              <div class="field">
-                <label for="sabnzbd_api_key">API key</label>
-                <div class="input-row">
-                  <input class="input mono" id="sabnzbd_api_key" name="sabnzbd_api_key" type="password" placeholder="Config → General → API Key" value="${esc(s.sabnzbd_api_key)}" />
-                  <button class="btn" type="button" data-test-client="sabnzbd">Test</button>
-                </div>
-              </div>
-            </div>
-            <div data-result="sabnzbd"></div>
-            <div class="field">
-              <label for="sabnzbd_category">Category</label>
-              <input class="input mono" id="sabnzbd_category" name="sabnzbd_category" placeholder="audiobooks" value="${esc(s.sabnzbd_category)}" style="max-width:240px" />
-              <span class="hint">Optional. Must already exist in SABnzbd. Leave it empty to use its default.</span>
-            </div>
+          <div id="route-list"></div>
+          <div class="row-actions">
+            <button class="btn" type="button" id="add-route">Add a rule</button>
+            <span class="hint">A rule with no indexer applies to every indexer, which is how a category rule works.</span>
           </div>
-          <div class="client-fields" data-for="usenet_client:nzbget">
-            <div class="field">
-              <label for="nzbget_url">NZBGet address</label>
-              <div class="input-row">
-                <input class="input mono" id="nzbget_url" name="nzbget_url" placeholder="http://localhost:6789" value="${esc(s.nzbget_url)}" />
-                <button class="btn" type="button" data-test-client="nzbget">Test</button>
-              </div>
-              <div data-result="nzbget"></div>
-            </div>
-            <div class="set-grid three">
-              <div class="field"><label for="nzbget_username">Username</label><input class="input mono" id="nzbget_username" name="nzbget_username" value="${esc(s.nzbget_username)}" placeholder="nzbget" autocomplete="off" /></div>
-              <div class="field"><label for="nzbget_password">Password</label><input class="input mono" id="nzbget_password" name="nzbget_password" type="password" value="${esc(s.nzbget_password)}" /></div>
-              <div class="field"><label for="nzbget_category">Category</label><input class="input mono" id="nzbget_category" name="nzbget_category" placeholder="Audiobooks" value="${esc(s.nzbget_category)}" /></div>
-            </div>
-            <span class="hint">The username and password are NZBGet’s ControlUsername and ControlPassword (Settings → Security).</span>
+          <div class="field">
+            <label>Coverage</label>
+            <div id="route-coverage" class="hint"></div>
           </div>
         </div>
       </section>
@@ -2777,6 +2643,231 @@ function Settings(root, page) {
     $$(`[data-for^="${group}:"]`, root).forEach((el) => { el.hidden = el.dataset.for !== `${group}:${v}`; });
     dirty();
   };
+  // ---- download clients, as a list ---------------------------------------------------------
+  // Rendered rather than hand-written markup: nine types with different fields each, and the
+  // routing table reads this same list. The payload goes back as JSON in hidden inputs, which is
+  // what the settings form already posts.
+  const clientBox = $("#client-list", root);
+  const routeBox = $("#route-list", root);
+  const coverageBox = $("#route-coverage", root);
+  const TYPE_LABEL = { sabnzbd: "SABnzbd", nzbget: "NZBGet", qbittorrent: "qBittorrent", transmission: "Transmission",
+    deluge: "Deluge", realdebrid: "Real-Debrid", alldebrid: "AllDebrid", torbox: "TorBox", premiumize: "Premiumize" };
+  const FIELDS = {  // what each type needs, in the order a person fills it in
+    sabnzbd: [["url", "Address"], ["api_key", "API key"]],
+    nzbget: [["url", "Address"], ["username", "Username"], ["password", "Password"]],
+    qbittorrent: [["url", "Web UI address"], ["username", "Username"], ["password", "Password"]],
+    transmission: [["url", "RPC address"], ["username", "Username"], ["password", "Password"]],
+    deluge: [["url", "Web UI address"], ["password", "Password"]],
+    realdebrid: [["api_key", "API key"]], alldebrid: [["api_key", "API key"]],
+    torbox: [["api_key", "API key"]], premiumize: [["api_key", "API key"]],
+  };
+  let clients = [];
+  let routes = [];
+  let advertised = [];
+  let defaultClient = s.default_client || "";
+
+  const hidden = (name, value) => {
+    // Inside the form, not the panel: save() posts FormData(form) and would never see it otherwise.
+    let input = form.querySelector(`input[type=hidden][name=${name}]`);
+    if (!input) { input = document.createElement("input"); input.type = "hidden"; input.name = name; form.appendChild(input); }
+    input.value = value;
+  };
+  const sync = () => {
+    hidden("clients", JSON.stringify(clients));
+    hidden("client_routes", JSON.stringify({ version: 1, rules: routes }));
+    const sel = $("#default_client", root);
+    if (sel) sel.value = defaultClient;
+    dirty();
+  };
+
+  const drawClients = () => {
+    clientBox.innerHTML = clients.length ? clients.map((c, i) => `
+      <fieldset class="client-row" data-i="${i}">
+        <legend>
+          <select class="select" data-f="type" aria-label="Client type">
+            ${Object.entries(TYPE_LABEL).map(([v, l]) => `<option value="${v}" ${c.type === v ? "selected" : ""}>${l}</option>`).join("")}
+          </select>
+        </legend>
+        <div class="grid-2">
+          ${(FIELDS[c.type] || []).map(([k, label]) => `
+            <div class="field">
+              <label>${label}</label>
+              <input class="input mono" data-f="${k}" type="${k === "password" || k === "api_key" ? "password" : "text"}"
+                     value="${esc(c[k] || "")}" placeholder="${k === "url" ? "http://…" : ""}" />
+            </div>`).join("")}
+          <div class="field">
+            <label>Category</label>
+            <input class="input mono" data-f="category" value="${esc(c.category || "")}" placeholder="optional" />
+          </div>
+          <div class="field">
+            <label>Save path</label>
+            <input class="input mono" data-f="save_path" value="${esc(c.save_path || "")}" placeholder="the client's own" />
+          </div>
+        </div>
+        <div class="row-actions">
+          <button class="btn" type="button" data-act="test">Test</button>
+          <button class="btn" type="button" data-act="remove">Remove</button>
+          <span class="hint" data-out></span>
+        </div>
+      </fieldset>`).join("") : `<p class="hint">No clients yet. Add the one you already run.</p>`;
+    const sel = $("#default_client", root);
+    if (sel) {
+      sel.innerHTML = clients.map((c) => `<option value="${c.id}">${esc(TYPE_LABEL[c.type] || c.type)}${c.type === c.id ? "" : " · " + esc(c.id)}</option>`).join("");
+      sel.value = clients.some((c) => c.id === defaultClient) ? defaultClient : (clients[0] && clients[0].id) || "";
+      defaultClient = sel.value;
+    }
+  };
+
+  const drawRoutes = () => {
+    routeBox.innerHTML = routes.length ? `<table class="table"><thead><tr>
+        <th></th><th>Indexer</th><th>Category</th><th>Client</th><th>Label</th><th>Save path</th><th></th></tr></thead>
+        <tbody>${routes.map((r, i) => `
+        <tr data-i="${i}">
+          <td><button class="btn icon" type="button" data-act="up" ${i === 0 ? "disabled" : ""} aria-label="Move up">↑</button></td>
+          <td><select class="select" data-f="indexers" multiple size="1" aria-label="Indexers this rule matches">
+            ${advertised.map((n) => `<option value="${esc(n)}" ${(r.match.indexers || []).includes(n) ? "selected" : ""}>${esc(n)}</option>`).join("")}
+          </select></td>
+          <td><select class="select" data-f="categories" aria-label="Category">
+            ${[["", "Any"], ["audiobook", "Audiobooks"], ["ebook", "Ebooks"]].map(([v, l]) =>
+              `<option value="${v}" ${((r.match.categories || [])[0] || "") === v ? "selected" : ""}>${l}</option>`).join("")}
+          </select></td>
+          <td><select class="select" data-f="client" aria-label="Client">
+            ${clients.map((c) => `<option value="${c.id}" ${r.client === c.id ? "selected" : ""}>${esc(TYPE_LABEL[c.type] || c.type)}</option>`).join("")}
+          </select></td>
+          <td><input class="input mono" data-f="label" value="${esc(r.label || "")}" placeholder="the client's own" /></td>
+          <td><input class="input mono" data-f="save_path" value="${esc(r.save_path || "")}" placeholder="the client's own" /></td>
+          <td class="nowrap">
+            <button class="btn" type="button" data-act="test">Test</button>
+            <button class="btn icon" type="button" data-act="down" ${i === routes.length - 1 ? "disabled" : ""} aria-label="Move down">↓</button>
+            <button class="btn icon" type="button" data-act="remove" aria-label="Remove">✕</button>
+          </td>
+        </tr>
+        <tr data-out-row="${i}"><td></td><td colspan="6" class="hint" data-out></td></tr>`).join("")}
+        </tbody></table>` : `<p class="hint">No rules yet: every release goes to the default client, exactly as before.</p>`;
+  };
+
+  const readRow = (el) => {
+    const row = el.closest("[data-i]");
+    const i = Number(row.dataset.i);
+    row.querySelectorAll("[data-f]").forEach((input) => {
+      if (input.multiple) return;
+      const k = input.dataset.f;
+      if (k === "indexers" || k === "categories") return;
+      if (clients[i] && row.classList.contains("client-row")) clients[i][k] = input.value;
+    });
+    return i;
+  };
+
+  clientBox.oninput = clientBox.onchange = (e) => {
+    const row = e.target.closest(".client-row");
+    if (!row) return;
+    const i = Number(row.dataset.i);
+    const k = e.target.dataset.f;
+    if (k === "type") { clients[i] = { id: clients[i].id, type: e.target.value }; drawClients(); }
+    else if (k) clients[i][k] = e.target.value;
+    sync();
+  };
+
+  clientBox.onclick = async (e) => {
+    const btn = e.target.closest("[data-act]");
+    if (!btn) return;
+    const row = btn.closest(".client-row");
+    const i = Number(row.dataset.i);
+    const out = $("[data-out]", row);
+    if (btn.dataset.act === "remove") { clients.splice(i, 1); drawClients(); drawRoutes(); sync(); return; }
+    if (btn.dataset.act === "test") {
+      spinBtn(btn, true);
+      try {
+        const got = await api("/api/settings/test-download-client", { method: "POST", body: { entry: clients[i] } });
+        out.innerHTML = `<span class="ok">${esc(got.label)} ${esc(got.version || "answered")}</span>`;
+      } catch (err) { out.innerHTML = `<span class="bad">${esc(err.message)}</span>`; }
+      spinBtn(btn, false);
+    }
+  };
+
+  $("#add-client", root).onclick = () => {
+    const spare = Object.keys(TYPE_LABEL).find((t) => !clients.some((c) => c.type === t)) || "deluge";
+    clients.push({ id: spare, type: spare, category: spare === "qbittorrent" || spare === "transmission" ? "audiobooks" : "" });
+    drawClients(); drawRoutes(); sync();
+  };
+
+  const readRoute = (row) => {
+    const i = Number(row.dataset.i);
+    const get = (k) => $(`[data-f=${k}]`, row);
+    const indexers = get("indexers") ? [...get("indexers").selectedOptions].map((o) => o.value) : (routes[i].match.indexers || []);
+    const category = get("categories") ? get("categories").value : ((routes[i].match.categories || [])[0] || "");
+    routes[i] = {
+      match: { indexers, categories: category ? [category] : [] },
+      client: get("client") ? get("client").value : routes[i].client,
+      label: get("label") ? get("label").value : routes[i].label || "",
+      save_path: get("save_path") ? get("save_path").value : routes[i].save_path || "",
+    };
+    return i;
+  };
+
+  routeBox.onchange = routeBox.oninput = (e) => {
+    const row = e.target.closest("tr[data-i]");
+    if (!row) return;
+    readRoute(row);
+    sync();
+  };
+
+  routeBox.onclick = async (e) => {
+    const btn = e.target.closest("[data-act]");
+    if (!btn) return;
+    const row = btn.closest("tr[data-i]");
+    const i = Number(row.dataset.i);
+    const act = btn.dataset.act;
+    if (act === "remove") { routes.splice(i, 1); drawRoutes(); sync(); return; }
+    if (act === "up" && i > 0) { [routes[i - 1], routes[i]] = [routes[i], routes[i - 1]]; drawRoutes(); sync(); return; }
+    if (act === "down" && i < routes.length - 1) { [routes[i + 1], routes[i]] = [routes[i], routes[i + 1]]; drawRoutes(); sync(); return; }
+    if (act === "test") {
+      const out = $(`[data-out-row='${i}'] [data-out]`, routeBox);
+      readRoute(row);
+      sync();
+      spinBtn(btn, true);
+      try {
+        const got = await api("/api/routing/test", {
+          method: "POST",
+          body: { indexer: (routes[i].match.indexers || [])[0] || "", kind: (routes[i].match.categories || ["audiobook"])[0] },
+        });
+        out.innerHTML = got.client
+          ? `${got.rule === null ? "No rule" : "Rule " + (got.rule + 1)} → <b>${esc(got.client_label || got.client)}</b>`
+            + ` · category <code>${esc(got.args.category || "the client's own")}</code>`
+            + ` · save to <code>${esc(got.args.save_path || "the client's own")}</code>`
+          : esc(got.reason);
+      } catch (err) { out.innerHTML = `<span class="bad">${esc(err.message)}</span>`; }
+      spinBtn(btn, false);
+    }
+  };
+
+  $("#add-route", root).onclick = () => {
+    if (!clients.length) { toast("Add a download client first.", { kind: "err" }); return; }
+    routes.push({ match: { indexers: [], categories: [] }, client: clients[0].id, label: "", save_path: "" });
+    drawRoutes(); sync();
+  };
+
+  const loadRouting = async () => {
+    try {
+      const [c, cov] = await Promise.all([api("/api/download-clients"), api("/api/routing/coverage")]);
+      clients = c.clients.map((x) => ({ id: x.id, type: x.type, url: x.url, username: x.username,
+        password: x.password, api_key: x.api_key, category: x.category, save_path: x.save_path }));
+      defaultClient = c.default_client || "";
+      advertised = cov.indexers || [];
+      routes = (cov.rules || []).map((r) => ({ match: { indexers: r.match.indexers || [], categories: r.match.categories || [] },
+        client: r.client, label: r.label || "", save_path: r.save_path || "" }));
+      const uncovered = cov.uncovered || [];
+      coverageBox.innerHTML = [
+        uncovered.length ? `No rule covers: <b>${uncovered.map(esc).join(", ")}</b> — these fall through to the default client.` : "Every advertised indexer has a rule.",
+        (cov.unknown_clients || []).length ? `<span class="bad">${cov.unknown_clients.map(esc).join("; ")}</span>` : "",
+      ].filter(Boolean).join("<br>");
+    } catch (err) {
+      coverageBox.innerHTML = `<span class="bad">${esc(err.message)}</span>`;
+    }
+    drawClients(); drawRoutes(); sync();
+  };
+  loadRouting();
+
   $$("[data-choice]", root).forEach((seg) => {
     choose(seg.dataset.choice, form[seg.dataset.choice].value);
     seg.onclick = (e) => { const b = e.target.closest("[data-v]"); if (b) choose(seg.dataset.choice, b.dataset.v); };
@@ -2796,10 +2887,11 @@ function Settings(root, page) {
 
   const collect = () => {
     const data = Object.fromEntries(new FormData(form));
-    data.delete_from_rd_after = form.delete_from_rd_after.checked;
-    data.delete_from_ad_after = form.delete_from_ad_after.checked;
-    data.delete_from_tb_after = form.delete_from_tb_after.checked;
-    data.delete_from_pm_after = form.delete_from_pm_after.checked;
+    // These four lived in the per-client blocks that Clients replaced. Only send one when its input
+    // is on the page, or a save would silently overwrite a stored preference with false.
+    for (const name of ["delete_from_rd_after", "delete_from_ad_after", "delete_from_tb_after", "delete_from_pm_after"]) {
+      if (form[name]) data[name] = form[name].checked;
+    }
     data.smart_search = form.smart_search.checked;
     data.auto_search = form.auto_search.checked;
     data.check_updates = form.check_updates.checked;

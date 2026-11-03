@@ -166,7 +166,13 @@ def client_for(entry: ClientEntry, transport: httpx.AsyncBaseTransport | None = 
     raise ClientError(f"{entry.label} isn't a client Narratarr can hand a release to.")
 
 
+def _any(settings: config.Settings, delivery: str) -> bool:
+    return any(e.delivery == delivery and e.configured for e in entries(settings))
+
+
 def usenet_configured(s: config.Settings, name: str | None = None) -> bool:
+    if name is None and _any(s, "usenet"):
+        return True
     name = name or s.usenet_client
     if name == "nzbget":
         return bool(s.nzbget_url)
@@ -174,6 +180,8 @@ def usenet_configured(s: config.Settings, name: str | None = None) -> bool:
 
 
 def torrent_configured(s: config.Settings, name: str | None = None) -> bool:
+    if name is None and _any(s, "torrent"):
+        return True
     name = name or s.torrent_client
     if name == "qbittorrent":
         return bool(s.qbittorrent_url)

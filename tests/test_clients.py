@@ -12,6 +12,11 @@ import pytest
 from narratarr import config, db, worker
 from narratarr.worker import Worker, link_into
 
+
+def use(kind: str, **fields):
+    """Configure one client the way Settings does now: a record in the list."""
+    return config.update({"clients": [{"id": kind, "type": kind, **fields}], "default_client": kind})
+
 HASH = "061850ead3eb6f1c5c6d8420211b4bbf2d4ee3e2"
 NZB = b'<?xml version="1.0"?>\n<nzb xmlns="http://www.newzbin.com/DTD/2003/nzb"></nzb>'
 
@@ -63,11 +68,8 @@ class FakeNZBGet:
 
 
 async def test_nzbget_pipeline(isolated_data):
-    config.update({
-        "usenet_client": "nzbget", "nzbget_url": "http://nzbget:6789", "nzbget_username": "nzbget",
-        "nzbget_password": "secret", "nzbget_category": "Audiobooks",
-        "prowlarr_url": "http://prowlarr:9696", "prowlarr_api_key": "K",
-    })
+    use("nzbget", url="http://nzbget:6789", username="nzbget", password="secret", category="Audiobooks")
+    config.update({"prowlarr_url": "http://prowlarr:9696", "prowlarr_api_key": "K"})
     fake = FakeNZBGet(finished_download(isolated_data))
     book = db.insert({
         "source": "prowlarr", "source_url": "https://nzbs.example/1", "title": "Dune", "author": "Frank Herbert",
@@ -86,8 +88,8 @@ async def test_nzbget_pipeline(isolated_data):
 
 
 async def test_nzbget_failure(isolated_data):
-    config.update({"usenet_client": "nzbget", "nzbget_url": "http://nzbget:6789", "nzbget_username": "nzbget",
-                   "nzbget_password": "secret", "prowlarr_url": "http://prowlarr:9696", "prowlarr_api_key": "K"})
+    use("nzbget", url="http://nzbget:6789", username="nzbget", password="secret")
+    config.update({"prowlarr_url": "http://prowlarr:9696", "prowlarr_api_key": "K"})
     book = db.insert({"source": "prowlarr", "source_url": "https://nzbs.example/2", "title": "Dune",
                       "protocol": "usenet", "download_url": "http://prowlarr:9696/x", "status": "queued"})
     await Worker(transport=httpx.MockTransport(FakeNZBGet(isolated_data, history="FAILURE/PAR")))._run(book["id"])
@@ -124,8 +126,7 @@ class FakeQbit:
 
 
 async def test_qbittorrent_keeps_seeding(isolated_data):
-    config.update({"torrent_client": "qbittorrent", "qbittorrent_url": "http://qbit:8080",
-                   "qbittorrent_username": "admin", "qbittorrent_password": "pw"})
+    use("qbittorrent", url="http://qbit:8080", username="admin", password="pw", category="audiobooks")
     original = finished_download(isolated_data)
     fake = FakeQbit(original)
     book = torrent_book()
@@ -141,8 +142,7 @@ async def test_qbittorrent_keeps_seeding(isolated_data):
 
 
 async def test_qbittorrent_bad_password(isolated_data):
-    config.update({"torrent_client": "qbittorrent", "qbittorrent_url": "http://qbit:8080",
-                   "qbittorrent_username": "admin", "qbittorrent_password": "nope"})
+    use("qbittorrent", url="http://qbit:8080", username="admin", password="nope")
     book = torrent_book()
     await Worker(transport=httpx.MockTransport(FakeQbit(isolated_data)))._run(book["id"])
     assert "password" in db.get(book["id"])["error"]
@@ -192,8 +192,8 @@ class FakeTransmission:
 
 async def test_transmission_with_path_mapping(isolated_data):
     original = finished_download(isolated_data)
-    config.update({"torrent_client": "transmission", "transmission_url": "http://transmission:9091",
-                   "path_remote": "/data/torrents", "path_local": str(original.parent)})
+    use("transmission", url="http://transmission:9091", category="audiobooks")
+    config.update({"path_remote": "/data/torrents", "path_local": str(original.parent)})
     fake = FakeTransmission(original)
     book = torrent_book()
 
@@ -207,9 +207,8 @@ async def test_transmission_with_path_mapping(isolated_data):
 
 async def test_transmission_saves_to_its_folder_with_the_label(isolated_data):
     original = finished_download(isolated_data)
-    config.update({"torrent_client": "transmission", "transmission_url": "http://transmission:9091",
-                   "transmission_folder": "/data/torrents/books", "transmission_label": "books, audio",
-                   "path_remote": "/data/torrents", "path_local": str(original.parent)})
+    use("transmission", url="http://transmission:9091", save_path="/data/torrents/books", category="books, audio")
+    config.update({"path_remote": "/data/torrents", "path_local": str(original.parent)})
     fake = FakeTransmission(original)
     book = torrent_book()
 
@@ -222,8 +221,8 @@ async def test_transmission_saves_to_its_folder_with_the_label(isolated_data):
 
 async def test_transmission_defaults_leave_the_folder_alone(isolated_data):
     original = finished_download(isolated_data)
-    config.update({"torrent_client": "transmission", "transmission_url": "http://transmission:9091",
-                   "path_remote": "/data/torrents", "path_local": str(original.parent)})
+    use("transmission", url="http://transmission:9091", category="audiobooks")
+    config.update({"path_remote": "/data/torrents", "path_local": str(original.parent)})
     fake = FakeTransmission(original)
     book = torrent_book()
 
@@ -234,9 +233,7 @@ async def test_transmission_defaults_leave_the_folder_alone(isolated_data):
 
 
 async def test_qbittorrent_folder_overrides_automatic_management(isolated_data):
-    config.update({"torrent_client": "qbittorrent", "qbittorrent_url": "http://qbit:8080",
-                   "qbittorrent_username": "admin", "qbittorrent_password": "pw",
-                   "qbittorrent_folder": "/data/torrents/books"})
+    use("qbittorrent", url="http://qbit:8080", username="admin", password="pw", save_path="/data/torrents/books")
     original = finished_download(isolated_data)
     fake = FakeQbit(original)
     book = torrent_book()
@@ -317,8 +314,8 @@ class FakeDeluge:
 
 async def test_deluge_with_path_mapping(isolated_data):
     original = finished_download(isolated_data)
-    config.update({"torrent_client": "deluge", "deluge_url": "http://deluge:8112", "deluge_password": "pw",
-                   "path_remote": "/data/torrents", "path_local": str(original.parent)})
+    use("deluge", url="http://deluge:8112", password="pw")
+    config.update({"path_remote": "/data/torrents", "path_local": str(original.parent)})
     fake = FakeDeluge(original)
     book = torrent_book()
 
@@ -336,9 +333,8 @@ async def test_deluge_with_path_mapping(isolated_data):
 
 async def test_deluge_saves_to_its_folder(isolated_data):
     original = finished_download(isolated_data)
-    config.update({"torrent_client": "deluge", "deluge_url": "http://deluge:8112", "deluge_password": "pw",
-                   "deluge_folder": "/data/torrents/books",
-                   "path_remote": "/data/torrents", "path_local": str(original.parent)})
+    use("deluge", url="http://deluge:8112", password="pw", save_path="/data/torrents/books")
+    config.update({"path_remote": "/data/torrents", "path_local": str(original.parent)})
     fake = FakeDeluge(original)
     book = torrent_book()
 
@@ -453,7 +449,6 @@ async def test_without_a_rule_the_grab_takes_the_same_path_it_always_did(isolate
         "clients": [{"id": "transmission", "type": "transmission", "url": "http://transmission:9091",
                      "category": "books"}],
         "default_client": "transmission", "client_routes": {"version": 1, "rules": []},
-        "torrent_client": "transmission",
         "path_remote": "/data/torrents", "path_local": str(original.parent),
     })
     fake = FakeTransmission(original)

@@ -26,8 +26,8 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from . import (apiv1, audible, audiobookshelf, auth, brave, config, db, downloaders, ebooks, importer, media, search,
-               tokens, updates, users, wanted)
+from . import (apiv1, audible, audiobookshelf, auth, brave, config, db, downloaders, ebooks, importer, media, routing,
+               search, tokens, updates, users, wanted)
 from .audiobookshelf import Audiobookshelf, AudiobookshelfError
 from .downloaders import ClientError
 from . import alldebrid, languages, notify, tidy
@@ -249,6 +249,10 @@ async def discover(q: str = "", category: str = "", page: int = 1, source: str =
     books = db.list_books()
     owned = {b["release_url"]: b for b in books if b["release_url"]} | {b["source_url"]: b for b in books}
     want = languages.parse(config.load().languages)
+    # Which client would take each result, resolved once per request. The chip is a hint, not a
+    # promise: the grab re-resolves, because a rule can change between showing a row and clicking it.
+    settings = config.load()
+    client_by_id = {e.id: e for e in downloaders.entries(settings)}
     for item in data["items"]:
         b, e = owned.get(item["url"]), owned.get(wanted.url_for(item["url"], "ebook"))
         item["source"] = src.name
@@ -257,6 +261,16 @@ async def discover(q: str = "", category: str = "", page: int = 1, source: str =
             languages.detect(item.get("title") or "") if src.name in ("prowlarr", "torznab", "audiobookbay") else "")
         item["lang_ok"] = languages.allowed(item["language"], want)
         item["library"] = {"id": (b or e)["id"], "status": (b or e)["status"]} if b or e else None
+        item["client"] = None
+        if src.delivery != "direct":  # a direct source needs no client, so the row has no chip
+            # A source that does not report an indexer per row (AudiobookBay) is routed by its own
+            # name, which is what the indexer picker offers and what coverage() reports on.
+            decision = routing.resolve(settings, item.get("indexer") or src.label, kind,
+                                       item.get("protocol") or ("usenet" if item.get("nzb_url") else "torrent"))
+            entry = client_by_id.get(decision.client_id)
+            if decision.client_id:
+                item["client"] = {"id": decision.client_id, "label": entry.label if entry else "",
+                                  "rule": decision.rule}
     if src.name == "prowlarr" and kind == "ebook" and not data["items"]:
         data["note"] = await _no_ebook_indexers(src)
     return data
@@ -1143,6 +1157,112 @@ async def test_torznab():
         return await Torznab(s.torznab_url, s.torznab_api_key, s.torznab_categories).status()
     except TorznabError as e:
         raise HTTPException(400, str(e))
+
+
+@app.get("/api/download-clients")
+async def download_clients():
+    """The configured clients, secrets masked, plus what the UI needs to offer in a picker."""
+    s = config.load()
+    out = []
+    for entry in downloaders.entries(s):
+        row = entry.public()
+        row["default"] = entry.id == s.default_client
+        out.append(row)
+    return {
+        "clients": out,
+        "default_client": s.default_client,
+        "types": [{"type": t, "label": downloaders.LABELS[t], "delivery": downloaders.DELIVERY[t]}
+                  for t in downloaders.DELIVERY],
+    }
+
+
+class ClientProbe(BaseModel):
+    id: str = ""
+    entry: dict | None = None
+    transport: bool = False  # unused; kept out of the client's way
+
+
+@app.post("/api/settings/test-download-client")
+async def test_download_client(body: ClientProbe):
+    """Prove one client can reach its daemon. Accepts an unsaved entry so Test works before Save."""
+    s = config.load()
+    raw = body.entry
+    if not raw and body.id:
+        raw = next((c for c in s.clients if c.get("id") == body.id), None)
+    entry = downloaders.entry_from_dict(raw or {})
+    if entry is None:
+        raise HTTPException(400, "Pick a client type first.")
+    if not entry.configured:
+        raise HTTPException(400, f"{entry.label} needs its address filled in first.")
+    try:
+        async with downloaders.client_for(entry) as client:
+            return {"label": client.label, "version": await client.version()}
+    except ClientError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/indexers")
+async def indexers():
+    """The indexers the user's sources actually advertise, for the routing picker.
+
+    Populated from Prowlarr and from the Torznab indexer's own caps, because a rule that names an
+    indexer nobody advertises can never match and would look like a broken feature.
+    """
+    s = config.load()
+    names: list[str] = []
+    notes: list[str] = []
+    if s.prowlarr_url and s.prowlarr_api_key:
+        try:
+            names += await Prowlarr(s.prowlarr_url, s.prowlarr_api_key).offering() or []
+        except ProwlarrError as e:
+            notes.append(f"Prowlarr: {e}")
+    if s.torznab_url and s.torznab_api_key:
+        try:
+            names.append((await Torznab(s.torznab_url, s.torznab_api_key, s.torznab_categories).status())["title"])
+        except TorznabError as e:
+            notes.append(f"Torznab: {e}")
+    for name, source in all_sources().items():
+        # Only sources that hand a release to a download client are routing targets. A catalog and a
+        # free archive never are, and offering them would be a rule that can never fire.
+        if source.delivery in ("indexer", "torrent"):
+            names.append(source.label)
+    return {"indexers": sorted({n for n in names if n}, key=str.lower), "notes": notes}
+
+
+class RouteProbe(BaseModel):
+    indexer: str = ""
+    kind: str = "audiobook"
+    protocol: str = ""
+
+
+@app.post("/api/routing/test")
+async def test_route(body: RouteProbe):
+    """What would take a sample release, and with which arguments. Grabs nothing."""
+    s = config.load()
+    entry_for = {e.id: e for e in downloaders.entries(s)}
+    decision = routing.resolve(s, body.indexer, body.kind or "audiobook", body.protocol)
+    entry = entry_for.get(decision.client_id)
+    return {
+        "client": decision.client_id,
+        "client_label": entry.label if entry else "",
+        "delivery": entry.delivery if entry else "",
+        "rule": decision.rule,
+        "reason": decision.reason,
+        "problems": decision.problems,
+        "args": {
+            "category": decision.label or (entry.category if entry else ""),
+            "save_path": decision.save_path or (entry.save_path if entry else ""),
+        },
+    }
+
+
+@app.get("/api/routing/coverage")
+async def routing_coverage():
+    """Which indexers no rule covers, and rules naming a client that no longer exists."""
+    s = config.load()
+    advertised = (await indexers())["indexers"]
+    cov = routing.coverage(s, advertised)
+    return {**cov, "indexers": advertised, "rules": routing.routes(s)}
 
 
 @app.post("/api/settings/test-client/{name}")

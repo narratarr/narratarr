@@ -320,3 +320,113 @@ def test_a_bare_list_is_read_as_the_current_version(routed):
     s = routed([{"match": {"indexers": ["The Pirate Bay"]}, "client": "deluge"}])
     s.client_routes = [{"match": {"indexers": ["The Pirate Bay"]}, "client": "qbit"}]
     assert routing.routes(s)[0]["client"] == "qbit", "an older file shape still works"
+
+
+# ---- what the settings page is allowed to do -------------------------------------------------
+#
+# These go through the API the UI calls, not the resolver directly: the UI posts the whole list and
+# the whole rule list on every save, so the endpoints are where a reorder or a removed client has to
+# behave.
+
+@pytest.fixture
+def api_client(isolated_data, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from narratarr import api
+
+    return TestClient(api.app)
+
+
+def test_the_ui_can_reorder_and_the_answer_follows(client_routes=None):
+    """Saving the rules in a different order changes which client a release goes to. This is the
+    whole precedence model, and it is the only test that proves the order survives a round trip."""
+    from fastapi.testclient import TestClient
+
+    from narratarr import api
+
+    c = TestClient(api.app)
+    c.put("/api/settings", json={"clients": TWO_CLIENTS + [{"id": "transmission", "type": "transmission",
+                                                           "url": "http://t:9091"}],
+                                 "default_client": "qbit"})
+    first = {"version": 1, "rules": [
+        {"match": {"indexers": ["The Pirate Bay"]}, "client": "deluge", "label": "one"},
+        {"match": {"indexers": ["The Pirate Bay"]}, "client": "qbit", "label": "two"},
+    ]}
+    assert c.put("/api/settings", json={"client_routes": first}).status_code == 200
+    got = c.post("/api/routing/test", json={"indexer": "The Pirate Bay", "kind": "audiobook"}).json()
+    assert (got["client"], got["rule"]) == ("deluge", 0)
+    assert got["args"] == {"category": "one", "save_path": ""}  # the route's own label wins
+
+    swapped = {"version": 1, "rules": list(reversed(first["rules"]))}
+    assert c.put("/api/settings", json={"client_routes": swapped}).status_code == 200
+    got = c.post("/api/routing/test", json={"indexer": "The Pirate Bay", "kind": "audiobook"}).json()
+    assert (got["client"], got["rule"]) == ("qbit", 0), "the swabbed rule that matches first is now rule 1"
+
+
+def test_a_rule_with_an_empty_indexer_list_does_not_restrict():
+    """A category-only rule covers every indexer, which is how one rule replaces five."""
+    from fastapi.testclient import TestClient
+
+    from narratarr import api
+
+    c = TestClient(api.app)
+    c.put("/api/settings", json={"clients": TWO_CLIENTS, "default_client": "qbit"})
+    rules = {"version": 1, "rules": [{"match": {"indexers": [], "categories": ["ebooks"]}, "client": "deluge"}]}
+    assert c.put("/api/settings", json={"client_routes": rules}).status_code == 200
+    for indexer in ("The Pirate Bay", "NZBGeek", ""):
+        got = c.post("/api/routing/test", json={"indexer": indexer, "kind": "ebook"}).json()
+        assert got["client"] == "deluge", indexer
+    # and it does not match the other kind
+    assert c.post("/api/routing/test", json={"indexer": "The Pirate Bay", "kind": "audiobook"}).json()["client"] == "qbit"
+
+
+def test_a_removed_client_is_not_selectable_and_shows_up_as_a_broken_rule():
+    from fastapi.testclient import TestClient
+
+    from narratarr import api
+
+    c = TestClient(api.app)
+    c.put("/api/settings", json={"clients": TWO_CLIENTS, "default_client": "qbit"})
+    c.put("/api/settings", json={"client_routes": {"version": 1, "rules": [
+        {"match": {"indexers": ["The Pirate Bay"]}, "client": "deluge"}]}})
+
+    # remove Deluge, the way the UI does: post the list without it
+    saved = c.put("/api/settings", json={"clients": [{"id": "qbit", "type": "qbittorrent", "url": "http://qbit:8080"}],
+                                        "default_client": "qbit"})
+    assert saved.status_code == 200
+    payload = c.get("/api/download-clients").json()
+    assert [x["id"] for x in payload["clients"]] == ["qbit"], "a removed client is not offered"
+
+    cov = c.get("/api/routing/coverage").json()
+    assert cov["unknown_clients"] == ["Rule 1 -> deluge"]
+    # and the grab still happens, on the default
+    got = c.post("/api/routing/test", json={"indexer": "The Pirate Bay", "kind": "audiobook"}).json()
+    assert got["client"] == "qbit" and got["problems"]
+
+
+def test_the_test_button_reports_an_unsaved_entry_without_saving_it():
+    from fastapi.testclient import TestClient
+
+    from narratarr import api
+
+    c = TestClient(api.app)
+    c.put("/api/settings", json={"clients": [{"id": "qbit", "type": "qbittorrent", "url": "http://qbit:8080"}]})
+    r = c.post("/api/settings/test-download-client",
+               json={"entry": {"id": "temp", "type": "deluge", "url": "http://deluge:8112", "password": "pw"}})
+    assert r.status_code in (200, 400)  # whatever the daemon says, the entry was not stored
+    assert [x["id"] for x in c.get("/api/download-clients").json()["clients"]] == ["qbit"]
+    assert c.post("/api/settings/test-download-client", json={"entry": {"id": "x", "type": "nope"}}).status_code == 400
+
+
+def test_the_json_the_settings_form_posts_is_accepted_as_text():
+    """The form posts hidden inputs as text, so the endpoints have to parse them."""
+    from fastapi.testclient import TestClient
+
+    from narratarr import api
+
+    c = TestClient(api.app)
+    r = c.put("/api/settings", json={"clients": json.dumps([{"id": "qbit", "type": "qbittorrent",
+                                                            "url": "http://qbit:8080"}]),
+                                     "client_routes": json.dumps({"version": 1, "rules": []})})
+    assert r.status_code == 200, r.text
+    assert [x["id"] for x in config.load().clients] == ["qbit"]

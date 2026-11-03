@@ -1926,3 +1926,30 @@ button.link { border: 0; background: none; padding: 0; min-height: 32px; color: 
   .modal.tidy #tidy-body { flex: none; }
   .tidy-list { max-height: none; overflow: visible; }
 }
+
+/* Which download client would take a result. Quiet: it is a hint, not a control. */
+.client-chip {
+  display: inline-block; margin-top: 6px; padding: 1px 7px; border-radius: 999px;
+  border: 1px solid var(--border); color: var(--muted); font-size: 11px; line-height: 18px;
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* The clients list and the routing table, both rendered by the settings page. */
+.client-row { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; }
+.client-row legend { padding: 0 6px; }
+.client-row .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.client-row .row-actions { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.table { width: 100%; border-collapse: collapse; }
+.table th { text-align: left; font-size: 12px; color: var(--muted); font-weight: 600; padding: 4px 6px; }
+.table td { padding: 4px 6px; vertical-align: middle; }
+.table select[multiple] { min-width: 130px; }
+/* Label and save path are free text: give them room, and let a narrow screen scroll the table
+   rather than crushing every column. */
+.table input.input { min-width: 150px; }
+#route-list { overflow-x: auto; }
+.table .nowrap { white-space: nowrap; }
+.table tr[data-out-row] td { border: 0; padding-top: 0; }
+.row-actions { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+.ok { color: var(--good, #3fb950); }
+.bad { color: var(--bad, #f85149); }
+@media (max-width: 760px) { .client-row .grid-2 { grid-template-columns: 1fr; } }

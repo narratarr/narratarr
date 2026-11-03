@@ -96,11 +96,20 @@ class Settings:
         d = asdict(self)
         for key in SECRETS:
             d[key] = _mask(d[key], key)
-        d["clients"] = [
-            {**c, "password": _mask(c.get("password", ""), "x_password"),
-             "api_key": _mask(c.get("api_key", ""), "x_api_key")}
-            for c in (d.get("clients") or []) if isinstance(c, dict)
-        ]
+        from .downloaders import entry_from_dict
+
+        d["clients"] = []
+        for c in (asdict(self).get("clients") or []):
+            if not isinstance(c, dict):
+                continue
+            parsed = entry_from_dict(c)
+            d["clients"].append({
+                **c,
+                "label": parsed.label if parsed else c.get("type", ""),
+                "configured": bool(parsed and parsed.configured),
+                "password": _mask(c.get("password", ""), "x_password"),
+                "api_key": _mask(c.get("api_key", ""), "x_api_key"),
+            })
         d["rd_configured"] = bool(self.rd_api_key)
         d["ad_configured"] = bool(self.ad_api_key)
         d["tb_configured"] = bool(self.tb_api_key)
@@ -114,10 +123,17 @@ class Settings:
         d["qbittorrent_configured"] = bool(self.qbittorrent_url)
         d["transmission_configured"] = bool(self.transmission_url)
         d["deluge_configured"] = bool(self.deluge_url)
-        d["usenet_configured"] = d[f"{self.usenet_client}_configured"]
+        # A client in the list is what "configured" means now; the flat settings remain the answer
+        # for an install that has not been migrated or was set up through the older API.
+        from .downloaders import entries
+
+        listed = entries(self)
+        d["usenet_configured"] = any(e.delivery == "usenet" and e.configured for e in listed) \
+            or d[f"{self.usenet_client}_configured"]
         short = {"realdebrid": "rd", "alldebrid": "ad", "torbox": "tb", "premiumize": "pm"}.get(self.torrent_client,
                                                                                                  self.torrent_client)
-        d["torrent_configured"] = d[f"{short}_configured"]
+        d["torrent_configured"] = any(e.delivery == "torrent" and e.configured for e in listed) \
+            or d[f"{short}_configured"]
         return d
 
 
@@ -180,10 +196,8 @@ def load() -> Settings:
 def update(changes: dict) -> Settings:
     """Apply changes and persist. Masked secrets sent back unchanged are ignored."""
     s = load()
-    flat_clients_given = False
-    touched_flat = any(
-        k in _FLAT_PROTOCOL_FIELDS[proto] for k in changes for proto in _FLAT_PROTOCOL_FIELDS
-    )
+    list_given = "clients" in changes
+    touched_flat = any(k in _FLAT_PROTOCOL_FIELDS[p] for k in changes for p in _FLAT_PROTOCOL_FIELDS)
     with _lock:
         known = {f.name: f for f in fields(Settings)}
         fresh = {k for k, v in changes.items() if k in SECRETS and isinstance(v, str) and v and not v.startswith("•")}
@@ -202,7 +216,6 @@ def update(changes: dict) -> Settings:
                             setattr(s, secret, "")
             if k == "clients":
                 v = _merge_client_secrets(validate_clients(v), s.clients)
-                flat_clients_given = True
             elif k == "client_routes":
                 from . import routing
 
@@ -229,8 +242,8 @@ def update(changes: dict) -> Settings:
                 if ".." in v.split("/"):
                     raise ValueError("The folder layout has to stay inside the library folder.")
             setattr(s, k, v)
-        if touched_flat and not flat_clients_given:
-            refresh_clients(s)  # the old surface still edits clients, so keep the list honest
+        if touched_flat and not list_given:
+            refresh_clients(s)  # a caller still using the flat fields
         # A removed client must not leave the default pointing at nothing.
         ids = [c["id"] for c in s.clients]
         if s.default_client not in ids:
@@ -319,13 +332,30 @@ _FLAT_PROTOCOL_FIELDS = {
 }
 
 
-def refresh_clients(s: Settings) -> None:
-    """Mirror a flat client change into the list.
+# ---- the compatibility path, and when it can go ----------------------------------------------
+#
+# The flat client fields (`torrent_client`, `qbittorrent_url`, …) are still part of the settings
+# model and of the public API: `PUT /api/settings {"torrent_client": "deluge"}` is a documented way
+# to change where downloads go. Settings no longer renders them, but anything that still sets them
+# has to keep working, so a flat client change is mirrored into the list.
+#
+# It goes when the flat fields themselves go. That is a separate change: delete them from Settings,
+# teach the migration to read the old file's keys directly, and move the callers over.
 
-    The old settings surface still writes `torrent_client` and its fields, so the list has to follow
-    it or the two disagree and a grab uses a client that was never updated. Entries the user added
-    some other way are left alone; only the entry for each protocol is rebuilt.
-    """
+_FLAT_PROTOCOL_FIELDS = {
+    "usenet": ("usenet_client", "sabnzbd_url", "sabnzbd_api_key", "sabnzbd_category",
+               "nzbget_url", "nzbget_username", "nzbget_password", "nzbget_category"),
+    "torrent": ("torrent_client", "rd_api_key", "ad_api_key", "tb_api_key", "pm_api_key",
+                "qbittorrent_url", "qbittorrent_username", "qbittorrent_password",
+                "qbittorrent_category", "qbittorrent_folder",
+                "transmission_url", "transmission_username", "transmission_password",
+                "transmission_label", "transmission_folder",
+                "deluge_url", "deluge_password", "deluge_folder"),
+}
+
+
+def refresh_clients(s: Settings) -> None:
+    """Mirror a flat client change into the list, for callers that still use the flat fields."""
     from .downloaders import entry_from_dict
 
     current = {c.get("id"): c for c in (s.clients or []) if isinstance(c, dict)}
@@ -351,6 +381,11 @@ def validate_clients(value) -> list:
     """A list of client records, ids unique, types ones we can actually build."""
     from .downloaders import DELIVERY
 
+    if isinstance(value, str):  # the settings form posts hidden inputs as text
+        try:
+            value = json.loads(value or "[]")
+        except ValueError:
+            raise ValueError("clients has to be a list of download clients")
     if not isinstance(value, list):
         raise ValueError("clients has to be a list of download clients")
     out, seen = [], set()
