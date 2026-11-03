@@ -1,0 +1,42 @@
+name: Announce release
+
+# Posts each release to #announcements in the Discord once, when it's published.
+# (A plain GitHub webhook can't pick which release events it sends, so it posted for created,
+# released and published.) The Discord webhook URL lives in the DISCORD_RELEASE_WEBHOOK secret.
+
+on:
+  release:
+    types: [published]
+
+permissions: {}
+
+jobs:
+  discord:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post to Discord
+        env:
+          WEBHOOK: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
+        run: |
+          if [ -z "$WEBHOOK" ]; then
+            echo "::warning::DISCORD_RELEASE_WEBHOOK isn't set, so nothing was posted"
+            exit 0
+          fi
+          # The release text is read straight from the event file by jq, never pasted into the shell.
+          jq '.release as $r
+            | ($r.body // "" | gsub("\r"; "")) as $body
+            | {
+                username: "Narratarr",
+                allowed_mentions: { parse: [] },
+                embeds: [{
+                  title: ($r.name // $r.tag_name),
+                  url: $r.html_url,
+                  color: 16169058,
+                  description: (if ($body | length) > 3800
+                    then ($body[:3800] + "…\n\n[Read the full notes](" + $r.html_url + ")")
+                    else $body end),
+                  footer: { text: ("docker pull ghcr.io/narratarr/narratarr:" + ($r.tag_name | ltrimstr("v"))) },
+                  timestamp: $r.published_at
+                }]
+              }' "$GITHUB_EVENT_PATH" > payload.json
+          curl --fail-with-body -sS -H "Content-Type: application/json" --data @payload.json "$WEBHOOK"
