@@ -328,23 +328,10 @@ def test_a_bare_list_is_read_as_the_current_version(routed):
 # the whole rule list on every save, so the endpoints are where a reorder or a removed client has to
 # behave.
 
-@pytest.fixture
-def api_client(isolated_data, monkeypatch):
-    from fastapi.testclient import TestClient
-
-    from narratarr import api
-
-    return TestClient(api.app)
-
-
-def test_the_ui_can_reorder_and_the_answer_follows(client_routes=None):
+def test_the_ui_can_reorder_and_the_answer_follows(accounts):
     """Saving the rules in a different order changes which client a release goes to. This is the
     whole precedence model, and it is the only test that proves the order survives a round trip."""
-    from fastapi.testclient import TestClient
-
-    from narratarr import api
-
-    c = TestClient(api.app)
+    c = accounts
     c.put("/api/settings", json={"clients": TWO_CLIENTS + [{"id": "transmission", "type": "transmission",
                                                            "url": "http://t:9091"}],
                                  "default_client": "qbit"})
@@ -363,13 +350,9 @@ def test_the_ui_can_reorder_and_the_answer_follows(client_routes=None):
     assert (got["client"], got["rule"]) == ("qbit", 0), "the swabbed rule that matches first is now rule 1"
 
 
-def test_a_rule_with_an_empty_indexer_list_does_not_restrict():
+def test_a_rule_with_an_empty_indexer_list_does_not_restrict(accounts):
     """A category-only rule covers every indexer, which is how one rule replaces five."""
-    from fastapi.testclient import TestClient
-
-    from narratarr import api
-
-    c = TestClient(api.app)
+    c = accounts
     c.put("/api/settings", json={"clients": TWO_CLIENTS, "default_client": "qbit"})
     rules = {"version": 1, "rules": [{"match": {"indexers": [], "categories": ["ebooks"]}, "client": "deluge"}]}
     assert c.put("/api/settings", json={"client_routes": rules}).status_code == 200
@@ -380,12 +363,8 @@ def test_a_rule_with_an_empty_indexer_list_does_not_restrict():
     assert c.post("/api/routing/test", json={"indexer": "The Pirate Bay", "kind": "audiobook"}).json()["client"] == "qbit"
 
 
-def test_a_removed_client_is_not_selectable_and_shows_up_as_a_broken_rule():
-    from fastapi.testclient import TestClient
-
-    from narratarr import api
-
-    c = TestClient(api.app)
+def test_a_removed_client_is_not_selectable_and_shows_up_as_a_broken_rule(accounts):
+    c = accounts
     c.put("/api/settings", json={"clients": TWO_CLIENTS, "default_client": "qbit"})
     c.put("/api/settings", json={"client_routes": {"version": 1, "rules": [
         {"match": {"indexers": ["The Pirate Bay"]}, "client": "deluge"}]}})
@@ -404,12 +383,8 @@ def test_a_removed_client_is_not_selectable_and_shows_up_as_a_broken_rule():
     assert got["client"] == "qbit" and got["problems"]
 
 
-def test_the_test_button_reports_an_unsaved_entry_without_saving_it():
-    from fastapi.testclient import TestClient
-
-    from narratarr import api
-
-    c = TestClient(api.app)
+def test_the_test_button_reports_an_unsaved_entry_without_saving_it(accounts):
+    c = accounts
     c.put("/api/settings", json={"clients": [{"id": "qbit", "type": "qbittorrent", "url": "http://qbit:8080"}]})
     r = c.post("/api/settings/test-download-client",
                json={"entry": {"id": "temp", "type": "deluge", "url": "http://deluge:8112", "password": "pw"}})
@@ -418,13 +393,9 @@ def test_the_test_button_reports_an_unsaved_entry_without_saving_it():
     assert c.post("/api/settings/test-download-client", json={"entry": {"id": "x", "type": "nope"}}).status_code == 400
 
 
-def test_the_json_the_settings_form_posts_is_accepted_as_text():
+def test_the_json_the_settings_form_posts_is_accepted_as_text(accounts):
     """The form posts hidden inputs as text, so the endpoints have to parse them."""
-    from fastapi.testclient import TestClient
-
-    from narratarr import api
-
-    c = TestClient(api.app)
+    c = accounts
     r = c.put("/api/settings", json={"clients": json.dumps([{"id": "qbit", "type": "qbittorrent",
                                                             "url": "http://qbit:8080"}]),
                                      "client_routes": json.dumps({"version": 1, "rules": []})})

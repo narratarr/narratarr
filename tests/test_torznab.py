@@ -188,27 +188,6 @@ async def test_pipeline_fetches_the_torrent_through_the_right_source(isolated_da
 
 # ---- the accounts model -------------------------------------------------------------------
 
-HOME = ("192.168.1.20", 50000)
-
-
-@pytest.fixture
-def accounts(monkeypatch):
-    """A real admin and a real listener, signed in through the actual middleware."""
-    from fastapi.testclient import TestClient
-    from narratarr import api, auth, users
-
-    auth._failures.clear()
-    monkeypatch.setattr(users, "_N", 2**10)  # fast hashing in tests
-    c = TestClient(api.app, client=HOME)
-    c.__enter__()
-    c.app.state.worker.poke = lambda: None
-    assert c.post("/api/auth/setup", json={"username": "admin", "password": "admin-pass"}).status_code == 200
-    made = c.post("/api/users", json={"username": "listener", "password": "listen-pass", "role": "listener"})
-    assert made.status_code == 200, made.text
-    yield c
-    c.__exit__(None, None, None)
-
-
 def as_role(client, username, password):
     assert client.post("/api/auth/login", json={"username": username, "password": password}).status_code == 200
     return client
