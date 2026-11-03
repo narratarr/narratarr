@@ -282,17 +282,17 @@ img { display: block; }
 .card .author { color: var(--text-2); font-size: 13.5px; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .card .facts { display: flex; gap: 6px; margin-top: 8px; color: var(--text-3); font-size: 12px; font-weight: 500; flex-wrap: nowrap; overflow: hidden; min-height: 1.25em; }
 .card .facts span + span::before { content: "·"; margin-right: 6px; }
-.card .bm-slot { display: flex; align-items: center; min-height: 26px; margin-top: 9px; }
-.bm-rating {
+.card .rating-slot { display: flex; align-items: center; min-height: 26px; margin-top: 9px; }
+.rating-pill {
   display: inline-flex; align-items: baseline; gap: 6px;
   padding: 4px 9px; border-radius: 999px; max-width: 100%;
   background: var(--surface-2); border: 1px solid var(--border);
   font-size: 12px; line-height: 1; color: var(--text-2); text-decoration: none;
 }
-.bm-rating:hover { background: var(--surface-3); border-color: var(--border-strong); }
-.bm-rating .bm-score { font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; }
-.bm-rating .bm-cons { font-weight: 500; color: var(--text); }
-.bm-rating.empty {
+.rating-pill:hover { background: var(--surface-3); border-color: var(--border-strong); }
+.rating-pill .rating-score { font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; }
+.rating-pill .rating-mark { font-weight: 500; color: var(--text); }
+.rating-pill.empty {
   padding: 0; background: none; border: 0;
   color: var(--text-3); font-style: italic;
 }

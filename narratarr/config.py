@@ -81,7 +81,9 @@ class Settings:
     auto_search_hours: int = 12
     audible_region: str = "us"
     check_updates: bool = True  # one request a day to GitHub's releases API
-    ratings_provider: str = "audnex"  # "audnex", "bookmarks", "goodreads" (unofficial), "" for none
+    # On by default, and on for an existing settings file that predates the key: `load()` starts
+    # from the dataclass defaults and only overwrites keys it finds, so an absent key means True.
+    ratings_enabled: bool = True
     # Audible storefronts Audnex serves, in the order they are tried. `br` is not here: the API
     # rejects it as an unsupported code, and a code that can only fail should not be offered.
     audnex_regions: list[str] = field(default_factory=lambda: ["uk"])
@@ -123,7 +125,6 @@ CHOICES = {
     "usenet_client": ("sabnzbd", "nzbget"),
     "torrent_client": ("realdebrid", "alldebrid", "torbox", "premiumize", "qbittorrent", "transmission", "deluge"),
     "audible_region": ("us", "uk", "ca", "au", "in", "de", "fr", "it", "es", "jp"),
-    "ratings_provider": ("audnex", "bookmarks", "goodreads", ""),
 }
 # Each service's secrets. Changing the service's address to a different host clears them, so a
 # saved key can never be sent to a machine the user didn't enter it for.

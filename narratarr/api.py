@@ -57,7 +57,8 @@ async def lifespan(app: FastAPI):
     app.state.worker = worker
     app.state.tasks = set()
     worker.start()
-    ratings.start_filler()
+    if config.load().ratings_enabled:
+        ratings.start_filler()  # nothing is ever queued with the feature off
     yield
     await worker.stop()
 

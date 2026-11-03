@@ -307,20 +307,22 @@ Narratarr searches category `3030` (*Audio › Audiobook*) for audiobooks and `7
 
 ### Ratings on the cards
 
-Discover can show a star score for each book. It comes from one of three providers, set in
-**Settings → Rating metadata**: Audnex (Audible's own average), Bookmarks, or Goodreads (off by
-default, and unofficial — their terms forbid extracting listings, so it is your call).
+Discover can show a star score on each book, taken from the average Audible publishes for the
+audiobook edition. It is **on by default** and switched off in **Settings → Rating metadata**;
+switched off, no requests are made at all and no pill is shown.
 
-A score is only shown when the book we found is the book we asked for: the title must match
-exactly and the surname must match. A near miss leaves the card reading **No Rating**. A wrong
-score is worse than a blank one.
+A score appears only when the book we found is the book we asked for: the title must match exactly
+after normalising, and the surname must match too. A near miss leaves the card reading **No Rating**,
+and a book that exists but has no ratings yet reads **No Rating Available**. A wrong score is worse
+than a blank one, so the gate is strict rather than fuzzy.
 
-Audible sells different titles in different countries, and Audnex only answers for the storefront
-that carries the book, so the settings take an **ordered list** of storefronts. They are tried in
-turn and the first that has the book wins; that choice is remembered for the book. Each row has a
-**Test** button that asks that storefront about a known title and tells you whether it answers, so
-you can see which regions work for you instead of guessing from blank cards. More regions means
-more coverage and more requests.
+Audible sells different titles in different countries and the ratings service only answers from a
+storefront that carries the book, so the settings take an ordered list of them, with a **Test**
+button per row. The storefront that answered is remembered for that book, and the book's own home
+marketplace is tried as well, so a single `uk` entry is enough for most titles.
+
+Full details, including what is cached and for how long, how to fill a whole library before
+browsing, and what the feature cannot do: **[docs/ratings.md](docs/ratings.md)**.
 
 ### Wanted books and following authors
 

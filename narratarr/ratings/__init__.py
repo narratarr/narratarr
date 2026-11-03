@@ -23,13 +23,6 @@ from .store import Store
 
 log = logging.getLogger("narratarr.ratings")
 
-# The vote floor has to match what each source's number actually counts. Goodreads publishes
-# reader votes, in the millions, so a book with twelve of them is noise. Bookmarks publishes critic
-# reviews, single digits by design, so the same floor would blank every entry it has and the
-# provider would look broken while being correct. One map, one place to add the next provider.
-MIN_COUNT_BY_SOURCE = {"goodreads": MIN_COUNT, "bookmarks": 3}
-MIN_COUNT_DEFAULT = 3
-
 PRIOR_SCORE = 3.9       # the average a new book is treated as having, so few votes pull toward it
 PRIOR_WEIGHT = 1000     # how many real votes the prior is worth
 UNKNOWN_COUNT_WEIGHT = 100  # what a rating with no count is worth: real, but weak evidence
@@ -44,7 +37,7 @@ class Rating:
     scale: float = 5.0
     source: str = ""
     url: str = ""
-    label: str = ""            # what the second part of the pill says, e.g. "5.0M" or a consensus
+    label: str = ""            # the source mark beside the score, e.g. "Audible"
     tooltip: str = ""          # the full sentence, for the title attribute
     extra: dict = field(default_factory=dict)
 
@@ -66,9 +59,8 @@ class Rating:
     def to_dict(self) -> dict:
         return {
             "score": round(float(self.score), 2),
-            # Goodreads averages are quoted to two places ("4.30"); Bookmarks' R to one ("3.9").
-            "score_text": f"★ {float(self.score):.2f}" if self.source == "goodreads"
-            else f"★ {float(self.score):.1f}",
+            # Audible publishes one decimal ("4.9"); quoting two would invent precision.
+            "score_text": f"★ {float(self.score):.1f}",
             "count": self.count,
             "scale": self.scale,
             "source": self.source,
@@ -97,11 +89,6 @@ def compact_count(n: int | None) -> str:
 # ---- providers ----------------------------------------------------------------------------
 
 
-def available() -> dict[str, str]:
-    """Provider keys the user can pick in Settings."""
-    return {"audnex": "Audible", "bookmarks": "Bookmarks", "goodreads": "Goodreads (unofficial)"}
-
-
 def make_rating(score, count, url: str, source: str, label: str = "", tooltip: str = "",
                 extra: dict | None = None) -> Rating | None:
     """The one place a score becomes a rating, and the one place the vote floor is applied.
@@ -119,10 +106,9 @@ def make_rating(score, count, url: str, source: str, label: str = "", tooltip: s
             count = int(count)
         except (TypeError, ValueError):
             count = None
-    floor = MIN_COUNT_BY_SOURCE.get(source, MIN_COUNT_DEFAULT)
-    if count is not None and count < floor:
+    if count is not None and count < MIN_COUNT:
         return None
-    source_label = {"goodreads": "Goodreads", "bookmarks": "Bookmarks"}.get(source, source)
+    source_label = {"audnex": "Audible"}.get(source, source)
     if tooltip:
         pass
     elif count is None:
@@ -132,7 +118,7 @@ def make_rating(score, count, url: str, source: str, label: str = "", tooltip: s
     return Rating(
         score=float(score),
         count=count,
-        scale=5.0 if source != "bookmarks" else 4.0,
+        scale=5.0,
         source=source,
         url=url or "",
         label=label or compact_count(count),
@@ -142,25 +128,19 @@ def make_rating(score, count, url: str, source: str, label: str = "", tooltip: s
 
 
 def provider(settings=None):
-    """The provider the instance is set to, or None when ratings are off."""
+    """The provider, or None when ratings are switched off.
+
+    One provider ships, so there is nothing to choose between: the setting is on or off. Off means
+    no object, no queue and no request, which is the point of the switch rather than a blank card.
+    """
     from .. import config
 
     s = settings if settings is not None else config.load()
-    name = getattr(s, "ratings_provider", "") or ""
-    store = get_store(s)
-    if name == "bookmarks":
-        from .bookmarks_provider import BookmarksProvider
+    if not getattr(s, "ratings_enabled", True):
+        return None
+    from .audnex import AudnexProvider
 
-        return BookmarksProvider(store)
-    if name == "audnex":
-        from .audnex import AudnexProvider
-
-        return AudnexProvider(store)
-    if name == "goodreads":
-        from .goodreads import GoodreadsProvider
-
-        return GoodreadsProvider(store)
-    return None
+    return AudnexProvider(get_store(s))
 
 
 _store = None
@@ -197,6 +177,9 @@ def enrich(item: dict, provider_obj=None, settings=None) -> dict:
     item["rating_state"] = "none"
     p = provider_obj if provider_obj is not None else provider(settings)
     if p is None:
+        # Switched off: the feature is absent, so the card says nothing at all. That is not the
+        # same as "unrated", and the UI must be able to tell the two apart.
+        item["rating_state"] = "off"
         return item
     title = clean_query_title(item.get("title") or "", item.get("source") or "")
     try:

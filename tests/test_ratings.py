@@ -1,7 +1,7 @@
-"""Ratings: the parser, the resolver's order of preference, the cache, and the weighting.
+"""Ratings: matching, the cache, region sweeps, what a card shows, and the settings toggle.
 
-No test here touches the network: every provider and resolver is handed a MockTransport, and the
-rate limiter is given a zero gap so the suite does not sleep for a second a book.
+No test here touches the network: every request goes through a MockTransport, and the rate limiter
+is given a zero gap so the suite does not sleep for a second a book.
 """
 
 import asyncio
@@ -14,31 +14,18 @@ import pytest
 from narratarr import config
 from narratarr.ratings import audnex as audnex_module
 from narratarr.ratings import Rating, compact_count, enrich, make_rating, provider, sort_items
-from narratarr.ratings import bookmarks_provider
 from narratarr.ratings.audnex import (
     AudnexProvider,
     RegionUnavailable,
     audible_url,
     parse_score,
 )
-from narratarr.ratings.bookmarks_provider import BookmarksProvider
-from narratarr.ratings.goodreads import GoodreadsProvider, book_id, parse_book
 from narratarr.ratings.match import MIN_COUNT, clean_query_title, normalise, strict_match, title_matches
-from narratarr.ratings.resolver import Resolver
 from narratarr.config import parse_regions
 from narratarr.ratings.store import Store, key_for
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
-BOOK_HTML = """<!doctype html><html><head>
-<script type="application/ld+json">{"@type":"BreadcrumbList","itemListElement":[]}</script>
-<script type="application/ld+json">
-{"@context":"https://schema.org","@type":"Book","name":"Project Hail Mary",
- "isbn":"9780593135204",
- "aggregateRating":{"@type":"AggregateRating","ratingValue":"4.30","ratingCount":"5044634"}}
-</script></head><body></body></html>"""
-
-THIN_HTML = BOOK_HTML.replace('"5044634"', '"12"').replace('"4.30"', '"5.0"')
 
 
 @pytest.fixture(autouse=True)
@@ -63,178 +50,6 @@ def client(handler):
 # ---- the JSON-LD parser -------------------------------------------------------------------
 
 
-def test_parser_reads_the_book_block_not_the_first_script():
-    got = parse_book(BOOK_HTML)
-    assert got == {"score": 4.3, "count": 5044634, "name": "Project Hail Mary",
-                   "authors": [], "isbn": "9780593135204"}
-
-
-def test_parser_returns_nothing_for_a_page_without_a_rating():
-    assert parse_book("<html><body>not a book page</body></html>") is None
-    assert parse_book("") is None
-    assert parse_book('<script type="application/ld+json">{"@type":"Book"}</script>') is None
-
-
-def test_book_id_from_a_canonical_url():
-    assert book_id("https://www.goodreads.com/book/show/54493401-project-hail-mary") == "54493401"
-    assert book_id("https://www.goodreads.com/book/isbn/9780593135204") == ""
-
-
-# ---- the resolver's order of preference -----------------------------------------------------
-
-
-def _openlibrary(isbn="9780593135204", title="Project Hail Mary", author="Andy Weir"):
-    return {"docs": [{"title": title, "author_name": [author], "isbn": [isbn, "0593135202"]}]}
-
-
-async def test_resolver_prefers_the_isbn_from_open_library(store):
-    seen = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        seen.append(request.url.host)
-        assert "openlibrary.org" in str(request.url)
-        return httpx.Response(200, json=_openlibrary())
-
-    async with client(handler) as c:
-        hit = await Resolver(store, client=c, gap=0).resolve("Project Hail Mary", "Andy Weir")
-    assert hit["via"] == "openlibrary"
-    assert hit["isbn"] == "9780593135204"
-    assert hit["url"] == "https://www.goodreads.com/book/isbn/9780593135204"
-    assert seen == ["openlibrary.org"]  # one request, no fallbacks
-
-
-async def test_resolver_rejects_a_different_author(store):
-    """Open Library happily returns *a* book for any title; the surname gate is what stops it."""
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        if "openlibrary.org" in str(request.url):
-            return httpx.Response(200, json={"docs": [{"title": "Project Hail Mary",
-                                                       "author_name": ["Someone Else"],
-                                                       "isbn": ["9780000000000"]}]})
-        raise AssertionError(f"unexpected request: {request.url}")
-
-    async with client(handler) as c:
-        hit = await Resolver(store, client=c, gap=0).resolve("Project Hail Mary", "Andy Weir")
-    assert hit is None
-
-
-async def test_a_book_we_have_already_resolved_costs_nothing(store):
-    store.put_resolved(key_for("Project Hail Mary", "Andy Weir"), remote_id="54493401")
-
-    def handler(request: httpx.Request) -> httpx.Response:  # must not be called
-        raise AssertionError(f"resolver went to the network for a cached book: {request.url}")
-
-    async with client(handler) as c:
-        hit = await Resolver(store, client=c, gap=0).resolve("Project Hail Mary", "Andy Weir")
-    assert hit["via"] == "cache"
-    assert hit["url"].endswith("/54493401")
-
-
-async def test_the_local_match_is_a_fallback_not_the_first_answer(store):
-    """A differently-spelled author still asks Open Library first — the local row is the last resort,
-    so a stale entry can never override a real lookup."""
-    store.put_resolved(key_for("Project Hail Mary", "Andy Weir"), remote_id="54493401")
-    tried = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        tried.append("openlibrary")
-        return httpx.Response(200, json={"docs": []})
-
-    async with client(handler) as c:
-        # A different spelling of the title, not of the author: a surname alone is no longer a match.
-        hit = await Resolver(store, client=c, gap=0).resolve("Project Hail Mary (Unabridged)", "Andy Weir")
-    assert tried == ["openlibrary"], "Open Library must be tried before the local row"
-    assert hit["via"] == "local"
-    assert hit["url"].endswith("/54493401")
-
-
-async def test_a_transient_failure_is_not_remembered_as_a_missing_book(store):
-    """A 500 at Open Library must not become a week of "this book has no rating"."""
-    calls = {"n": 0}
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        calls["n"] += 1
-        assert "openlibrary" in str(request.url), request.url
-        return httpx.Response(503)              # the site is having a bad minute
-
-    async with client(handler) as c:
-        r = Resolver(store, client=c, gap=0)
-        assert await r.resolve("Project Hail Mary", "Andy Weir") is None
-        assert store.get_resolved(key_for("Project Hail Mary", "Andy Weir")) is None, \
-            "an unavailable lookup was cached as a dead end"
-        before = calls["n"]
-        assert await r.resolve("Project Hail Mary", "Andy Weir") is None
-    assert calls["n"] > before, "the next search should try again"
-
-
-async def test_a_dead_end_is_remembered_so_it_is_not_retried(store):
-    """A definite "no such book" is worth remembering; otherwise every search re-asks about it."""
-    calls = {"n": 0}
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        calls["n"] += 1
-        assert "openlibrary" in str(request.url), request.url
-        return httpx.Response(200, json={"docs": []})
-
-    async with client(handler) as c:
-        r = Resolver(store, client=c, gap=0)
-        assert await r.resolve("No Such Book", "Nobody") is None
-        first = calls["n"]
-        assert await r.resolve("No Such Book", "Nobody") is None
-    assert calls["n"] == first, "a book that failed resolution was resolved again"
-
-
-# ---- the cache ------------------------------------------------------------------------------
-
-
-async def test_second_lookup_costs_zero_requests(store):
-    def handler(request: httpx.Request) -> httpx.Response:
-        if "openlibrary.org" in str(request.url):
-            return httpx.Response(200, json=_openlibrary())
-        return httpx.Response(200, content=BOOK_HTML)
-
-    async with client(handler) as c:
-        p = GoodreadsProvider(store, client=c, gap=0)
-        first = await p.fetch_and_store("Project Hail Mary", "Andy Weir")
-        assert first.score == 4.3 and first.count == 5044634
-
-        def boom(request):  # any request at all is a failure now
-            raise AssertionError(f"cache miss: {request.url}")
-
-        p2 = GoodreadsProvider(store, client=httpx.AsyncClient(transport=httpx.MockTransport(boom)), gap=0)
-        cached = p2.cached("Project Hail Mary", "Andy Weir")
-    assert cached.score == 4.3
-    assert cached.label == "5.0M"
-    assert cached.tooltip == "4.30 average from 5,044,634 ratings on Goodreads"
-    assert store.count("goodreads") == {"rated": 1}
-
-
-async def test_a_bot_challenge_is_not_recorded_as_a_book_with_no_rating(store):
-    """Goodreads answers 202 with an empty body once it decides you are a robot. If that were cached
-    as "unrated", every book seen during the block would stay blank for a week."""
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        if "openlibrary.org" in str(request.url):
-            return httpx.Response(200, json=_openlibrary())
-        return httpx.Response(202, content=b"")
-
-    async with client(handler) as c:
-        p = GoodreadsProvider(store, client=c, gap=0)
-        assert await p.fetch_and_store("Project Hail Mary", "Andy Weir") is None
-    assert store.count("goodreads") == {}, "a bot challenge must leave the cache untouched"
-
-
-async def test_a_thinly_rated_book_is_not_a_rating(store):
-    def handler(request: httpx.Request) -> httpx.Response:
-        if "openlibrary.org" in str(request.url):
-            return httpx.Response(200, json=_openlibrary())
-        return httpx.Response(200, content=THIN_HTML)
-
-    async with client(handler) as c:
-        p = GoodreadsProvider(store, client=c, gap=0)
-        assert await p.fetch_and_store("Project Hail Mary", "Andy Weir") is None
-    assert store.count("goodreads") == {"unrated": 1}  # remembered, so it is not asked again
-
 
 # ---- display and sorting -------------------------------------------------------------------
 
@@ -249,47 +64,12 @@ def test_compact_count():
 def test_a_dozen_votes_are_refused_and_the_sort_is_the_raw_score():
     """The floor is what stops thin evidence. The sort is the raw score, because the pill prints
     the raw score: anything else shows a column of numbers that does not descend."""
-    assert make_rating(5.0, 12, "u", "goodreads") is None       # under the floor
-    thin_ok = make_rating(5.0, 60, "u", "goodreads").to_dict()
-    solid = make_rating(4.3, 2_000_000, "u", "goodreads").to_dict()
+    assert make_rating(5.0, 12, "u", "audnex") is None       # under the floor
+    thin_ok = make_rating(5.0, 60, "u", "audnex").to_dict()
+    solid = make_rating(4.3, 2_000_000, "u", "audnex").to_dict()
     assert thin_ok["bayes"] < solid["bayes"], "the weight still exists, it just does not order"
     ranked = [i["rating"]["score"] for i in sort_items([{"rating": solid}, {"rating": thin_ok}])]
     assert ranked == [5.0, 4.3]
-
-
-def test_the_vote_floor_is_per_source_not_global():
-    """A Bookmarks count is critic reviews, 7 to 10 in the real dataset. A global floor of 50 would
-    refuse every one of them and the provider would look broken while behaving as designed."""
-    assert make_rating(3.9, 8, "u", "bookmarks") is not None
-    assert make_rating(3.9, 2, "u", "bookmarks") is None          # still refuses a single review
-    assert make_rating(4.3, 8, "u", "goodreads") is None          # a Goodreads 8 is noise
-    assert make_rating(4.3, 8, "u", "somebody-new") is not None   # unknown source: the low default
-
-
-def test_bookmarks_ratings_are_unchanged_by_going_through_the_gate():
-    """Routing it through make_rating must not alter one byte of what the pill shows: same score,
-    same one-decimal text, same consensus label, same tooltip, same R and flags."""
-    from narratarr import bookmarks
-
-    entries = bookmarks._get_entries()
-    assert entries, "the committed dataset should still load"
-    seen = 0
-    for entry in entries:
-        got = bookmarks_provider.BookmarksProvider().cached(entry["title"], entry.get("author", ""))
-        if got is None:
-            continue
-        seen += 1
-        reviews = sum(int(v or 0) for v in (entry.get("flags") or {}).values())
-        consensus = entry.get("consensus", "")
-        assert got.score == float(entry["R"])
-        assert got.scale == 4.0
-        assert got.count == (reviews or None)
-        assert got.label == consensus
-        assert got.tooltip == f"{float(entry['R']):.1f} from {reviews} critics on Bookmarks — {consensus}".strip(" —")
-        assert got.to_dict()["score_text"] == f"★ {float(entry['R']):.1f}"
-        assert got.to_dict()["R"] == float(entry["R"])
-        assert got.to_dict()["flags"] == (entry.get("flags") or {})
-    assert seen == len(entries), "a real Bookmarks entry was refused by the floor"
 
 
 def test_count_less_ratings_order_by_score_among_themselves():
@@ -305,44 +85,24 @@ def test_count_less_ratings_order_by_score_among_themselves():
 def test_sorting_keeps_nulls_last():
     """No weighting: there is no count to weight by, and an invented weight is a made-up number."""
     items = [
-        {"rating": make_rating(4.1, 500, "u", "goodreads").to_dict()},
+        {"rating": make_rating(4.1, 500, "u", "audnex").to_dict()},
         {"rating": None},
-        {"rating": make_rating(4.9, 500, "u", "goodreads").to_dict()},
-        {"rating": make_rating(3.5, 500, "u", "goodreads").to_dict()},
+        {"rating": make_rating(4.9, 500, "u", "audnex").to_dict()},
+        {"rating": make_rating(3.5, 500, "u", "audnex").to_dict()},
     ]
     assert [i["rating"] and i["rating"]["score"] for i in sort_items(items)] == [4.9, 4.1, 3.5, None]
 
 
 def test_score_text_matches_each_provider():
-    assert Rating(4.3, 5044634, source="goodreads").to_dict()["score_text"] == "★ 4.30"
-    assert Rating(3.9, 120, source="bookmarks").to_dict()["score_text"] == "★ 3.9"
+    assert Rating(4.3, None, source="audnex").to_dict()["score_text"] == "★ 4.3"
 
 
-# ---- Bookmarks unchanged -------------------------------------------------------------------
-
-
-def test_bookmarks_still_reads_its_own_dataset(monkeypatch):
-    from narratarr import bookmarks
-
-    monkeypatch.setattr(bookmarks, "_entries", [{
-        "title": "Project Hail Mary", "author": "Andy Weir", "slug": "phm",
-        "url": "https://bookmarks.reviews/reviews/all/phm/",
-        "flags": {"rave": 5, "positive": 2, "mixed": 1, "pan": 0},
-        "consensus": "Rave", "R": 3.8,
-    }])
-    rating = BookmarksProvider().cached("Project Hail Mary", "Andy Weir")
-    assert rating.score == 3.8 and rating.scale == 4.0
-    assert rating.label == "Rave"          # the consensus, as before
-    assert rating.to_dict()["R"] == 3.8    # the old field the UI used to read
-
-
-# ---- the page path -------------------------------------------------------------------------
 
 
 def test_enrich_never_blocks_and_always_sets_the_key(monkeypatch, tmp_path):
     monkeypatch.setattr(config, "DATA_DIR", tmp_path)
     monkeypatch.setattr(config, "_settings", None)
-    config.update({"ratings_provider": "audnex"})
+    config.update({"ratings_enabled": True})
     called = {"n": 0}
     monkeypatch.setattr("narratarr.ratings._enqueue",
                         lambda t, a, asin="": called.__setitem__("n", called["n"] + 1))
@@ -378,9 +138,9 @@ def test_near_titles_and_series_neighbours_are_refused():
 # ---- the floor lives in one place -----------------------------------------------------------
 
 def test_the_vote_floor_is_applied_once():
-    assert make_rating(5.0, 12, "u", "goodreads") is None, "12 ratings is noise"
-    assert make_rating(3.2, MIN_COUNT, "u", "goodreads") is not None
-    assert make_rating(None, 5000, "u", "goodreads") is None, "no score is not a zero score"
+    assert make_rating(5.0, 12, "u", "audnex") is None, "12 ratings is noise"
+    assert make_rating(3.2, MIN_COUNT, "u", "audnex") is not None
+    assert make_rating(None, 5000, "u", "audnex") is None, "no score is not a zero score"
 
 
 def test_a_rating_with_no_count_is_expressible():
@@ -395,83 +155,9 @@ def test_a_rating_with_no_count_is_expressible():
     assert d["tooltip"] == "4.9 average on Audible (ASIN B08GB2RLKM)"
 
 
-# ---- Bookmarks unchanged -------------------------------------------------------------------
 
 
-def test_bookmarks_still_reads_its_own_dataset(monkeypatch):
-    from narratarr import bookmarks
-
-    monkeypatch.setattr(bookmarks, "_entries", [{
-        "title": "Project Hail Mary", "author": "Andy Weir", "slug": "phm",
-        "url": "https://bookmarks.reviews/reviews/all/phm/",
-        "flags": {"rave": 5, "positive": 2, "mixed": 1, "pan": 0},
-        "consensus": "Rave", "R": 3.8,
-    }])
-    rating = BookmarksProvider().cached("Project Hail Mary", "Andy Weir")
-    assert rating.score == 3.8 and rating.scale == 4.0
-    assert rating.label == "Rave"          # the consensus, as before
-    assert rating.to_dict()["R"] == 3.8    # the old field the UI used to read
-
-
-# ---- the page path -------------------------------------------------------------------------
-
-
-def test_enrich_never_blocks_and_always_sets_the_key(monkeypatch, tmp_path):
-    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
-    monkeypatch.setattr(config, "_settings", None)
-    config.update({"ratings_provider": "audnex"})
-    called = {"n": 0}
-    monkeypatch.setattr("narratarr.ratings._enqueue",
-                        lambda t, a, asin="": called.__setitem__("n", called["n"] + 1))
-
-    item = enrich({"title": "Unknown Book", "author": "Nobody"})
-    assert item["rating"] is None
-    assert called["n"] == 1, "a miss should be queued for the background filler"
-
-
-# ---- the strict gate: one place, every refusal ---------------------------------------------
-
-def test_near_titles_and_series_neighbours_are_refused():
-    """The one test that proves "refuse rather than guess". Each line is a way to be plausibly wrong."""
-    # exact, and exact through cosmetic differences
-    assert strict_match("Catch 22", "Joseph Heller", "Catch-22", ["Joseph Heller"])
-    assert strict_match("Devil's Fjord", "David Hewson", "Devil&apos;s Fjord", ["David Hewson"])
-    assert strict_match("Etna", "Paul Yoon", "Etna: A Novel", ["Paul Yoon"])  # subtitle without a digit
-    assert strict_match("Project Hail Mary", "Weir, Andy", "Project Hail Mary", ["Andy Weir"]), \
-        "an inverted author name is the same author"
-
-    # a different book
-    assert not strict_match("Etna", "Paul Yoon", "Etna Rising", ["Paul Yoon"]), "near title"
-    assert not strict_match("Etna", "Paul Yoon", "Etna (Book 2)", ["Paul Yoon"]), "series neighbour"
-    assert not strict_match("Etna", "Paul Yoon", "Etna (The Etna Saga, #1)", ["Paul Yoon"]), "series suffix"
-    assert not strict_match("Dune", "Frank Herbert", "Dune Messiah", ["Frank Herbert"]), "next in series"
-
-    # the right book, the wrong person
-    assert not strict_match("Etna", "Paul Yoon", "Etna", ["Yoon"]), "surname only"
-    assert not strict_match("Etna", "Paul Yoon", "Etna", ["Paul Auster"]), "different author"
-    assert not strict_match("Etna", "Paul Yoon", "Etna", []), "no author at all is not a match"
-
-
-# ---- the floor lives in one place -----------------------------------------------------------
-
-def test_the_vote_floor_is_applied_once():
-    assert make_rating(5.0, 12, "u", "goodreads") is None, "12 ratings is noise"
-    assert make_rating(3.2, MIN_COUNT, "u", "goodreads") is not None
-    assert make_rating(None, 5000, "u", "goodreads") is None, "no score is not a zero score"
-
-
-def test_a_rating_with_no_count_is_expressible():
-    """Audnex returns a bare number with no count behind it. The contract has to carry that, and
-    the vote floor must not throw it away: a floor needs a count to apply to."""
-    r = make_rating(4.9, None, "https://api.audnex.us/books/B00TEST", "audnex")
-    assert r is not None and r.score == 4.9 and r.count is None
-    assert r.tooltip == "4.90 average on audnex"          # no invented count
-    d = r.to_dict()
-    assert d["count"] is None and d["label"] == ""        # the pill shows the score alone
-    assert d["display"]
-
-
-AUDNEX_ASIN = "B08GB2RLKM"
+AUDNEX_ASIN = "B08GB2RLKM"   # Project Hail Mary, the book the live fixture came from
 
 
 def audnex_record() -> dict:
@@ -864,6 +550,48 @@ def test_a_stale_unrated_row_stops_claiming_to_know_the_book(store):
 
 def test_the_client_prints_two_different_strings():
     src = (Path(__file__).parent.parent / "narratarr/static/app.js").read_text()
-    line = next(l for l in src.splitlines() if "rating_state" in l and "bm-rating empty" in l)
+    line = next(l for l in src.splitlines() if "rating_state" in l and "rating-pill empty" in l)
     assert '"No Rating Available"' in line, "an unrated-but-known book needs its own words"
     assert ': "No Rating"' in line, "everything else keeps the old ones"
+
+
+# ---- the settings toggle --------------------------------------------------------------------
+
+def test_ratings_are_on_by_default_even_for_an_old_settings_file(tmp_path, monkeypatch):
+    """David's instance predates this key. The default has to apply at read time, not only in a
+    fresh template, or an upgrade silently turns the feature off."""
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(config, "SETTINGS_FILE", tmp_path / "settings.json")
+    monkeypatch.setattr(config, "_settings", None)
+    # a settings file from before the toggle existed, still carrying the retired provider key
+    (tmp_path / "settings.json").write_text('{"library_dir": "/audiobooks", "ratings_provider": "audnex"}')
+    assert config.load().ratings_enabled is True
+    assert provider() is not None
+
+
+def test_switching_it_off_constructs_nothing_and_calls_nothing(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(config, "SETTINGS_FILE", tmp_path / "settings.json")
+    monkeypatch.setattr(config, "_settings", None)
+    config.update({"ratings_enabled": False})
+
+    assert provider() is None, "no provider object at all when the feature is off"
+
+    called = {"n": 0}
+    monkeypatch.setattr("narratarr.ratings._enqueue",
+                        lambda *a, **k: called.__setitem__("n", called["n"] + 1))
+    item = {"title": "Project Hail Mary", "author": "Andy Weir", "source": "audible"}
+    enrich(item)
+    assert item["rating"] is None
+    assert item["rating_state"] == "off", "absent, not unrated"
+    assert called["n"] == 0, "nothing was queued for a fetch"
+
+
+def test_switching_it_back_on_starts_asking_again(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(config, "SETTINGS_FILE", tmp_path / "settings.json")
+    monkeypatch.setattr(config, "_settings", None)
+    config.update({"ratings_enabled": False})
+    assert provider() is None
+    config.update({"ratings_enabled": True})
+    assert provider() is not None

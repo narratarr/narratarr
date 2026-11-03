@@ -346,32 +346,34 @@ function cardHTML(item, lib, i = 0) {
         <div class="title">${esc(item.title)}</div>
         <div class="author">${esc(item.author || (item.indexer ? `via ${item.indexer}` : "Unknown author"))}</div>
         ${facts.length ? `<div class="facts">${facts.map((f) => `<span>${esc(f)}</span>`).join("")}</div>` : ""}
-        ${bmRatingHTML(item)}
+        ${ratingPillHTML(item)}
       </div>
     </article>`;
 }
 
-function bmRatingHTML(item) {
+function ratingPillHTML(item) {
   // `rating` is whatever provider Settings selected. `label` is the small mark beside the score:
-  // "Audible" where there is no count to show, or a consensus line from Bookmarks.
-  const r = item.rating || item.bookmarks_rating;
+  // the source mark beside the score, e.g. "Audible".
+  // Switched off in Settings: no slot, no words. "Absent" is not "unrated".
+  if (item.rating_state === "off") return "";
+  const r = item.rating;
   let inner = "";
   if (r && (r.score_text || r.display)) {
     const score = r.score_text || `★ ${Number(r.R).toFixed(1)}`;
-    const second = r.label || r.consensus || (r.count ? `${r.count}` : "");
+    const second = r.label || (r.count ? `${r.count}` : "");
     const tip = r.tooltip || r.display || "";
-    inner = `<a class="bm-rating" href="${esc(r.url)}" target="_blank" rel="noopener" title="${esc(tip)}">
-        <span class="bm-score">${esc(score)}</span>
-        ${second ? `<span class="bm-cons">${esc(second)}</span>` : ""}
+    inner = `<a class="rating-pill" href="${esc(r.url)}" target="_blank" rel="noopener" title="${esc(tip)}">
+        <span class="rating-score">${esc(score)}</span>
+        ${second ? `<span class="rating-mark">${esc(second)}</span>` : ""}
       </a>`;
   } else {
     // Two different facts, so two different strings. "The source knows this book and nobody has
     // rated it" is information; "we never found it" is not the same thing.
-    inner = `<span class="bm-rating empty">${item.rating_state === "unrated" ? "No Rating Available" : "No Rating"}</span>`;
+    inner = `<span class="rating-pill empty">${item.rating_state === "unrated" ? "No Rating Available" : "No Rating"}</span>`;
   }
   // Always emit the slot so every card reserves the same space and the row
   // sits at the same height whether or not a rating exists.
-  return `<div class="bm-slot">${inner}</div>`;
+  return `<div class="rating-slot">${inner}</div>`;
 }
 
 const shortLength = (len) => (len || "").replace(/ hours?/, "h").replace(/ and /, " ").replace(/ minutes?/, "m");
@@ -536,7 +538,7 @@ function Discover(root) {
     <div id="lang-note"></div>
     <div class="grid" id="grid"></div>
     <div class="load-more" id="sentinel"></div>
-    <div class="muted" style="margin-top:18px;font-size:12px;text-align:center">Ratings from Bookmarks, courtesy Lit Hub</div>`;
+  `;
 
   const grid = $("#grid", root);
   const sentinel = $("#sentinel", root);
@@ -578,7 +580,7 @@ function Discover(root) {
     let items = d.items.filter((i) => (!d.lang || i.language === d.lang) && (!d.fmt || i.format.toUpperCase() === d.fmt))
       .filter((i) => d.allLangs || i.lang_ok !== false);
     const by = {
-      rating: (a, b) => { const s = (x) => x.rating?.score ?? x.bookmarks_rating?.R ?? null; const av = s(a), bv = s(b); if (av == null && bv == null) return 0; if (av == null) return 1; if (bv == null) return -1; return bv - av; },
+      rating: (a, b) => { const s = (x) => x.rating?.score ?? null; const av = s(a), bv = s(b); if (av == null && bv == null) return 0; if (av == null) return 1; if (bv == null) return -1; return bv - av; },
       newest: (a, b) => (Date.parse(b.posted) || 0) - (Date.parse(a.posted) || 0),
       largest: (a, b) => sizeOf(b.size) - sizeOf(a.size),
       smallest: (a, b) => sizeOf(a.size) - sizeOf(b.size),
@@ -2344,21 +2346,15 @@ function Settings(root, page) {
       <section class="panel" data-page="search">
         <div class="ph"><h3>Rating metadata</h3><p class="desc">The star pill on every Discover card. Ratings are read from a local cache, never fetched while a page loads: a book with no rating yet is filled in the background and appears on your next search.</p></div>
         <div class="body">
-          <div class="set-row">
-            <label for="ratings_provider"><b>Ratings provider</b><small>A book is only scored when its title and author both match exactly; a near miss shows <b>No Rating</b> rather than the wrong score.</small></label>
-            <select class="select" id="ratings_provider" name="ratings_provider">
-              ${[["audnex", "Audnex (Audible)"], ["bookmarks", "Bookmarks"], ["goodreads", "Goodreads (unofficial)"], ["", "Off"]]
-                .map(([v, l]) => `<option value="${v}" ${(s.ratings_provider ?? "audnex") === v ? "selected" : ""}>${l}</option>`).join("")}
-            </select>
+          <div class="field">
+            <label class="switch"><input type="checkbox" name="ratings_enabled" ${s.ratings_enabled ? "checked" : ""}><i></i>Show ratings on book cards</label>
+            <span class="hint">A star score from Audible’s own average, for any book they sell. Ratings are read from a local cache, never fetched while a page loads, so a new book fills in the background and shows next time. Switching this off removes the pill from every card and makes no network requests at all.</span>
           </div>
           <div class="set-row">
             <label><b>Audible storefronts</b><small>A book is only sold in some countries, and the ratings service only answers from a country that sells it. Narratarr asks your list in order, then the country the book itself came from, so the single United Kingdom entry is enough for most titles. The storefront that answered is remembered for that book. Add more only if the same cards keep showing <b>No Rating</b>: more regions means more coverage and more requests.</small></label>
             <div id="audnex-regions"></div>
             <input type="hidden" name="audnex_regions" value="${esc((s.audnex_regions || ["uk"]).join(","))}" />
             <div><button class="btn" type="button" id="add-region">Add a region</button></div>
-          </div>
-          <div class="set-row">
-            <label><b>Goodreads</b><small>Unofficial: their terms forbid collecting listings with extraction tools, so enabling it is your own call, not something Narratarr recommends.</small></label>
           </div>
         </div>
       </section>

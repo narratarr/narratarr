@@ -2,7 +2,7 @@
 
 Two things are cached, and the distinction matters:
 
-* what a title resolved to (its ISBN and Goodreads id), so a book is never resolved twice;
+* what a title resolved to (the ASIN it matched), so a book is never resolved twice;
 * the rating that came back, so the page renders from disk and never from the network.
 
 A miss is recorded too. Without that, an unmatched book is retried on every search and the
@@ -16,7 +16,7 @@ import threading
 import time
 from pathlib import Path
 
-# A miss is worth retrying eventually — a book can appear on Goodreads later — but not often.
+# A miss is worth retrying eventually — a book can reach Audible later — but not often.
 RETRY_AFTER = 7 * 24 * 3600
 
 
