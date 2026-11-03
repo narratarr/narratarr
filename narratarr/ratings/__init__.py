@@ -224,16 +224,22 @@ def _enqueue(title: str, author: str, asin: str = "") -> None:
 
 async def _drain() -> None:
     """One book at a time, at the provider's own pace. Never started in tests."""
-    p = provider()
     while True:
         title, author, asin = await _queue.get()
         try:
+            p = provider()  # asked each time, so switching ratings off stops the fetching too
             if p is not None:
                 await p.fetch_and_store(title, author, asin)
         except Exception as e:
             log.warning("ratings fetch failed for %r: %s", title, e)
         finally:
             _queue.task_done()
+
+
+def ensure_filler() -> None:
+    """Start the background filler if it isn't running: ratings can be switched on after startup."""
+    if not any(not task.done() for task in _filler):
+        start_filler()
 
 
 def start_filler() -> None:

@@ -595,3 +595,22 @@ def test_switching_it_back_on_starts_asking_again(tmp_path, monkeypatch):
     assert provider() is None
     config.update({"ratings_enabled": True})
     assert provider() is not None
+
+
+async def test_switching_ratings_on_after_startup_starts_the_filler(monkeypatch):
+    """The filler starts at startup only when ratings are on; turned on later, the next search starts it."""
+    import narratarr.ratings as ratings_module
+
+    started = []
+
+    async def fake_drain():
+        started.append(True)
+        await asyncio.sleep(3600)
+
+    monkeypatch.setattr(ratings_module, "_drain", fake_drain)
+    ratings_module.stop_filler()
+    ratings_module.ensure_filler()
+    ratings_module.ensure_filler()  # already running: not started twice
+    await asyncio.sleep(0)
+    assert started == [True]
+    ratings_module.stop_filler()

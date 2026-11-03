@@ -263,9 +263,9 @@ async def discover(q: str = "", category: str = "", page: int = 1, source: str =
         item["library"] = {"id": (b or e)["id"], "status": (b or e)["status"]} if b or e else None
     # Ratings: read from the cache only. Anything missing is filled in the background and shows
     # up on the next search, so a slow ratings provider never holds up a page.
-    from . import ratings
-
     _provider = ratings.provider()
+    if _provider is not None:
+        ratings.ensure_filler()  # switched on since startup: the filler wasn't started then
     for item in data["items"]:
         ratings.enrich(item, provider_obj=_provider)
     if sort == "rating":
