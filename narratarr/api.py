@@ -30,7 +30,7 @@ from . import (apiv1, audible, audiobookshelf, auth, brave, config, db, download
                tokens, updates, users, wanted)
 from .audiobookshelf import Audiobookshelf, AudiobookshelfError
 from .downloaders import ClientError
-from . import alldebrid, languages, notify
+from . import alldebrid, languages, notify, tidy
 from .alldebrid import AllDebrid, AllDebridError
 from . import torbox
 from .premiumize import Premiumize, PremiumizeError
@@ -890,6 +890,69 @@ async def import_books(body: ImportBooks):
 async def import_check_folder():
     """Check the watched import folder right away instead of waiting a minute."""
     return {"queued": await _worker().watch_folder()}
+
+
+# ---- tidy library ---------------------------------------------------------------------------
+
+
+class TidyOptions(BaseModel):
+    prefer: Literal["library", "tags"] = "library"
+    books: list[int] = []
+    tags: bool = False
+    sidecars: bool = False
+
+
+def _busy() -> set[int]:
+    return set(_worker().running)
+
+
+@app.post("/api/tidy/preview")
+async def tidy_preview(body: TidyOptions):
+    """Where every finished book would go under the folder layout in Settings. Moves nothing."""
+    return await asyncio.to_thread(tidy.preview, config.load(), body.prefer, _busy())
+
+
+@app.get("/api/tidy/status")
+async def tidy_status():
+    return await asyncio.to_thread(tidy.JOB.as_dict)
+
+
+@app.post("/api/tidy/apply")
+async def tidy_apply(body: TidyOptions):
+    if tidy.JOB.running:
+        raise HTTPException(409, "Tidying is already under way.")
+    if not body.books:
+        raise HTTPException(400, "Pick at least one book to move.")
+    tidy.JOB = job = tidy.Job(running=True, total=len(body.books))
+    settings = config.load()
+
+    async def run() -> None:
+        try:
+            await asyncio.to_thread(tidy.apply, settings, body.books[:10000], body.prefer, _busy(),
+                                    body.tags, body.sidecars, job)
+            if job.moved:
+                await _worker()._notify_audiobookshelf(settings)
+        except Exception as e:  # never leave the job looking busy forever
+            log.exception("Tidy library failed")
+            job.failed.append({"id": None, "title": "", "error": f"Unexpected error: {e}"})
+        finally:
+            tidy.finished(job)
+
+    _background(run())
+    return job.as_dict()
+
+
+@app.post("/api/tidy/undo")
+async def tidy_undo():
+    if tidy.JOB.running:
+        raise HTTPException(409, "Wait for tidying to finish first.")
+    settings = config.load()
+    result = await asyncio.to_thread(tidy.undo, settings, _busy())
+    if result["back"]:
+        await _worker()._notify_audiobookshelf(settings)
+    tidy.JOB = tidy.Job(undone=result["back"], failed=[{"id": None, "title": f["path"], "error": f["error"]} for f in result["failed"]],
+                        finished_at=time.time())
+    return {**result, "undo": len(db.last_tidy_batch()[1])}
 
 
 # ---- authors and series ----------------------------------------------------------

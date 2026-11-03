@@ -365,7 +365,18 @@ When a book doesn't have one of these, that part is left out along with the word
 | `{author}/{series}/Vol. {series_number} - {title}` | `Frank Herbert/Dune Chronicles/Vol. 1 - Dune` | `Andy Weir/Project Hail Mary` |
 | `{author}/{title} ({year})` | `Frank Herbert/Dune (1965)` | `Andy Weir/Project Hail Mary (2021)` |
 
-Settings has one-click presets for these, including an **Audiobookshelf style** one, `{author}/{series}/Vol {series_number} - {year} - {title} {{narrator}}`, which gives `Frank Herbert/Dune Chronicles/Vol 1 - 1965 - Dune {Scott Brick}`: Audiobookshelf reads the series, volume, year and narrator straight from that name. (Double braces keep a brace in the name; an empty narrator leaves the braces out too.) The second layout above is how Audiobookshelf likes series laid out. Series and year come from the Audible catalog for Wanted books, and from the file's tags (`SERIES`, `SERIES-PART`, the date) for imports. Settings shows a live preview as you type. Changing the layout applies to books downloaded from then on; books already in your library stay where they are.
+Settings has one-click presets for these, including an **Audiobookshelf style** one, `{author}/{series}/Vol {series_number} - {year} - {title} {{narrator}}`, which gives `Frank Herbert/Dune Chronicles/Vol 1 - 1965 - Dune {Scott Brick}`: Audiobookshelf reads the series, volume, year and narrator straight from that name. (Double braces keep a brace in the name; an empty narrator leaves the braces out too.) The second layout above is how Audiobookshelf likes series laid out. Series and year come from the Audible catalog for Wanted books, and from the file's tags (`SERIES`, `SERIES-PART`, the date) for imports. Settings shows a live preview as you type. Changing the layout applies to books downloaded from then on. To move the books already in your library, use Tidy library.
+
+### Tidy library
+
+**Settings → General → Tidy your library → Preview changes** shows, for every finished book, the folder it's in now and the folder your layout puts it in. Nothing moves until you click **Move**, and **Undo** puts the last batch back.
+
+- **Where the names come from.** Either Narratarr's details (from Audible, for matched books) or the audio files' own tags (album, artist, narrator, `SERIES` and `SERIES-PART`, the date), whichever is better for your library.
+- **Moves are renames on the same disk, never copies.** They're instant, and Audiobookshelf recognises each moved folder as the same book, so everyone keeps their listening progress. An ebook inside its audiobook's folder moves with it, and an ebook elsewhere joins its audiobook's new folder. Folders left empty are cleared away.
+- **Books that can't move safely are held back, with the reason.** That includes a folder that's already taken, two books that would share one folder, a folder with another book inside it, a book Narratarr is downloading, and a move that would mean copying to another disk. Books with no author or title are marked **needs a look**, with a button to fix their details, rather than filed under "Unknown Author".
+- **Optional extras.** Add the cover, `desc.txt` and `reader.txt` Audiobookshelf reads, where a folder lacks them. Or write the details into the audio files' tags (MP3, M4B/M4A, FLAC, Ogg, Opus) so every app agrees. Tag writing changes your files, and Undo doesn't change the tags back.
+
+Audiobookshelf rescans once when tidying finishes, if it's connected.
 
 ### Languages
 

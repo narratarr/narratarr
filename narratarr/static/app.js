@@ -1335,6 +1335,241 @@ function openImport(folder = "") {
 }
 
 // ---------------------------------------------------------------------------
+// Tidy library: move the books already there into the folder layout, after a preview
+
+const TIDY_ORIGIN = {
+  audible: "Audible details",
+  import: "Read from the files when imported",
+  download: "From the download",
+  tags: "From the files’ own tags",
+};
+const TIDY_STATES = [
+  ["move", "will move"],
+  ["look", "need a look"],
+  ["held", "held back"],
+  ["tidy", "already tidy"],
+];
+
+// The new path, with the folders that change picked out.
+function tidyPathHTML(to, from) {
+  const was = from.split("/");
+  return to.split("/").map((part, i) => (part === was[i] ? esc(part) : `<b>${esc(part)}</b>`)).join('<i class="sep">/</i>');
+}
+
+function openTidy({ onClose } = {}) {
+  const scrim = $("#modal");
+  const t = { plan: null, prefer: "library", filter: "move", picked: new Set(), timer: 0 };
+  scrim.hidden = false;
+  scrim.innerHTML = `
+    <div class="modal wide tidy" role="dialog" aria-modal="true" aria-labelledby="tidy-title">
+      <button class="btn icon tidy-x" type="button" data-act="cancel" aria-label="Close">${I.x}</button>
+      <h3 id="tidy-title">Tidy your library</h3>
+      <p>Moves the books already in your library into your folder layout. Nothing moves until you say so, and you can undo it afterwards.</p>
+      <div id="tidy-body"><div class="imp-empty"><span class="spinner"></span><p>Working out where everything goes…</p></div></div>
+      <div class="actions" id="tidy-actions"></div>
+    </div>`;
+  const body = $("#tidy-body", scrim);
+  const actions = $("#tidy-actions", scrim);
+
+  const close = () => {
+    clearTimeout(t.timer);
+    scrim.hidden = true;
+    scrim.innerHTML = "";
+    document.removeEventListener("keydown", onKey, true);
+    onClose?.();
+  };
+  const onKey = (e) => { if (e.key === "Escape") { e.stopPropagation(); close(); } };
+  document.addEventListener("keydown", onKey, true);
+
+  const movable = () => t.plan.books.filter((b) => b.state === "move");
+  const joinsOf = (id) => movable().filter((b) => b.joins === id);
+
+  function rowHTML(b) {
+    const can = b.state === "move";
+    const note = b.carries.length ? `<span class="tidy-tag">${I.book} Its ebook comes too</span>`
+      : b.joins && can ? `<span class="tidy-tag">${I.headphones} Joins its audiobook</span>` : "";
+    return `
+      <label class="tidy-row ${b.state}" ${can ? "" : 'data-still'}>
+        ${can ? `<input type="checkbox" data-pick="${b.id}" ${t.picked.has(b.id) ? "checked" : ""}>` : `<span class="tidy-mark">${b.state === "tidy" ? I.check : I.alert}</span>`}
+        <span class="tidy-main">
+          <span class="tidy-name"><b>${esc(b.title)}</b>${b.kind === "ebook" ? `<span class="kind-inline">${I.book}Ebook</span>` : ""}
+            <small>${esc(b.author || "Unknown author")}</small></span>
+          ${b.state === "tidy" ? `<span class="tidy-path now">${esc(b.to)}</span>` : `
+          <span class="tidy-path from">${esc(b.from)}</span>
+          <span class="tidy-path to"><span class="arrow" aria-hidden="true">→</span>${tidyPathHTML(b.to, b.from)}</span>`}
+          <span class="tidy-foot">
+            ${b.reason ? `<span class="tidy-why">${esc(b.reason)}</span>` : ""}
+            ${b.state === "look" ? `<button class="btn ghost sm" type="button" data-fix="${b.id}">${I.pencil} Fix details</button>` : ""}
+            ${note}
+            <span class="tidy-origin">${esc(TIDY_ORIGIN[b.origin] || "")}</span>
+          </span>
+        </span>
+      </label>`;
+  }
+
+  function render() {
+    const p = t.plan;
+    const shown = p.books.filter((b) => b.state === t.filter);
+    const empty = {
+      move: p.counts.tidy ? "Every book is already where your layout puts it." : "Nothing to move.",
+      look: "Every book has an author and a title.",
+      held: "Nothing is held back.",
+      tidy: "No books are in place yet.",
+    }[t.filter];
+    body.innerHTML = `
+      <div class="tidy-layout"><span>Layout</span><code>${esc(p.template)}</code></div>
+      <div class="tidy-stats" role="tablist" aria-label="Show">
+        ${TIDY_STATES.map(([k, label]) => `
+          <button type="button" role="tab" class="tidy-stat ${k} ${t.filter === k ? "on" : ""}" data-filter="${k}" aria-selected="${t.filter === k}">
+            <b>${p.counts[k]}</b><span>${label}</span></button>`).join("")}
+      </div>
+      <div class="imp-mode-row">
+        <div class="segmented" role="radiogroup" aria-label="Name folders from">
+          <button type="button" data-prefer="library" class="${t.prefer === "library" ? "on" : ""}">Narratarr’s details</button>
+          <button type="button" data-prefer="tags" class="${t.prefer === "tags" ? "on" : ""}">The files’ own tags</button>
+        </div>
+        <span class="hint">${t.prefer === "library"
+          ? "The title, author, series and narrator Narratarr shows, which come from Audible for matched books."
+          : "What the audio files’ tags say, where they say it. Handy when the files are tagged better than they were matched."}</span>
+      </div>
+      ${t.filter === "move" && shown.length ? `
+        <div class="imp-head"><b>${p.counts.move} book${p.counts.move === 1 ? "" : "s"} to move</b>
+          <label class="imp-all"><input type="checkbox" id="tidy-all" ${t.picked.size === p.counts.move ? "checked" : ""}> Select all</label></div>` : ""}
+      <div class="imp-list tidy-list">${shown.length ? shown.map(rowHTML).join("") : `<div class="imp-empty">${I.check}<p>${esc(empty)}</p></div>`}</div>
+      ${p.counts.move ? `
+      <div class="tidy-extras">
+        <label class="switch"><input type="checkbox" id="tidy-sidecars" checked><i></i><span><b>Add the cover, description and narrator files</b><small>Only where a folder doesn’t have them. Audiobookshelf reads these.</small></span></label>
+        <label class="switch"><input type="checkbox" id="tidy-tags"><i></i><span><b>Write these details into the audio files’ tags</b><small>Fills in and corrects the album, author, narrator and series, so every app agrees. This changes your audio files, and Undo won’t change the tags back.</small></span></label>
+      </div>` : ""}`;
+    sync();
+  }
+
+  function sync() {
+    const n = t.picked.size;
+    actions.innerHTML = `
+      <button class="btn ghost" type="button" data-act="cancel">Cancel</button>
+      <button class="btn primary" type="button" data-act="apply" ${n ? "" : "disabled"}>${n ? `Move ${n} book${n === 1 ? "" : "s"}` : "Move books"}</button>`;
+  }
+
+  async function load() {
+    try {
+      t.plan = await api("/api/tidy/preview", { method: "POST", body: { prefer: t.prefer } });
+    } catch (e) {
+      body.innerHTML = `<div class="state failed" style="margin-top:16px">${esc(e.message)}</div>`;
+      actions.innerHTML = `<button class="btn ghost" type="button" data-act="cancel">Close</button>`;
+      return;
+    }
+    t.picked = new Set(movable().map((b) => b.id));
+    if (!t.plan.counts.move) t.filter = t.plan.counts.look ? "look" : t.plan.counts.held ? "held" : "move";
+    render();
+  }
+
+  function progress(job) {
+    const pct = job.total ? Math.round((job.done / job.total) * 100) : 0;
+    body.innerHTML = `
+      <div class="tidy-run">
+        <div class="tidy-meter"><i style="width:${pct}%"></i></div>
+        <b>Moving ${Math.min(job.done + 1, job.total)} of ${job.total}</b>
+        <small>${esc(job.current || "Getting ready…")}</small>
+      </div>`;
+    actions.innerHTML = "";
+  }
+
+  function result(job) {
+    const failed = job.failed || [];
+    const abs = state.settings?.audiobookshelf_token && state.settings?.audiobookshelf_url && job.moved ? " Audiobookshelf is rescanning, and keeps everyone’s place in each book." : "";
+    body.innerHTML = `
+      <div class="tidy-done ${job.moved ? "ok" : ""}">
+        <span class="ic">${job.moved ? I.check : I.alert}</span>
+        <div><b>${job.moved ? `Moved ${job.moved} book${job.moved === 1 ? "" : "s"}` : "Nothing moved"}</b>
+          <p>${job.moved ? `Every book is in its new folder, and Narratarr plays and reads them from there.${abs}` : "Have a look at why below."}</p></div>
+      </div>
+      ${failed.length ? `<div class="tidy-fails"><b>${failed.length} stayed where ${failed.length === 1 ? "it was" : "they were"}</b>
+        ${failed.map((f) => `<div><span>${esc(f.title)}</span><small>${esc(f.error)}</small></div>`).join("")}</div>` : ""}
+      ${(job.notes || []).length ? `<div class="tidy-fails notes">${job.notes.map((n) => `<div><small>${esc(n)}</small></div>`).join("")}</div>` : ""}`;
+    actions.innerHTML = `
+      ${job.undo ? `<button class="btn ghost" type="button" data-act="undo">${I.retry} Undo</button>` : ""}
+      <button class="btn primary" type="button" data-act="cancel">Done</button>`;
+  }
+
+  async function poll() {
+    let job;
+    try { job = await api("/api/tidy/status"); } catch { t.timer = setTimeout(poll, 1500); return; }
+    if (job.running) { progress(job); t.timer = setTimeout(poll, 600); return; }
+    result(job);
+    refreshLibrary();
+  }
+
+  scrim.onchange = (e) => {
+    if (e.target.id === "tidy-all") {
+      t.picked = e.target.checked ? new Set(movable().map((b) => b.id)) : new Set();
+      $$("[data-pick]", body).forEach((c) => { c.checked = e.target.checked; });
+    } else if (e.target.dataset.pick) {
+      const id = Number(e.target.dataset.pick);
+      const on = e.target.checked;
+      // The two formats of a book share a folder: an ebook joining its audiobook goes with it.
+      const linked = [id, ...joinsOf(id).map((b) => b.id)];
+      const partner = movable().find((b) => b.id === id)?.joins;
+      if (on && partner && movable().some((b) => b.id === partner)) linked.push(partner);
+      for (const x of linked) {
+        on ? t.picked.add(x) : t.picked.delete(x);
+        const box = $(`[data-pick="${x}"]`, body);
+        if (box) box.checked = on;
+      }
+      const all = $("#tidy-all", body);
+      if (all) all.checked = t.picked.size === t.plan.counts.move;
+    }
+    sync();
+  };
+  scrim.onclick = async (e) => {
+    if (e.target === scrim || e.target.closest('[data-act="cancel"]')) return close();
+    const f = e.target.closest("[data-filter]");
+    if (f) { t.filter = f.dataset.filter; return render(); }
+    const pref = e.target.closest("[data-prefer]");
+    if (pref && pref.dataset.prefer !== t.prefer) {
+      t.prefer = pref.dataset.prefer;
+      body.innerHTML = `<div class="imp-empty"><span class="spinner"></span><p>${t.prefer === "tags" ? "Reading the tags in every book…" : "Working out where everything goes…"}</p></div>`;
+      return load();
+    }
+    const fix = e.target.closest("[data-fix]");
+    if (fix) { e.preventDefault(); close(); return openDrawer({ bookId: Number(fix.dataset.fix) }); }
+    if (e.target.closest('[data-act="apply"]')) {
+      const btn = e.target.closest('[data-act="apply"]');
+      spinBtn(btn, true);
+      try {
+        const job = await api("/api/tidy/apply", { method: "POST", body: {
+          prefer: t.prefer, books: [...t.picked],
+          sidecars: !!$("#tidy-sidecars", body)?.checked, tags: !!$("#tidy-tags", body)?.checked,
+        } });
+        progress(job);
+        poll();
+      } catch (err) {
+        toast(err.message, { kind: "err" });
+        spinBtn(btn, false);
+      }
+      return;
+    }
+    if (e.target.closest('[data-act="undo"]')) {
+      const btn = e.target.closest('[data-act="undo"]');
+      spinBtn(btn, true);
+      try {
+        const r = await api("/api/tidy/undo", { method: "POST" });
+        toast(r.back ? `Put ${r.back} folder${r.back === 1 ? "" : "s"} back where ${r.back === 1 ? "it was" : "they were"}` : "Nothing to put back",
+          { kind: r.failed.length ? "err" : "ok" });
+        refreshLibrary();
+        close();
+      } catch (err) {
+        toast(err.message, { kind: "err" });
+        spinBtn(btn, false);
+      }
+    }
+  };
+
+  // Already under way (opened again mid-move): show its progress instead of a new plan.
+  api("/api/tidy/status").then((job) => (job.running ? (progress(job), poll()) : load())).catch(load);
+}
+
+// ---------------------------------------------------------------------------
 // Authors & series you follow
 
 function portraitHTML(f, cls = "") {
@@ -1933,6 +2168,17 @@ function Settings(root, page) {
             </div>
           </div>
         </div>
+      </section>
+
+      <section class="panel tidy-panel" data-page="general">
+        <div class="ph ph-row">
+          <div><h3>Tidy your library</h3><p class="desc">Move the books already in your library into this layout, using their details from Audible or their own tags. You see every change first, and can undo it.</p></div>
+          <div class="tidy-btns">
+            <button class="btn ghost" type="button" id="tidy-undo" hidden>${I.retry} Undo last tidy</button>
+            <button class="btn primary" type="button" id="tidy-open">Preview changes</button>
+          </div>
+        </div>
+        <div class="body" id="tidy-gate" hidden><span class="hint">${I.alert} Save your library folder and layout first, so the preview uses them.</span></div>
       </section>
 
       <section class="panel" data-page="general">
@@ -2597,7 +2843,32 @@ function Settings(root, page) {
       .filter((k) => JSON.stringify(now[k]) !== JSON.stringify(saved[k])).length;
     $("#save-bar", root).hidden = !n;
     $("#save-count", root).textContent = `${n} unsaved change${n === 1 ? "" : "s"}`;
+    // Tidy uses the saved layout, so it waits until the one on screen is saved.
+    const unsaved = ["library_dir", "folder_template"].some((k) => JSON.stringify(now[k]) !== JSON.stringify(saved[k]));
+    $("#tidy-gate", root).hidden = !unsaved;
+    $("#tidy-open", root).disabled = unsaved;
   }
+  const tidyUndoState = () => api("/api/tidy/status").then((job) => {
+    const btn = $("#tidy-undo", root);
+    if (btn) btn.hidden = !job.undo;
+  }).catch(() => {});
+  $("#tidy-open", root).onclick = () => openTidy({ onClose: tidyUndoState });
+  $("#tidy-undo", root).onclick = async (e) => {
+    const ok = await modal({ title: "Undo the last tidy?", body: "Every folder it moved goes back where it was. Any covers, descriptions and tags it added stay.", confirm: "Undo" });
+    if (!ok) return;
+    spinBtn(e.currentTarget, true);
+    try {
+      const r = await api("/api/tidy/undo", { method: "POST" });
+      toast(r.failed.length ? `Put ${r.back} back. ${r.failed.length} couldn’t move: ${r.failed[0].error}` : `Put ${r.back} folder${r.back === 1 ? "" : "s"} back`,
+        { kind: r.failed.length ? "err" : "ok" });
+      refreshLibrary();
+    } catch (err) {
+      toast(err.message, { kind: "err" });
+    }
+    spinBtn(e.currentTarget, false);
+    tidyUndoState();
+  };
+  tidyUndoState();
   form.addEventListener("input", dirty);
   form.addEventListener("change", dirty);
   $("#discard", root).onclick = () => { state.view = Settings(root, page); };
