@@ -368,12 +368,15 @@ class Worker:
             raise ValueError("Pick a release for this book first: open it and choose Find releases.")
         else:
             settings = config.load()
-            decision = routing.resolve(settings, book["indexer"], wanted.kind_of(book), book["protocol"])
+            # A source that names no indexer per release (AudiobookBay) is routed by its own name, the
+            # same name Discover's chip and the Settings picker use.
+            indexer = book["indexer"] or source.label
+            decision = routing.resolve(settings, indexer, wanted.kind_of(book), book["protocol"])
             chosen = downloaders.entry_from_dict(
                 next((c for c in settings.clients if c.get("id") == decision.client_id), {}) or {}
             )
             # One line, every grab, whether a rule matched or not.
-            log.info("Book %s (%s, kind %s): %s", book["id"], book["indexer"] or "unknown indexer",
+            log.info("Book %s (%s, kind %s): %s", book["id"], indexer or "unknown indexer",
                      wanted.kind_of(book), decision.reason)
             for problem in decision.problems:
                 log.warning("Book %s: %s", book["id"], problem)
@@ -381,6 +384,9 @@ class Worker:
                 raise ValueError(f"A route sent this release to '{decision.client_id}', which does not exist. "
                                  "Fix it under Settings → Downloads → Routing.")
             if chosen is None:
+                if book["protocol"] == "usenet":
+                    raise ValueError("Nothing can take a Usenet release: add SABnzbd or NZBGet under "
+                                     "Settings → Downloads.")
                 raise ValueError("Add a download client in Settings before grabbing anything.")
 
             if chosen.delivery == "usenet":

@@ -125,6 +125,13 @@ def entries(settings: config.Settings) -> list[ClientEntry]:
     return [e for e in (entry_from_dict(r) for r in (settings.clients or [])) if e]
 
 
+def entry_for_job(settings: config.Settings, name: str) -> ClientEntry | None:
+    """The client a book's job was sent to. Books record the entry's id; ones from before the list
+    recorded the client type, which is also the id the migration gives each entry."""
+    listed = entries(settings)
+    return next((e for e in listed if e.id == name), None) or next((e for e in listed if e.type == name), None)
+
+
 def client_for(entry: ClientEntry, transport: httpx.AsyncBaseTransport | None = None):
     """The client object behind an entry."""
     if entry.type == "sabnzbd":

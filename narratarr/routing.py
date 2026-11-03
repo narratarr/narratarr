@@ -87,7 +87,11 @@ def resolve(settings: config.Settings, indexer: str, kind: str, protocol: str = 
     """
     from .downloaders import entries
 
-    known = {e.id for e in entries(settings)}
+    listed = entries(settings)
+    known = {e.id for e in listed}
+    delivery = {e.id: e.delivery for e in listed}
+    label = {e.id: e.label for e in listed}
+    proto = protocol or "torrent"  # a release with no protocol recorded is a torrent
     decision = Decision()
 
     for i, rule in enumerate(routes(settings)):
@@ -99,6 +103,14 @@ def resolve(settings: config.Settings, indexer: str, kind: str, protocol: str = 
             continue
         if not matches(rule, indexer, kind):
             continue
+        if delivery.get(client_id) != proto:
+            # A category rule ("audiobooks -> Deluge") matches Usenet releases too, and Deluge can't
+            # take an NZB. Skip it for this release rather than hand a client something it can't use.
+            decision.problems.append(
+                f"Rule {i + 1} matched, but {label.get(client_id, client_id)} can't take a "
+                f"{'Usenet' if proto == 'usenet' else 'torrent'} release, so it was skipped."
+            )
+            continue
         decision.client_id = client_id
         decision.label = str(rule.get("label") or "")
         decision.save_path = str(rule.get("save_path") or "")
@@ -107,20 +119,39 @@ def resolve(settings: config.Settings, indexer: str, kind: str, protocol: str = 
                            f"-> {client_id or 'default client'}")
         return decision
 
-    # Nothing matched: fall through, which is what every grab did before routing existed. That means
-    # the client the flat setting names for this protocol, so an install with SABnzbd for Usenet and
-    # qBittorrent for torrents keeps sending each release where it always went.
-    proto = protocol or "torrent"  # a release with no protocol recorded is a torrent
-    flat = str(getattr(settings, "usenet_client" if proto == "usenet" else "torrent_client", "") or "")
-    default = flat if flat in known else str(getattr(settings, "default_client", "") or "")
-    if default in known:
-        decision.client_id = default
-    else:
-        of_protocol = [e.id for e in entries(settings) if e.delivery == proto]
-        decision.client_id = of_protocol[0] if of_protocol else default
+    # Nothing matched: fall through, which is what every grab did before routing existed.
+    decision.client_id = default_for(settings, proto)
     decision.reason = (f"no rule matched ({indexer or 'unknown indexer'}, kind {kind or 'any'}) "
                        f"-> default client {decision.client_id or 'none configured'}")
     return decision
+
+
+def default_for(settings: config.Settings, protocol: str) -> str:
+    """The client a release of this protocol goes to when no rule matches, or "" if none can take it.
+
+    Only a client that can take the protocol is a candidate: on an install with just qBittorrent, a
+    Usenet release has nowhere to go, and saying so beats sending an NZB to a torrent client.
+    The flat `torrent_client` / `usenet_client` choice decides first, as it always has (connecting
+    AllDebrid, or `PUT /api/settings {"torrent_client": ...}`, still changes where torrents go). Picking
+    a default in Settings sets that choice too, so the two can't disagree; the chosen entry wins a tie
+    between two clients of the same type.
+    """
+    from .downloaders import entries
+
+    capable = [e for e in entries(settings) if e.delivery == protocol]
+    flat = str(getattr(settings, "usenet_client" if protocol == "usenet" else "torrent_client", "") or "")
+    chosen = str(getattr(settings, "default_client", "") or "")
+    by_id = {e.id: e for e in capable}
+    if chosen in by_id and by_id[chosen].type == flat:
+        return chosen
+    if flat in by_id:
+        return flat
+    same_type = next((e.id for e in capable if e.type == flat), "")
+    if same_type:
+        return same_type
+    if chosen in by_id:
+        return chosen
+    return capable[0].id if capable else ""
 
 
 def _describe(rule: dict) -> str:

@@ -401,3 +401,133 @@ def test_the_json_the_settings_form_posts_is_accepted_as_text(accounts):
                                      "client_routes": json.dumps({"version": 1, "rules": []})})
     assert r.status_code == 200, r.text
     assert [x["id"] for x in config.load().clients] == ["qbit"]
+
+
+# ---- review fixes ---------------------------------------------------------------------------
+
+
+@pytest.mark.real_auth
+def test_a_listener_cannot_see_clients_indexers_or_rules(accounts):
+    """Client addresses, usernames, save paths and the rules are the admin's, like the rest of Settings."""
+    c = accounts
+    assert c.post("/api/auth/login", json={"username": "admin", "password": "admin-pass"}).status_code == 200
+    c.put("/api/settings", json={"clients": TWO_CLIENTS})
+    assert c.get("/api/download-clients").status_code == 200
+    assert c.post("/api/auth/login", json={"username": "listener", "password": "listen-pass"}).status_code == 200
+    for method, path in [("get", "/api/download-clients"), ("get", "/api/indexers"),
+                         ("post", "/api/routing/test"), ("get", "/api/routing/coverage")]:
+        got = getattr(c, method)(path, **({"json": {"indexer": "x"}} if method == "post" else {}))
+        assert got.status_code == 403, (path, got.status_code)
+
+
+def test_a_saved_password_never_follows_the_address_to_another_machine(flat):
+    """The rule the flat settings have always had: moving a client to a different host drops its
+    saved secret unless a new one is typed, so it can't be sent somewhere it wasn't entered for."""
+    flat({})
+    config.update({"clients": [{"id": "qbit", "type": "qbittorrent", "url": "http://nas:8080", "password": "hunter2"}]})
+    masked = config.load().public()["clients"][0]["password"]
+    assert masked.startswith("•")
+
+    config.update({"clients": [{"id": "qbit", "type": "qbittorrent", "url": "http://nas:8080/", "password": masked}]})
+    assert config.load().clients[0]["password"] == "hunter2", "same machine: kept"
+
+    config.update({"clients": [{"id": "qbit", "type": "qbittorrent", "url": "http://elsewhere:8080", "password": masked}]})
+    assert config.load().clients[0]["password"] == "", "different machine: dropped"
+
+    config.update({"clients": [{"id": "qbit", "type": "qbittorrent", "url": "http://elsewhere:8080", "password": "new-one"}]})
+    assert config.load().clients[0]["password"] == "new-one", "a newly typed one is used"
+
+
+def test_the_test_button_fills_a_masked_secret_only_for_the_same_machine(accounts, monkeypatch):
+    seen = []
+
+    class Probe:
+        label = "qBittorrent"
+
+        def __init__(self, entry):
+            seen.append((entry.url, entry.password))
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def version(self):
+            return "v5"
+
+    monkeypatch.setattr(downloaders, "client_for", lambda entry, transport=None: Probe(entry))
+    accounts.put("/api/settings", json={"clients": [{"id": "qbit", "type": "qbittorrent", "url": "http://nas:8080", "password": "hunter2"}]})
+    masked = accounts.get("/api/settings").json()["clients"][0]["password"]
+    for url in ("http://nas:8080", "http://elsewhere:8080"):
+        got = accounts.post("/api/settings/test-download-client",
+                            json={"entry": {"id": "qbit", "type": "qbittorrent", "url": url, "password": masked}})
+        assert got.status_code == 200, got.text
+    assert seen == [("http://nas:8080", "hunter2"), ("http://elsewhere:8080", "")]
+
+
+def test_a_category_rule_never_hands_a_usenet_release_to_a_torrent_client(flat):
+    flat({})
+    s = config.update({"clients": TWO_CLIENTS + [{"id": "sabnzbd", "type": "sabnzbd", "url": "http://sab:8080", "api_key": "k"}],
+                       "client_routes": {"version": 1, "rules": [{"match": {"categories": ["audiobook"]}, "client": "deluge"}]}})
+    torrent = routing.resolve(s, "Anything", "audiobook", "torrent")
+    assert torrent.client_id == "deluge" and torrent.rule == 0
+    usenet = routing.resolve(s, "NZBGeek", "audiobook", "usenet")
+    assert usenet.client_id == "sabnzbd" and usenet.rule is None
+    assert any("can't take a Usenet release" in p for p in usenet.problems)
+
+
+def test_a_usenet_release_with_no_usenet_client_has_nowhere_to_go(flat):
+    flat({})
+    s = config.update({"clients": TWO_CLIENTS, "default_client": "qbit"})
+    assert routing.resolve(s, "NZBGeek", "audiobook", "usenet").client_id == ""
+
+
+def test_picking_a_default_is_picking_the_client_for_its_protocol(flat):
+    flat({})
+    config.update({"clients": TWO_CLIENTS, "default_client": "qbit"})
+    s = config.update({"default_client": "deluge"})
+    assert s.torrent_client == "deluge"
+    assert routing.default_for(s, "torrent") == "deluge"
+    # and the old way round still works: choosing a torrent client by name makes it the default
+    s = config.update({"torrent_client": "qbittorrent"})
+    assert routing.default_for(s, "torrent") == "qbit" and s.default_client == "qbit"
+
+
+def test_a_save_that_repeats_the_default_does_not_undo_a_flat_choice(flat):
+    """The settings form posts default_client on every save; that mustn't undo connecting AllDebrid."""
+    flat({})
+    config.update({"clients": TWO_CLIENTS + [{"id": "alldebrid", "type": "alldebrid", "api_key": "k"}], "default_client": "qbit"})
+    config.update({"ad_api_key": "k2", "torrent_client": "alldebrid"})  # what the AllDebrid code sign-in does
+    s = config.update({"default_client": config.load().default_client, "languages": ""})
+    assert routing.default_for(s, "torrent") == "alldebrid"
+
+
+def test_a_job_is_found_on_its_client_by_id(flat):
+    flat({})
+    s = config.update({"clients": [{"id": "qbittorrent", "type": "qbittorrent", "url": "http://a:1"},
+                                   {"id": "qbittorrent-2", "type": "qbittorrent", "url": "http://b:2"}]})
+    assert downloaders.entry_for_job(s, "qbittorrent-2").url == "http://b:2"
+    assert downloaders.entry_for_job(s, "qbittorrent").url == "http://a:1"
+    assert downloaders.entry_for_job(s, "deluge") is None
+
+
+async def test_an_audiobookbay_grab_is_routed_by_the_source_name(flat, monkeypatch):
+    """AudiobookBay names no indexer on its releases, so a rule on "AudiobookBay" has to fire at grab
+    time, not only in the chip Discover shows."""
+    from narratarr.worker import Worker
+
+    flat({})
+    config.update({"library_dir": str(config.DATA_DIR / "library"), "clients": TWO_CLIENTS,
+                   "client_routes": {"version": 1, "rules": [{"match": {"indexers": ["AudiobookBay"]}, "client": "deluge"}]}})
+    db.init()
+    book = db.insert({"source": "audiobookbay", "source_url": "https://audiobookbay.lu/abss/dune/", "title": "Dune",
+                      "author": "Frank Herbert", "info_hash": "a" * 40, "status": "queued"})
+    picked = []
+
+    async def stop_here(self, book, source, entry, decision):
+        picked.append(entry.id)
+
+    monkeypatch.setattr(Worker, "_process_torrent_client", stop_here)
+    await Worker().process(book["id"])
+    assert picked == ["deluge"]

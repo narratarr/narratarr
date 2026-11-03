@@ -33,14 +33,17 @@ them, but they are part of the settings API and they still take precedence for t
 They go away in a later change that removes them along with the compatibility path that keeps them
 in step with the list.
 
-For the same reason the default is resolved **per protocol** when no rule matches:
+For the same reason the default is resolved **per protocol** when no rule matches. Each client card
+in Settings shows which client is the default for torrents and which for Usenet, and **Make default**
+changes it. Picking a default also sets `torrent_client` or `usenet_client`, so the old setting and the
+list never disagree; choosing a client the old way (connecting AllDebrid with a code, say) makes it the
+default in turn.
 
-1. the client you have set up for this protocol (Usenet or torrent)
-2. then the default client you picked
-3. then the first client that can take this delivery at all
-
-A single flat default would send a torrent to SABnzbd on an install that has both, which is the
-failure this ordering exists to prevent. A release with no protocol recorded is treated as a torrent.
+Only a client that can take the release is ever a candidate. A rule that matches but names a client of
+the other kind, such as an "audiobooks → Deluge" rule meeting a Usenet release, is skipped for that
+release, and the log says so. An install with no Usenet client has nowhere to send a Usenet release,
+and the book fails with a message saying so, rather than an NZB being handed to a torrent client.
+A release with no protocol recorded is treated as a torrent.
 
 ## How matching works
 
@@ -65,6 +68,10 @@ Narratarr files them under the source's own name, `AudiobookBay`, and the picker
 spelling. A rule keyed on `AudiobookBay` therefore matches every AudiobookBay release. What you
 cannot do is key on a specific uploader or tracker inside the site, because there is no such field to
 match.
+
+Torznab works the same way when its feed doesn't name an indexer on each item: those releases are
+filed under `Torznab`, which the picker offers once Torznab is set up. Prowlarr always names the
+indexer, so `Prowlarr` itself is never offered: a rule on it could never fire.
 
 **Some sources are not routable at all**, and deliberately so:
 

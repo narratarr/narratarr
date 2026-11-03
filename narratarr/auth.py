@@ -27,7 +27,8 @@ PROXY_HEADERS = ("x-forwarded-for", "x-real-ip", "forwarded", "cf-connecting-ip"
 # Paths anyone may use. Everything else under /api/ needs a signed-in user.
 OPEN = {"/api/health", "/api/auth/status", "/api/auth/login", "/api/auth/setup"}
 # Paths only admins may use (any method), and admin-only method/path pairs.
-ADMIN_PREFIXES = ("/api/users", "/api/settings/", "/api/audiobookshelf", "/api/import", "/api/updates/apply", "/api/tidy")
+ADMIN_PREFIXES = ("/api/users", "/api/settings/", "/api/audiobookshelf", "/api/import", "/api/updates/apply", "/api/tidy",
+                  "/api/download-clients", "/api/indexers", "/api/routing")
 LOGIN_TRIES = 8  # per address, every LOGIN_WINDOW seconds
 LOGIN_WINDOW = 10 * 60
 

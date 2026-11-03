@@ -2107,30 +2107,6 @@ function settingsStatus(key, users, notifiers) {
 }
 
 // Signing in to a cloud service with a short code: AllDebrid's PIN, TorBox's device code.
-function codeCardHTML(p, name, where, url) {
-  return `<div class="pin-card" id="${p}-pin-card">
-    <div class="pin-start" id="${p}-pin-start">
-      <div><b id="${p}-pin-title"></b><p class="desc" id="${p}-pin-desc"></p></div>
-      <div class="pin-actions">
-        <button class="btn" type="button" data-${p}-test>Test</button>
-        <button class="btn" type="button" id="${p}-pin">Connect ${name}</button>
-      </div>
-    </div>
-    <div class="pin-wait" id="${p}-pin-wait" hidden>
-      <span class="pin-code" id="${p}-pin-code" aria-label="Your code"></span>
-      <div class="pin-steps">
-        <b>Enter this code on ${name}</b>
-        <p class="desc">Open the page below wherever you’re signed in to ${name}, even on your phone. This page carries on by itself once you have.</p>
-        <div class="pin-actions">
-          <a class="btn" id="${p}-pin-link" href="${url}" target="_blank" rel="noopener noreferrer">Open ${where}</a>
-          <button class="btn ghost" type="button" id="${p}-pin-cancel">Cancel</button>
-        </div>
-        <small class="pin-status"><span class="spinner" aria-hidden="true"></span><span id="${p}-pin-left">Waiting for the code…</span></small>
-      </div>
-    </div>
-  </div>`;
-}
-
 function Settings(root, page) {
   const s = state.settings || {};
   const tile = (client, label, where) => {
@@ -2348,33 +2324,21 @@ function Settings(root, page) {
       </section>
 
       <section class="panel" data-page="downloads">
-        <div class="ph"><h3>Clients</h3><p class="desc">What takes your downloads. The order here does not matter; which one gets a release is decided under Routing, and anything with no rule goes to the default.</p></div>
+        <div class="ph"><h3>Download clients</h3><p class="desc">What fetches your books. Real-Debrid, AllDebrid, TorBox and Premiumize fetch torrents for you, so nothing is shared from your computer. qBittorrent, Transmission and Deluge download on your own machine and keep seeding, which shows your IP address to other peers; many people run them behind a VPN. SABnzbd and NZBGet take the Usenet results Prowlarr finds.</p></div>
         <div class="body">
-          <div id="client-list"></div>
-          <div class="row-actions">
-            <button class="btn" type="button" id="add-client">Add a client</button>
-            <span class="hint">A client is tested from its own row, before or after saving.</span>
-          </div>
-          <div class="field">
-            <label for="default_client">Default client</label>
-            <select class="select" id="default_client" name="default_client"></select>
-            <span class="hint">Anything no routing rule matches goes here. A book with a protocol of its own (Usenet or torrent) prefers the client you already use for that protocol, so an upgrade never moves a download.</span>
-          </div>
+          <div id="client-list" class="client-list"></div>
+          <div class="tile-groups client-picker" id="client-picker" hidden></div>
+          <div><button class="btn" type="button" id="add-client">${I.plus}Add a client</button></div>
         </div>
       </section>
 
       <section class="panel" data-page="downloads">
-        <div class="ph"><h3>Routing</h3><p class="desc">Ordered rules: the first one that matches decides the client. Unmatched releases go to the default client, which is what happened before routing existed.</p></div>
+        <div class="ph"><h3>Routing</h3><p class="desc">Send releases from some indexers, or of one kind of book, to a particular client. Rules are checked top to bottom and the first match decides. With no rules, everything goes to the default client.</p></div>
         <div class="body">
           <div id="route-list"></div>
-          <div class="row-actions">
-            <button class="btn" type="button" id="add-route">Add a rule</button>
-            <span class="hint">A rule with no indexer applies to every indexer, which is how a category rule works.</span>
-          </div>
-          <div class="field">
-            <label>Coverage</label>
-            <div id="route-coverage" class="hint"></div>
-          </div>
+          <div id="route-coverage" class="hint"></div>
+          <div><button class="btn" type="button" id="add-route">${I.plus}Add a rule</button>
+            <span class="hint" style="margin-left:10px">A rule with no indexer picked applies to every indexer.</span></div>
         </div>
       </section>
 
@@ -2652,19 +2616,52 @@ function Settings(root, page) {
   const coverageBox = $("#route-coverage", root);
   const TYPE_LABEL = { sabnzbd: "SABnzbd", nzbget: "NZBGet", qbittorrent: "qBittorrent", transmission: "Transmission",
     deluge: "Deluge", realdebrid: "Real-Debrid", alldebrid: "AllDebrid", torbox: "TorBox", premiumize: "Premiumize" };
-  const FIELDS = {  // what each type needs, in the order a person fills it in
-    sabnzbd: [["url", "Address"], ["api_key", "API key"]],
-    nzbget: [["url", "Address"], ["username", "Username"], ["password", "Password"]],
-    qbittorrent: [["url", "Web UI address"], ["username", "Username"], ["password", "Password"]],
-    transmission: [["url", "RPC address"], ["username", "Username"], ["password", "Password"]],
-    deluge: [["url", "Web UI address"], ["password", "Password"]],
-    realdebrid: [["api_key", "API key"]], alldebrid: [["api_key", "API key"]],
-    torbox: [["api_key", "API key"]], premiumize: [["api_key", "API key"]],
+  const GROUPS = [
+    ["In the cloud", [["realdebrid", "Premium account"], ["alldebrid", "Premium account"], ["torbox", "TorBox account"], ["premiumize", "Premium account"]]],
+    ["On this machine", [["qbittorrent", "Seeds from here"], ["transmission", "Seeds from here"], ["deluge", "Seeds from here"]]],
+    ["Usenet", [["sabnzbd", "Usenet"], ["nzbget", "Usenet"]]],
+  ];
+  const WHERE = Object.fromEntries(GROUPS.flatMap(([, list]) => list));
+  const link = (href, text) => `<a href="${href}" target="_blank" rel="noopener" style="color:var(--accent)">${text}</a>`;
+  // What each type needs, in the order a person fills it in: [field, label, placeholder, hint].
+  const FIELDS = {
+    sabnzbd: [["url", "SABnzbd address", "http://localhost:8080"], ["api_key", "API key", "Config → General → API Key"],
+      ["category", "Category", "audiobooks", "Optional. Must already exist in SABnzbd. Leave it empty to use its default."]],
+    nzbget: [["url", "NZBGet address", "http://localhost:6789"], ["username", "Username", "nzbget"], ["password", "Password"],
+      ["category", "Category", "Audiobooks", "The username and password are NZBGet’s ControlUsername and ControlPassword (Settings → Security)."]],
+    qbittorrent: [["url", "qBittorrent Web UI address", "http://localhost:8080"], ["username", "Username"], ["password", "Password"],
+      ["category", "Category", "audiobooks"],
+      ["save_path", "Download folder", "qBittorrent’s default", "Optional. Where qBittorrent saves Narratarr’s books, as qBittorrent sees it, e.g. <code>/data/torrents/books</code>."]],
+    transmission: [["url", "Transmission address", "http://localhost:9091"], ["username", "Username", "If you set one"], ["password", "Password"],
+      ["category", "Label", "", "Optional. Added to every torrent Narratarr sends, so you can filter them in Transmission 3.0 or later."],
+      ["save_path", "Download folder", "Transmission’s default", "Optional. Where Transmission saves Narratarr’s books, as Transmission sees it."]],
+    deluge: [["url", "Deluge Web UI address", "http://localhost:8112"],
+      ["password", "Password", "", "Deluge’s web password (it has no username). Set it under Preferences → Interface → Password."],
+      ["save_path", "Download folder", "Deluge’s default", "Optional. Where Deluge saves Narratarr’s books, as Deluge sees it."]],
+    realdebrid: [["api_key", "Real-Debrid API key", "Paste your private API token", `Find it at ${link("https://real-debrid.com/apitoken", "real-debrid.com/apitoken")}.`]],
+    alldebrid: [["api_key", "AllDebrid API key", "Paste an API key", `Create one at ${link("https://alldebrid.com/apikeys", "alldebrid.com/apikeys")}.`]],
+    torbox: [["api_key", "TorBox API key", "Paste an API key", `Find it in TorBox under ${link("https://torbox.app/settings", "Settings → API key")}.`]],
+    premiumize: [["api_key", "Premiumize API key", "Paste your API key", `Find it at ${link("https://www.premiumize.me/account", "premiumize.me/account")}.`]],
   };
+  const DELETE_AFTER = {
+    realdebrid: ["delete_from_rd_after", "Remove torrents from Real-Debrid after downloading"],
+    alldebrid: ["delete_from_ad_after", "Remove torrents from AllDebrid after downloading"],
+    torbox: ["delete_from_tb_after", "Remove torrents from TorBox after downloading"],
+    premiumize: ["delete_from_pm_after", "Remove torrents and their files from Premiumize after downloading"],
+  };
+  // AllDebrid and TorBox can connect with a short code entered on their site instead of a pasted key.
+  const PIN = {
+    alldebrid: { site: "alldebrid.com", where: "alldebrid.com/pin", start: "/api/settings/alldebrid/pin", check: "/api/settings/alldebrid/pin/check" },
+    torbox: { site: "TorBox", where: "TorBox’s sign-in page", start: "/api/settings/torbox/code", check: "/api/settings/torbox/code/check" },
+  };
+  const deleteAfter = Object.fromEntries(Object.values(DELETE_AFTER).map(([name]) => [name, Boolean(s[name])]));
   let clients = [];
   let routes = [];
   let advertised = [];
   let defaultClient = s.default_client || "";
+  let defaults = { torrent: "", usenet: "" };  // where a release no rule matches goes, per protocol
+  const DELIVERY = { sabnzbd: "usenet", nzbget: "usenet" };
+  const deliveryOf = (c) => DELIVERY[c.type] || "torrent";
 
   const hidden = (name, value) => {
     // Inside the form, not the panel: save() posts FormData(form) and would never see it otherwise.
@@ -2675,197 +2672,344 @@ function Settings(root, page) {
   const sync = () => {
     hidden("clients", JSON.stringify(clients));
     hidden("client_routes", JSON.stringify({ version: 1, rules: routes }));
-    const sel = $("#default_client", root);
-    if (sel) sel.value = defaultClient;
+    hidden("default_client", defaultClient);
     dirty();
+  };
+  const clientName = (c) => esc(TYPE_LABEL[c.type] || c.type) + (c.id === c.type ? "" : ` · ${esc(c.id)}`);
+  const hasKey = (c) => Boolean(c.api_key);
+
+  const fieldHTML = (c, [k, label, placeholder = "", hint = ""]) => `
+    <div class="field">
+      <label>${label}</label>
+      <input class="input mono" data-f="${k}" type="${k === "password" || k === "api_key" ? "password" : "text"}"
+             value="${esc(c[k] || "")}" placeholder="${esc(placeholder)}" autocomplete="off" />
+      ${hint ? `<span class="hint">${hint}</span>` : ""}
+    </div>`;
+
+  const pinHTML = (c) => {
+    const on = hasKey(c);
+    const name = TYPE_LABEL[c.type];
+    return `<div class="pin-card">
+      <div class="pin-start" data-pin-start>
+        <div><b>${on ? `${name} is connected` : "Connect with a code"}</b>
+          <p class="desc">${on ? "Test checks the account. To use a different one, connect again."
+            : `Narratarr shows a short code, you enter it on ${PIN[c.type].site}, and you’re connected. There’s no key to copy, and your password never comes here.`}</p></div>
+        <div class="pin-actions"><button class="btn ${on ? "" : "primary"}" type="button" data-act="pin">${on ? "Connect again" : `Connect ${name}`}</button></div>
+      </div>
+      <div class="pin-wait" data-pin-wait hidden>
+        <span class="pin-code" data-pin-code aria-label="Your code"></span>
+        <div class="pin-steps">
+          <b>Enter this code on ${name}</b>
+          <p class="desc">Open the page below wherever you’re signed in to ${name}, even on your phone. This page carries on by itself once you have.</p>
+          <div class="pin-actions">
+            <a class="btn" data-pin-link href="#" target="_blank" rel="noopener noreferrer">Open ${PIN[c.type].where}</a>
+            <button class="btn ghost" type="button" data-act="pin-cancel">Cancel</button>
+          </div>
+          <small class="pin-status"><span class="spinner" aria-hidden="true"></span><span data-pin-left>Waiting for the code…</span></small>
+        </div>
+      </div>
+    </div>`;
   };
 
   const drawClients = () => {
-    clientBox.innerHTML = clients.length ? clients.map((c, i) => `
-      <fieldset class="client-row" data-i="${i}">
-        <legend>
-          <select class="select" data-f="type" aria-label="Client type">
-            ${Object.entries(TYPE_LABEL).map(([v, l]) => `<option value="${v}" ${c.type === v ? "selected" : ""}>${l}</option>`).join("")}
-          </select>
-        </legend>
-        <div class="grid-2">
-          ${(FIELDS[c.type] || []).map(([k, label]) => `
-            <div class="field">
-              <label>${label}</label>
-              <input class="input mono" data-f="${k}" type="${k === "password" || k === "api_key" ? "password" : "text"}"
-                     value="${esc(c[k] || "")}" placeholder="${k === "url" ? "http://…" : ""}" />
-            </div>`).join("")}
-          <div class="field">
-            <label>Category</label>
-            <input class="input mono" data-f="category" value="${esc(c.category || "")}" placeholder="optional" />
-          </div>
-          <div class="field">
-            <label>Save path</label>
-            <input class="input mono" data-f="save_path" value="${esc(c.save_path || "")}" placeholder="the client's own" />
-          </div>
+    const firstOfType = new Set();
+    clientBox.innerHTML = clients.length ? clients.map((c, i) => {
+      const fields = FIELDS[c.type] || [];
+      const own = fields.filter(([k]) => ["url", "username", "password", "api_key"].includes(k));
+      const extra = fields.filter(([k]) => ["category", "save_path"].includes(k));
+      const del = DELETE_AFTER[c.type] && !firstOfType.has(c.type) ? DELETE_AFTER[c.type] : null;
+      firstOfType.add(c.type);
+      return `
+      <div class="client-card" data-i="${i}">
+        <div class="client-head">
+          <span class="client-name"><b>${clientName(c)}</b>
+            <small>${esc(WHERE[c.type] || "")}</small></span>
+          <span class="client-tools">
+            ${defaults[deliveryOf(c)] === c.id
+              ? `<span class="client-default" title="Releases no routing rule matches go here">${I.check}Default for ${deliveryOf(c) === "usenet" ? "Usenet" : "torrents"}</span>`
+              : clients.filter((x) => deliveryOf(x) === deliveryOf(c)).length > 1 ? `<button class="btn sm ghost" type="button" data-act="default">Make default</button>` : ""}
+            <button class="btn sm" type="button" data-act="test">Test</button>
+            <button class="btn sm ghost icon danger" type="button" data-act="remove" aria-label="Remove ${clientName(c)}">${I.trash}</button>
+          </span>
         </div>
-        <div class="row-actions">
-          <button class="btn" type="button" data-act="test">Test</button>
-          <button class="btn" type="button" data-act="remove">Remove</button>
-          <span class="hint" data-out></span>
-        </div>
-      </fieldset>`).join("") : `<p class="hint">No clients yet. Add the one you already run.</p>`;
-    const sel = $("#default_client", root);
-    if (sel) {
-      sel.innerHTML = clients.map((c) => `<option value="${c.id}">${esc(TYPE_LABEL[c.type] || c.type)}${c.type === c.id ? "" : " · " + esc(c.id)}</option>`).join("");
-      sel.value = clients.some((c) => c.id === defaultClient) ? defaultClient : (clients[0] && clients[0].id) || "";
-      defaultClient = sel.value;
+        ${PIN[c.type] ? pinHTML(c) : ""}
+        ${PIN[c.type] ? `<details class="set-more"${hasKey(c) ? "" : ""}><summary>Use an API key instead</summary>
+            <div class="set-grid">${own.map((f) => fieldHTML(c, f)).join("")}</div></details>`
+          : `<div class="set-grid ${own.length > 2 ? "three" : ""}">${own.map((f) => fieldHTML(c, f)).join("")}</div>`}
+        ${extra.length ? `<div class="set-grid">${extra.map((f) => fieldHTML(c, f)).join("")}</div>` : ""}
+        ${del ? `<label class="switch"><input type="checkbox" name="${del[0]}" ${deleteAfter[del[0]] ? "checked" : ""}><i></i>${del[1]}</label>` : ""}
+        <div data-out></div>
+      </div>`;
+    }).join("") : `<p class="muted client-empty">No download client yet. Add the one you already use.</p>`;
+  };
+  // Until the server says otherwise, a protocol's default is its first client.
+  const fillDefaults = () => {
+    for (const proto of ["torrent", "usenet"]) {
+      const mine = clients.filter((c) => deliveryOf(c) === proto);
+      if (!mine.some((c) => c.id === defaults[proto])) defaults[proto] = mine[0]?.id || "";
     }
   };
 
   const drawRoutes = () => {
-    routeBox.innerHTML = routes.length ? `<table class="table"><thead><tr>
-        <th></th><th>Indexer</th><th>Category</th><th>Client</th><th>Label</th><th>Save path</th><th></th></tr></thead>
-        <tbody>${routes.map((r, i) => `
-        <tr data-i="${i}">
-          <td><button class="btn icon" type="button" data-act="up" ${i === 0 ? "disabled" : ""} aria-label="Move up">↑</button></td>
-          <td><select class="select" data-f="indexers" multiple size="1" aria-label="Indexers this rule matches">
-            ${advertised.map((n) => `<option value="${esc(n)}" ${(r.match.indexers || []).includes(n) ? "selected" : ""}>${esc(n)}</option>`).join("")}
-          </select></td>
-          <td><select class="select" data-f="categories" aria-label="Category">
+    routeBox.innerHTML = routes.map((r, i) => {
+      const named = r.match.indexers || [];
+      // Indexers a rule names that this install no longer advertises still show, so they can be removed.
+      const offer = [...new Set([...advertised, ...named])];
+      return `
+      <div class="route-card" data-i="${i}">
+        <div class="route-head">
+          <b><span class="route-num">${i + 1}</span>${i === 0 ? "Checked first" : `Then rule ${i + 1}`}</b>
+          <span class="client-tools">
+            <button class="btn sm ghost icon" type="button" data-act="up" ${i === 0 ? "disabled" : ""} aria-label="Move rule ${i + 1} up">↑</button>
+            <button class="btn sm ghost icon" type="button" data-act="down" ${i === routes.length - 1 ? "disabled" : ""} aria-label="Move rule ${i + 1} down">↓</button>
+            <button class="btn sm" type="button" data-act="test">Test</button>
+            <button class="btn sm ghost icon danger" type="button" data-act="remove" aria-label="Remove rule ${i + 1}">${I.trash}</button>
+          </span>
+        </div>
+        <div class="field">
+          <label>From</label>
+          <div class="lang-chips" role="group" aria-label="Indexers rule ${i + 1} matches">
+            ${offer.map((n) => `<button type="button" class="fpill ${named.includes(n) ? "on" : ""}" data-ix="${esc(n)}" aria-pressed="${named.includes(n)}">${esc(n)}</button>`).join("")}
+          </div>
+          <span class="hint">${named.length ? "Only releases from these." : "None picked: releases from any indexer."}</span>
+        </div>
+        <div class="set-grid">
+          <div class="field"><label>Kind of book</label><select class="select" data-f="categories">
             ${[["", "Any"], ["audiobook", "Audiobooks"], ["ebook", "Ebooks"]].map(([v, l]) =>
               `<option value="${v}" ${((r.match.categories || [])[0] || "") === v ? "selected" : ""}>${l}</option>`).join("")}
-          </select></td>
-          <td><select class="select" data-f="client" aria-label="Client">
-            ${clients.map((c) => `<option value="${c.id}" ${r.client === c.id ? "selected" : ""}>${esc(TYPE_LABEL[c.type] || c.type)}</option>`).join("")}
-          </select></td>
-          <td><input class="input mono" data-f="label" value="${esc(r.label || "")}" placeholder="the client's own" /></td>
-          <td><input class="input mono" data-f="save_path" value="${esc(r.save_path || "")}" placeholder="the client's own" /></td>
-          <td class="nowrap">
-            <button class="btn" type="button" data-act="test">Test</button>
-            <button class="btn icon" type="button" data-act="down" ${i === routes.length - 1 ? "disabled" : ""} aria-label="Move down">↓</button>
-            <button class="btn icon" type="button" data-act="remove" aria-label="Remove">✕</button>
-          </td>
-        </tr>
-        <tr data-out-row="${i}"><td></td><td colspan="6" class="hint" data-out></td></tr>`).join("")}
-        </tbody></table>` : `<p class="hint">No rules yet: every release goes to the default client, exactly as before.</p>`;
-  };
-
-  const readRow = (el) => {
-    const row = el.closest("[data-i]");
-    const i = Number(row.dataset.i);
-    row.querySelectorAll("[data-f]").forEach((input) => {
-      if (input.multiple) return;
-      const k = input.dataset.f;
-      if (k === "indexers" || k === "categories") return;
-      if (clients[i] && row.classList.contains("client-row")) clients[i][k] = input.value;
-    });
-    return i;
+          </select></div>
+          <div class="field"><label>Send to</label><select class="select" data-f="client">
+            ${clients.map((c) => `<option value="${esc(c.id)}" ${r.client === c.id ? "selected" : ""}>${clientName(c)}</option>`).join("")}
+          </select></div>
+        </div>
+        <details class="set-more"${r.label || r.save_path ? " open" : ""}><summary>Category and folder for this rule</summary>
+          <div class="set-grid">
+            <div class="field"><label>Category or label</label><input class="input mono" data-f="label" value="${esc(r.label || "")}" placeholder="the client’s own" /></div>
+            <div class="field"><label>Download folder</label><input class="input mono" data-f="save_path" value="${esc(r.save_path || "")}" placeholder="the client’s own" /></div>
+          </div>
+        </details>
+        <div data-out></div>
+      </div>`;
+    }).join("") || `<p class="muted client-empty">No rules yet: every release goes to the default client, exactly as before.</p>`;
   };
 
   clientBox.oninput = clientBox.onchange = (e) => {
-    const row = e.target.closest(".client-row");
-    if (!row) return;
-    const i = Number(row.dataset.i);
+    const card = e.target.closest(".client-card");
+    if (!card) return;
+    const i = Number(card.dataset.i);
+    if (e.target.type === "checkbox" && e.target.name in deleteAfter) { deleteAfter[e.target.name] = e.target.checked; dirty(); return; }
     const k = e.target.dataset.f;
-    if (k === "type") { clients[i] = { id: clients[i].id, type: e.target.value }; drawClients(); }
-    else if (k) clients[i][k] = e.target.value;
-    sync();
+    if (k) { clients[i][k] = e.target.value; sync(); }
+  };
+
+  let pinTimer = 0;
+  const pinStop = (card) => {
+    clearTimeout(pinTimer);
+    if (!card) return;
+    $("[data-pin-wait]", card).hidden = true;
+    $("[data-pin-start]", card).hidden = false;
+  };
+  const pinConnect = async (btn, card, c) => {
+    const out = $("[data-out]", card);
+    const wait = $("[data-pin-wait]", card);
+    const name = TYPE_LABEL[c.type];
+    out.innerHTML = "";
+    spinBtn(btn, true);
+    let got;
+    try {
+      // Connecting saves the new key on the server, and the list is read back afterwards, so anything
+      // typed and not yet saved is saved first rather than lost.
+      if (saved && JSON.stringify(collect()) !== JSON.stringify(saved)) await save(true);
+      got = await api(PIN[c.type].start, { method: "POST" });
+    } catch (err) {
+      out.innerHTML = badLine(err.message);
+      spinBtn(btn, false);
+      return;
+    }
+    spinBtn(btn, false);
+    const code = got.pin || got.code;
+    $("[data-pin-code]", card).textContent = code;
+    $("[data-pin-link]", card).href = got.user_url;
+    $("[data-pin-start]", card).hidden = true;
+    wait.hidden = false;
+    const ends = Date.now() + got.expires_in * 1000;
+    const every = Math.max(3, got.interval || 3) * 1000;
+    const tick = async () => {
+      if (!wait.isConnected || wait.hidden) return; // cancelled, or left Settings
+      const left = Math.ceil((ends - Date.now()) / 60000);
+      if (left <= 0) {
+        pinStop(card);
+        out.innerHTML = badLine(`That code has expired. Choose Connect ${name} to get a new one.`);
+        return;
+      }
+      $("[data-pin-left]", card).textContent = `Waiting for the code · expires in ${left} min`;
+      try {
+        const r = await api(PIN[c.type].check, { method: "POST", body: got.pin ? { pin: code } : { code } });
+        if (!wait.isConnected || wait.hidden) return;
+        if (r.connected) {
+          pinStop(card);
+          state.settings = r.settings;
+          await loadRouting();
+          saved = snapshot();
+          dirty();
+          updateRdPill();
+          statuses();
+          const fresh = $$(".client-card", clientBox).find((el) => clients[Number(el.dataset.i)]?.type === c.type);
+          if (fresh) $("[data-out]", fresh).innerHTML = r.warning ? badLine(r.warning) : okLine(`${esc(name)} is connected`);
+          return;
+        }
+      } catch (err) {
+        pinStop(card);
+        out.innerHTML = badLine(err.message);
+        return;
+      }
+      pinTimer = setTimeout(tick, every);
+    };
+    pinTimer = setTimeout(tick, every);
   };
 
   clientBox.onclick = async (e) => {
     const btn = e.target.closest("[data-act]");
     if (!btn) return;
-    const row = btn.closest(".client-row");
-    const i = Number(row.dataset.i);
-    const out = $("[data-out]", row);
-    if (btn.dataset.act === "remove") { clients.splice(i, 1); drawClients(); drawRoutes(); sync(); return; }
-    if (btn.dataset.act === "test") {
+    const card = btn.closest(".client-card");
+    const i = Number(card.dataset.i);
+    const out = $("[data-out]", card);
+    const act = btn.dataset.act;
+    if (act === "remove") { pinStop(); clients.splice(i, 1); fillDefaults(); drawClients(); drawRoutes(); sync(); return; }
+    if (act === "default") { defaultClient = clients[i].id; defaults[deliveryOf(clients[i])] = defaultClient; drawClients(); sync(); return; }
+    if (act === "pin") return pinConnect(btn, card, clients[i]);
+    if (act === "pin-cancel") return pinStop(card);
+    if (act === "test") {
       spinBtn(btn, true);
       try {
         const got = await api("/api/settings/test-download-client", { method: "POST", body: { entry: clients[i] } });
-        out.innerHTML = `<span class="ok">${esc(got.label)} ${esc(got.version || "answered")}</span>`;
-      } catch (err) { out.innerHTML = `<span class="bad">${esc(err.message)}</span>`; }
+        out.innerHTML = okLine(got.summary ? esc(got.summary) : `Connected to ${esc(got.label)} ${esc(got.version || "")}`);
+      } catch (err) { out.innerHTML = badLine(err.message); }
       spinBtn(btn, false);
     }
   };
 
-  $("#add-client", root).onclick = () => {
-    const spare = Object.keys(TYPE_LABEL).find((t) => !clients.some((c) => c.type === t)) || "deluge";
-    clients.push({ id: spare, type: spare, category: spare === "qbittorrent" || spare === "transmission" ? "audiobooks" : "" });
+  // Adding a client: pick its kind from tiles, the way Downloads always looked.
+  const picker = $("#client-picker", root);
+  picker.innerHTML = GROUPS.map(([group, list]) => `
+    <div class="tile-group"><span class="tile-label" aria-hidden="true">${group}</span>
+      <div class="choice-tiles">${list.map(([t, where]) => `<button type="button" data-add="${t}"><b>${TYPE_LABEL[t]}</b><small>${where}</small></button>`).join("")}</div>
+    </div>`).join("");
+  $("#add-client", root).onclick = () => { picker.hidden = !picker.hidden; };
+  picker.onclick = (e) => {
+    const b = e.target.closest("[data-add]");
+    if (!b) return;
+    const type = b.dataset.add;
+    let id = type;
+    for (let n = 2; clients.some((c) => c.id === id); n++) id = `${type}-${n}`;
+    clients.push({ id, type, url: "", username: "", password: "", api_key: "", category: "", save_path: "" });
+    if (!defaultClient) defaultClient = id;
+    fillDefaults();
+    picker.hidden = true;
     drawClients(); drawRoutes(); sync();
+    clientBox.lastElementChild?.querySelector("input:not([type=checkbox])")?.focus();
   };
 
   const readRoute = (row) => {
     const i = Number(row.dataset.i);
     const get = (k) => $(`[data-f=${k}]`, row);
-    const indexers = get("indexers") ? [...get("indexers").selectedOptions].map((o) => o.value) : (routes[i].match.indexers || []);
-    const category = get("categories") ? get("categories").value : ((routes[i].match.categories || [])[0] || "");
+    const category = get("categories").value;
     routes[i] = {
-      match: { indexers, categories: category ? [category] : [] },
-      client: get("client") ? get("client").value : routes[i].client,
-      label: get("label") ? get("label").value : routes[i].label || "",
-      save_path: get("save_path") ? get("save_path").value : routes[i].save_path || "",
+      match: { indexers: $$(".fpill.on", row).map((b) => b.dataset.ix), categories: category ? [category] : [] },
+      client: get("client").value,
+      label: get("label").value,
+      save_path: get("save_path").value,
     };
     return i;
   };
 
   routeBox.onchange = routeBox.oninput = (e) => {
-    const row = e.target.closest("tr[data-i]");
+    const row = e.target.closest(".route-card");
     if (!row) return;
     readRoute(row);
     sync();
   };
 
   routeBox.onclick = async (e) => {
+    const pill = e.target.closest("[data-ix]");
+    if (pill) {
+      pill.classList.toggle("on");
+      pill.setAttribute("aria-pressed", pill.classList.contains("on"));
+      const row = pill.closest(".route-card");
+      readRoute(row);
+      $(".field .hint", row).textContent = routes[Number(row.dataset.i)].match.indexers.length
+        ? "Only releases from these." : "None picked: releases from any indexer.";
+      sync();
+      return;
+    }
     const btn = e.target.closest("[data-act]");
     if (!btn) return;
-    const row = btn.closest("tr[data-i]");
+    const row = btn.closest(".route-card");
     const i = Number(row.dataset.i);
     const act = btn.dataset.act;
     if (act === "remove") { routes.splice(i, 1); drawRoutes(); sync(); return; }
     if (act === "up" && i > 0) { [routes[i - 1], routes[i]] = [routes[i], routes[i - 1]]; drawRoutes(); sync(); return; }
     if (act === "down" && i < routes.length - 1) { [routes[i + 1], routes[i]] = [routes[i], routes[i + 1]]; drawRoutes(); sync(); return; }
     if (act === "test") {
-      const out = $(`[data-out-row='${i}'] [data-out]`, routeBox);
+      const out = $("[data-out]", row);
       readRoute(row);
       sync();
       spinBtn(btn, true);
       try {
+        // The saved rules are what gets tested, so save first, as every other Test does.
+        await save(true);
+        const r = routes[i];
         const got = await api("/api/routing/test", {
           method: "POST",
-          body: { indexer: (routes[i].match.indexers || [])[0] || "", kind: (routes[i].match.categories || ["audiobook"])[0] },
+          body: { indexer: (r.match.indexers || [])[0] || "", kind: (r.match.categories || [])[0] || "audiobook",
+                  protocol: deliveryOf(clients.find((c) => c.id === r.client) || {}) },
         });
-        out.innerHTML = got.client
-          ? `${got.rule === null ? "No rule" : "Rule " + (got.rule + 1)} → <b>${esc(got.client_label || got.client)}</b>`
-            + ` · category <code>${esc(got.args.category || "the client's own")}</code>`
-            + ` · save to <code>${esc(got.args.save_path || "the client's own")}</code>`
-          : esc(got.reason);
-      } catch (err) { out.innerHTML = `<span class="bad">${esc(err.message)}</span>`; }
+        const where = got.rule === null ? "No rule matched, so the default" : `Rule ${got.rule + 1} matched`;
+        out.innerHTML = (got.client
+          ? okLine(`${where}: <b>${esc(got.client_label || got.client)}</b> · category <code>${esc(got.args.category || "the client’s own")}</code> · folder <code>${esc(got.args.save_path || "the client’s own")}</code>`)
+          : badLine(got.reason)) + (got.problems || []).map((p) => badLine(p)).join("");
+      } catch (err) { out.innerHTML = badLine(err.message); }
       spinBtn(btn, false);
     }
   };
 
   $("#add-route", root).onclick = () => {
     if (!clients.length) { toast("Add a download client first.", { kind: "err" }); return; }
-    routes.push({ match: { indexers: [], categories: [] }, client: clients[0].id, label: "", save_path: "" });
+    routes.push({ match: { indexers: [], categories: ["audiobook"] }, client: clients[0].id, label: "", save_path: "" });
     drawRoutes(); sync();
   };
 
-  const loadRouting = async () => {
+  const adoptClients = (list) => {
+    clients = (list || []).map((x) => ({ id: x.id, type: x.type, url: x.url || "", username: x.username || "",
+      password: x.password || "", api_key: x.api_key || "", category: x.category || "", save_path: x.save_path || "" }));
+  };
+  async function loadRouting() {
     try {
       const [c, cov] = await Promise.all([api("/api/download-clients"), api("/api/routing/coverage")]);
-      clients = c.clients.map((x) => ({ id: x.id, type: x.type, url: x.url, username: x.username,
-        password: x.password, api_key: x.api_key, category: x.category, save_path: x.save_path }));
+      adoptClients(c.clients);
       defaultClient = c.default_client || "";
+      defaults = { torrent: "", usenet: "", ...(c.defaults || {}) };
       advertised = cov.indexers || [];
       routes = (cov.rules || []).map((r) => ({ match: { indexers: r.match.indexers || [], categories: r.match.categories || [] },
         client: r.client, label: r.label || "", save_path: r.save_path || "" }));
       const uncovered = cov.uncovered || [];
       coverageBox.innerHTML = [
-        uncovered.length ? `No rule covers: <b>${uncovered.map(esc).join(", ")}</b> — these fall through to the default client.` : "Every advertised indexer has a rule.",
-        (cov.unknown_clients || []).length ? `<span class="bad">${cov.unknown_clients.map(esc).join("; ")}</span>` : "",
+        !routes.length ? "" : uncovered.length ? `No rule names <b>${uncovered.map(esc).join(", ")}</b>, so those go to the default client.` : "Every indexer you have is named in a rule.",
+        (cov.unknown_clients || []).length ? `<span class="bad-text">${cov.unknown_clients.map(esc).join("; ")}</span>` : "",
       ].filter(Boolean).join("<br>");
     } catch (err) {
-      coverageBox.innerHTML = `<span class="bad">${esc(err.message)}</span>`;
+      coverageBox.innerHTML = `<span class="bad-text">${esc(err.message)}</span>`;
     }
-    drawClients(); drawRoutes(); sync();
-  };
+    drawClients(); drawRoutes();
+    // What was just read from the server is the saved state, not a change.
+    const before = { ...collect() };
+    sync();
+    if (saved) {
+      const now = collect();
+      for (const k of Object.keys(now)) if (JSON.stringify(now[k]) !== JSON.stringify(before[k]) || !(k in saved)) saved[k] = now[k];
+    }
+    dirty();
+  }
   loadRouting();
 
   $$("[data-choice]", root).forEach((seg) => {
@@ -2906,15 +3050,14 @@ function Settings(root, page) {
 
   async function save(quiet) {
     state.settings = await api("/api/settings", { method: "PUT", body: collect() });
-    form.rd_api_key.value = state.settings.rd_api_key;
-    form.ad_api_key.value = state.settings.ad_api_key;
-    form.tb_api_key.value = state.settings.tb_api_key;
-    form.pm_api_key.value = state.settings.pm_api_key;
-    form.audiobookshelf_token.value = state.settings.audiobookshelf_token;
-    form.brave_api_key.value = state.settings.brave_api_key;
-    for (const key of ["prowlarr_api_key", "torznab_api_key", "sabnzbd_api_key", "nzbget_password", "qbittorrent_password", "transmission_password", "deluge_password"]) {
-      form[key].value = state.settings[key];
+    for (const key of ["audiobookshelf_token", "brave_api_key", "prowlarr_api_key", "torznab_api_key"]) {
+      if (form[key]) form[key].value = state.settings[key];
     }
+    // The list comes back with its secrets masked, so a typed password doesn't stay in the page.
+    adoptClients(state.settings.clients);
+    defaultClient = state.settings.default_client || "";
+    try { defaults = { torrent: "", usenet: "", ...((await api("/api/download-clients")).defaults || {}) }; } catch { fillDefaults(); }
+    drawClients(); drawRoutes(); sync();
     state.sources = await api("/api/sources"); // the Prowlarr tab appears once it's set up
     updateRdPill();
     if (absConnected() === $("#abs-connected", root).hidden) absShow(); // a pasted API key just connected it
@@ -3018,38 +3161,6 @@ function Settings(root, page) {
     return `Connected to Prowlarr ${esc(r.version)} · <b>${r.indexers}</b> indexer${r.indexers === 1 ? "" : "s"} enabled${ebooks}`;
   });
   tester("torznab", (r) => `Connected to ${esc(r.title)} · book search ${r.book_search ? "<b>available</b>" : "not offered"} · <b>${r.categories}</b> categories`);
-  $$("[data-test-client]", root).forEach((btn) => {
-    btn.onclick = async () => {
-      const name = btn.dataset.testClient;
-      const out = $(`[data-result="${name}"]`, root);
-      spinBtn(btn, true);
-      try {
-        await save(true);
-        const r = await api(`/api/settings/test-client/${name}`, { method: "POST" });
-        out.innerHTML = okLine(`Connected to ${esc(r.label)} ${esc(r.version)}`);
-      } catch (err) {
-        out.innerHTML = `<div class="rd-result bad">${esc(err.message)}</div>`;
-      }
-      spinBtn(btn, false);
-    };
-  });
-
-  $("#test-rd", root).onclick = async (e) => {
-    const btn = e.currentTarget;
-    const out = $("#rd-result", root);
-    spinBtn(btn, true);
-    try {
-      await save(true);
-      const u = await api("/api/settings/test-rd", { method: "POST" });
-      const exp = u.expiration ? new Date(u.expiration).toLocaleDateString(undefined, { dateStyle: "medium" }) : "";
-      out.innerHTML = `<div class="rd-result">${I.check.replace("<svg", '<svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"')}
-        <span>Connected as <b>${esc(u.username)}</b> · ${esc(u.type)}${exp ? ` until ${esc(exp)}` : ""}</span></div>`;
-    } catch (err) {
-      out.innerHTML = `<div class="rd-result bad">${esc(err.message)}</div>`;
-    }
-    spinBtn(btn, false);
-  };
-
   // Notifications: each destination saves on its own, like people on the Users page, not with the save bar.
   // The editor's fields have no names, so the Settings form (and its save bar) never sees them.
   const notifyList = $("#notify-list", root);
@@ -3358,135 +3469,7 @@ function Settings(root, page) {
     loadLog();
   }, 8000);
 
-  // AllDebrid and TorBox: connect with a short code the user enters on their site, or with a pasted key.
-  const codeConnect = ({ p, name, client, site, start, check, line }) => {
-    const out = () => $(`#${p}-result`, root);
-    const card = () => {
-      const on = Boolean(state.settings[`${p}_configured`]);
-      $(`#${p}-pin-title`, root).textContent = on ? `${name} is connected` : "Connect with a code";
-      $(`#${p}-pin-desc`, root).textContent = on
-        ? "Test checks the account. To use a different one, connect again."
-        : `Narratarr shows a short code, you enter it on ${site}, and you’re connected. There’s no key to copy, and your password never comes here.`;
-      $(`#${p}-pin`, root).textContent = on ? "Connect again" : `Connect ${name}`;
-      $(`#${p}-pin`, root).classList.toggle("primary", !on);
-      $(`#${p}-pin-start [data-${p}-test]`, root).hidden = !on;
-      if (on) $(`[data-v="${client}"] small`, root).innerHTML = `<i class="dot ok"></i>Ready`;
-    };
-    card();
-    $$(`[data-${p}-test]`, root).forEach((btn) => {
-      btn.onclick = async () => {
-        spinBtn(btn, true);
-        try {
-          await save(true);
-          card();
-          out().innerHTML = line(await api(`/api/settings/test-${p}`, { method: "POST" }));
-        } catch (err) {
-          out().innerHTML = badLine(err.message);
-        }
-        spinBtn(btn, false);
-      };
-    });
-    let timer = 0;
-    const stop = () => {
-      clearTimeout(timer);
-      $(`#${p}-pin-wait`, root).hidden = true;
-      $(`#${p}-pin-start`, root).hidden = false;
-    };
-    $(`#${p}-pin-cancel`, root).onclick = stop;
-    $(`#${p}-pin`, root).onclick = async (e) => {
-      const btn = e.currentTarget;
-      const wait = $(`#${p}-pin-wait`, root);
-      out().innerHTML = "";
-      spinBtn(btn, true);
-      let got;
-      try {
-        got = await api(start, { method: "POST" });
-      } catch (err) {
-        out().innerHTML = badLine(err.message);
-        spinBtn(btn, false);
-        return;
-      }
-      spinBtn(btn, false);
-      const code = got.pin || got.code;
-      $(`#${p}-pin-code`, root).textContent = code;
-      $(`#${p}-pin-link`, root).href = got.user_url;
-      $(`#${p}-pin-start`, root).hidden = true;
-      wait.hidden = false;
-      const ends = Date.now() + got.expires_in * 1000;
-      const every = Math.max(3, got.interval || 3) * 1000;
-      const tick = async () => {
-        if (!wait.isConnected || wait.hidden) return; // cancelled, or left Settings
-        const left = Math.ceil((ends - Date.now()) / 60000);
-        if (left <= 0) {
-          stop();
-          out().innerHTML = badLine(`That code has expired. Choose Connect ${name} to get a new one.`);
-          return;
-        }
-        $(`#${p}-pin-left`, root).textContent = `Waiting for the code · expires in ${left} min`;
-        try {
-          const r = await api(check, { method: "POST", body: got.pin ? { pin: code } : { code } });
-          if (!wait.isConnected || wait.hidden) return;
-          if (r.connected) {
-            // The server saved the key and chose this service; keep anything else typed here as it was.
-            const key = `${p}_api_key`;
-            const { torrent_client, torrent_configured } = r.settings;
-            Object.assign(state.settings, { [key]: r.settings[key], [`${p}_configured`]: true, torrent_client, torrent_configured });
-            form[key].value = r.settings[key];
-            if (saved) Object.assign(saved, { [key]: r.settings[key], torrent_client });
-            choose("torrent_client", torrent_client);
-            stop();
-            card();
-            updateRdPill();
-            statuses();
-            out().innerHTML = line(r);
-            return;
-          }
-        } catch (err) {
-          stop();
-          out().innerHTML = badLine(err.message);
-          return;
-        }
-        timer = setTimeout(tick, every);
-      };
-      timer = setTimeout(tick, every);
-    };
-  };
   const badLine = (text) => `<div class="rd-result bad">${esc(text)}</div>`;
-  codeConnect({
-    p: "ad", name: "AllDebrid", client: "alldebrid", site: "alldebrid.com",
-    start: "/api/settings/alldebrid/pin", check: "/api/settings/alldebrid/pin/check",
-    line: (u) => {
-      if (u.warning) return badLine(u.warning);
-      if (!u.premium && !u.trial) return badLine(`Connected as ${u.username}, but the account isn’t premium. AllDebrid needs premium for torrents.`);
-      const until = u.premium_until ? new Date(u.premium_until * 1000).toLocaleDateString(undefined, { dateStyle: "medium" }) : "";
-      return okLine(`Connected as <b>${esc(u.username)}</b> · ${u.trial ? "free trial" : "premium"}${until ? ` until ${esc(until)}` : ""}`);
-    },
-  });
-  codeConnect({
-    p: "tb", name: "TorBox", client: "torbox", site: "TorBox",
-    start: "/api/settings/torbox/code", check: "/api/settings/torbox/code/check",
-    line: (u) => {
-      if (u.warning) return badLine(u.warning);
-      const until = u.premium_until ? new Date(u.premium_until).toLocaleDateString(undefined, { dateStyle: "medium" }) : "";
-      return okLine(`Connected${u.email ? ` as <b>${esc(u.email)}</b>` : ""}${u.plan ? ` · ${esc(u.plan)} plan` : ""}${until ? ` until ${esc(until)}` : ""}`);
-    },
-  });
-  $("#test-pm", root).onclick = async (e) => {
-    const btn = e.currentTarget;
-    const out = $("#pm-result", root);
-    spinBtn(btn, true);
-    try {
-      await save(true);
-      const u = await api("/api/settings/test-pm", { method: "POST" });
-      const until = u.premium_until ? new Date(u.premium_until * 1000).toLocaleDateString(undefined, { dateStyle: "medium" }) : "";
-      out.innerHTML = u.premium ? okLine(`Connected · premium${until ? ` until ${esc(until)}` : ""}`)
-        : badLine("Connected, but the account isn’t premium. Premiumize needs premium for torrents.");
-      if (u.premium) $('[data-v="premiumize"] small', root).innerHTML = `<i class="dot ok"></i>Ready`;
-    } catch (err) {
-      out.innerHTML = badLine(err.message);
-    }
-    spinBtn(btn, false);
-  };
 
   // Audiobookshelf: find the server, sign in once (which creates an API key), pick a library.
   let absServer = null; // what Find last found: {url, version, ready, password_login, insecure}

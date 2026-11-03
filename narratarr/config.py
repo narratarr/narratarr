@@ -197,6 +197,7 @@ def update(changes: dict) -> Settings:
     """Apply changes and persist. Masked secrets sent back unchanged are ignored."""
     s = load()
     list_given = "clients" in changes
+    prev_default = s.default_client
     touched_flat = any(k in _FLAT_PROTOCOL_FIELDS[p] for k in changes for p in _FLAT_PROTOCOL_FIELDS)
     with _lock:
         known = {f.name: f for f in fields(Settings)}
@@ -248,6 +249,27 @@ def update(changes: dict) -> Settings:
         ids = [c["id"] for c in s.clients]
         if s.default_client not in ids:
             s.default_client = ids[0] if ids else ""
+        from .downloaders import DELIVERY
+
+        flat_for = {"usenet": "usenet_client", "torrent": "torrent_client"}
+        if s.default_client != prev_default and "default_client" in changes:
+            # Picking a default is picking the client for its protocol, which is what the flat choice
+            # records and what the rest of the app (and routing's fall-through) reads.
+            kind = next((c["type"] for c in s.clients if c["id"] == s.default_client), "")
+            flat = flat_for.get(DELIVERY.get(kind, ""))
+            if flat and kind in CHOICES[flat]:
+                setattr(s, flat, kind)
+        elif "default_client" not in changes:
+            # And the other way round: choosing a client the old way (connecting AllDebrid, or
+            # PUT {"torrent_client": ...}) makes it the default when the default was that protocol's.
+            for proto, flat in flat_for.items():
+                if flat not in changes:
+                    continue
+                current = next((c for c in s.clients if c["id"] == s.default_client), None)
+                if current is None or DELIVERY.get(current["type"]) == proto:
+                    pick = next((c["id"] for c in s.clients if c["type"] == getattr(s, flat)), "")
+                    if pick:
+                        s.default_client = pick
         if s.import_folder:
             lib, imp = Path(s.library_dir).expanduser().resolve(), Path(s.import_folder).expanduser().resolve()
             if lib == imp or lib in imp.parents or imp in lib.parents:
@@ -315,21 +337,6 @@ def migrate_clients(s: Settings) -> None:
     if made:
         torrent = next((e["id"] for e in made if e["id"] not in ("sabnzbd", "nzbget")), "")
         s.default_client = torrent or made[0]["id"]
-
-
-# Which flat fields belong to which protocol, so a change through the old surface can be mirrored
-# into the list. Phase 1 keeps the existing UI working; when Settings owns the list, this stays as
-# the compatibility path for an old client and nothing else writes flat fields.
-_FLAT_PROTOCOL_FIELDS = {
-    "usenet": ("usenet_client", "sabnzbd_url", "sabnzbd_api_key", "sabnzbd_category",
-               "nzbget_url", "nzbget_username", "nzbget_password", "nzbget_category"),
-    "torrent": ("torrent_client", "rd_api_key", "ad_api_key", "tb_api_key", "pm_api_key",
-                "qbittorrent_url", "qbittorrent_username", "qbittorrent_password",
-                "qbittorrent_category", "qbittorrent_folder",
-                "transmission_url", "transmission_username", "transmission_password",
-                "transmission_label", "transmission_folder",
-                "deluge_url", "deluge_password", "deluge_folder"),
-}
 
 
 # ---- the compatibility path, and when it can go ----------------------------------------------
@@ -413,13 +420,20 @@ def validate_clients(value) -> list:
 
 
 def _merge_client_secrets(new: list, old: list) -> list:
-    """A masked secret posted back unchanged means "leave it alone", exactly as flat secrets do."""
+    """A masked secret posted back unchanged means "leave it alone", exactly as flat secrets do.
+
+    And, exactly as flat secrets do, a saved password or key only ever stays with the machine it was
+    entered for: if the client's address now points at a different host, or the entry has become a
+    different kind of client, a masked secret is dropped rather than carried over. Otherwise changing
+    an address would send the old password to the new machine on the next Test or grab.
+    """
     by_id = {c.get("id"): c for c in old if isinstance(c, dict)}
     for entry in new:
         prev = by_id.get(entry["id"]) or {}
+        same_place = prev.get("type") == entry.get("type") and _host(prev.get("url", "")) == _host(entry.get("url", ""))
         for key in ("password", "api_key"):
             if str(entry.get(key) or "").startswith("•"):
-                entry[key] = prev.get(key, "")
+                entry[key] = prev.get(key, "") if same_place else ""
     return new
 
 
