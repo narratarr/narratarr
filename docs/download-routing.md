@@ -27,6 +27,12 @@ Two entries, not one, because a working install can have SABnzbd for Usenet and 
 torrents at the same time. Collapsing those into a single client would have silently dropped one of
 them, and nobody's working setup may break on upgrade.
 
+The flat client settings from older versions (`torrent_client`, `usenet_client` and their address,
+credential, category and folder fields) **still work and are still read**. Settings no longer shows
+them, but they are part of the settings API and they still take precedence for the protocol default.
+They go away in a later change that removes them along with the compatibility path that keeps them
+in step with the list.
+
 For the same reason the default is resolved **per protocol** when no rule matches:
 
 1. the client you have set up for this protocol (Usenet or torrent)
@@ -49,9 +55,28 @@ when you save it, because it would swallow every release.
 
 A part you leave empty does not restrict anything. Both parts given means both must agree.
 
-Sources that hand releases to a client appear in the indexer picker by their own name — AudiobookBay
-for instance — because they do not report a per-row indexer. Catalogues and free archives are not
-offered, since no client ever takes their downloads.
+### What a rule can key on, and what it cannot
+
+The indexer picker is filled from the sources that actually hand releases to a download client, so
+every name in it can fire.
+
+**AudiobookBay is a special case worth knowing.** Its listings do not carry a per-indexer name, so
+Narratarr files them under the source's own name, `AudiobookBay`, and the picker offers exactly that
+spelling. A rule keyed on `AudiobookBay` therefore matches every AudiobookBay release. What you
+cannot do is key on a specific uploader or tracker inside the site, because there is no such field to
+match.
+
+**Some sources are not routable at all**, and deliberately so:
+
+| Source | Why no rule can match |
+|---|---|
+| Audible catalog | a catalogue for browsing, not an indexer; releases come from somewhere else |
+| Open Library | the same: book details, not releases |
+| LibriVox | a free direct download; no client is involved, so there is nothing to route |
+| Old-Time Radio | the same |
+
+The picker does not offer them. A rule keyed on one of those names could never fire, which is why
+they are absent rather than disabled.
 
 ## What the log says
 
