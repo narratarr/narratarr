@@ -126,7 +126,9 @@ async def test_missing_api_key_fails_with_helpful_message(isolated_data):
 
     await Worker(transport=httpx.MockTransport(FakeRD({})))._run(book["id"])
 
-    assert "API key" in db.get(book["id"])["error"]
+    # The router refuses to hand a release to a client with no key, and says which one to finish.
+    error = db.get(book["id"])["error"]
+    assert "Real-Debrid" in error and "set up" in error
 
 
 def test_destination_template_and_sanitizing(isolated_data):

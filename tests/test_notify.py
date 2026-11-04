@@ -191,7 +191,7 @@ async def test_worker_announces_start_and_failure(isolated_data, monkeypatch):
     config.update({"torrent_client": "realdebrid", "rd_api_key": ""})
     await Worker(transport=httpx.MockTransport(Catcher(500)))._run(book["id"])
     assert seen[0] == ("grabbed", "")
-    assert seen[1][0] == "failed" and "API key" in seen[1][1]
+    assert seen[1][0] == "failed" and "Real-Debrid" in seen[1][1]  # named, not a connection error
 
 
 @pytest.fixture
