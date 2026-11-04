@@ -1926,3 +1926,36 @@ button.link { border: 0; background: none; padding: 0; min-height: 32px; color: 
   .modal.tidy #tidy-body { flex: none; }
   .tidy-list { max-height: none; overflow: visible; }
 }
+
+/* Which download client would take a result. Quiet: it is a hint, not a control. */
+.client-chip {
+  display: inline-block; margin-top: 6px; padding: 1px 8px; border-radius: 999px;
+  border: 1px solid var(--border); color: var(--text-3); font-size: 11px; line-height: 18px;
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* Settings → Downloads: one card per client, and the routing rules. */
+.client-list { display: grid; gap: 14px; min-width: 0; }
+.client-list:empty { display: none; }
+.client-card { display: grid; gap: 16px; padding: 18px 20px; border-radius: 16px; background: var(--surface-2); border: 1px solid var(--border); min-width: 0; }
+.client-card .pin-card { background: var(--surface-3); }
+.client-card .set-more { padding-top: 14px; }
+.client-head { display: flex; align-items: center; justify-content: space-between; gap: 10px 14px; flex-wrap: wrap; }
+.client-name { display: grid; gap: 2px; min-width: 0; }
+.client-name b { font: 500 18px/1.2 var(--serif); }
+.client-name small { color: var(--text-3); font-size: 12.5px; }
+.client-tools { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.client-default { display: inline-flex; align-items: center; gap: 5px; padding: 0 10px; height: 28px; border-radius: 999px; font-size: 12.5px; font-weight: 600; color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.client-default svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; }
+.client-empty { margin: 0; }
+.client-picker { padding: 16px 18px; border-radius: 16px; border: 1px dashed var(--border-strong); }
+.client-picker[hidden] { display: none; }
+#add-client svg, #add-route svg { width: 16px; height: 16px; margin-right: 6px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; }
+#route-list { display: grid; gap: 14px; min-width: 0; }
+#route-coverage:empty { display: none; }
+.route-card { display: grid; gap: 16px; padding: 18px 20px; border-radius: 16px; background: var(--surface-2); border: 1px solid var(--border); min-width: 0; }
+.route-card .set-more { padding-top: 14px; }
+.route-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.route-head b { display: inline-flex; align-items: center; gap: 10px; font: 500 17px/1.2 var(--serif); }
+.route-num { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; font: 600 13px var(--sans, inherit); color: var(--accent-ink); background: var(--accent-grad); }
+.bad-text { color: var(--err); }

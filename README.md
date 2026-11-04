@@ -280,6 +280,8 @@ Already running an \*arr stack? Narratarr searches the indexers in your Prowlarr
 
 Press **Test** next to each one. Once Prowlarr is connected, a **Prowlarr** tab (and an **Audible catalog** tab) appears on Discover. Each Prowlarr result shows its indexer, size, format, and whether it's Usenet or a torrent. Open one and Narratarr matches the release name to the real book, so it's filed under the right author and title, with cover art.
 
+**Routing a release to a particular client.** Settings → Downloads holds a list of clients and, under Routing, an ordered list of rules: the first rule that matches sends the release to its client, and anything unmatched goes to the default. A rule matches on the indexer that found the release, the kind of book, or both. Every grab logs which rule decided it, so a file that landed somewhere unexpected can be explained afterwards. With no rules, nothing changes. Full detail, including what the log lines look like and how to test a route before trusting it: **[docs/download-routing.md](docs/download-routing.md)**.
+
 **What happens after you press Download:**
 
 - **Usenet:** the NZB goes to SABnzbd or NZBGet. When it has downloaded, repaired and unpacked the release, Narratarr moves the files into your library and clears the job from the client's history.
