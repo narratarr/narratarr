@@ -2,6 +2,12 @@
 
 All notable changes to Narratarr. The app shows this under **Settings → Updates**.
 
+## 0.9.1 — 2026-11-04
+
+- **Connecting to Audiobookshelf, SABnzbd and the rest now says what's wrong.** Instead of "Couldn't reach", Narratarr says whether no machine by that name could be found, nothing is answering on that port, nothing answered at all, or the address doesn't speak https. In Docker, typing `localhost` explains that it means Narratarr's own container, and asks for the IP address of the machine the app runs on.
+- **SABnzbd by name.** SABnzbd turns away names it doesn't know (`http://sabnzbd:8080`, say), which Narratarr used to report as a wrong API key. It now says so, and how to fix it: use SABnzbd's IP address, or add the name under SABnzbd's Config → Special → host_whitelist.
+- **Finding Audiobookshelf in Docker.** Find also looks on the machine Docker runs on, and for an `abs` container. When an address doesn't answer on the port you gave, Narratarr tries Audiobookshelf's usual ports too, so `audiobookshelf:13378` finds a container that listens on port 80 inside Docker, and says so. If Find comes up empty, it says why: from inside Docker, Narratarr can't search your home network, so type the IP address and port instead.
+
 ## 0.9.0 — 2026-11-04
 
 - **Download routing.** Settings → Downloads now holds a list of download clients rather than one per kind, so you can have, say, Real-Debrid and qBittorrent side by side. **Routing** rules send a release to a particular client by the indexer that found it and whether it's an audiobook or an ebook, with its own category and folder if you like. Rules are checked top to bottom and the first match decides; anything else goes to the default client, and each client says whether it's the default for torrents or for Usenet. **Test** on a rule shows where a sample release would go. Discover shows on each result which client would take it. Your existing setup carries over as it is: with no rules, every download goes where it went before. Contributed by curator8888.
