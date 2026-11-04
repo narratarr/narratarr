@@ -9,3 +9,6 @@ dist/
 # Per-instance ratings cache (never shipped: it is not a dataset we own)
 ratings.sqlite
 ratings.sqlite-*
+
+# Wrangler local state (account cache, dev builds)
+.wrangler/
