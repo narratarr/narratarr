@@ -274,6 +274,11 @@ p code { background: rgba(255, 244, 230, 0.06); border: 1px solid var(--line); p
 .tab:hover { color: var(--paper); }
 .tab[aria-selected="true"] { background: rgba(255,244,230,.1); color: var(--paper); }
 .tabpanel { margin-top: 18px; }
+.soon-tag { margin-left: 6px; padding: 3px 7px; border-radius: 999px; font: 600 10.5px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--amber); background: rgba(248,198,110,.12); vertical-align: 1px; }
+.soon { display: grid; gap: 14px; justify-items: start; padding: clamp(24px, 3.4vw, 40px); border-radius: 18px; border: 1px dashed rgba(248,198,110,.35); background: rgba(248,198,110,.04); }
+.soon-badge { font: 500 12px/1 var(--mono); letter-spacing: .16em; text-transform: uppercase; color: var(--amber); }
+.soon h3 { margin: 0; font: 450 clamp(26px, 2.6vw, 34px)/1.1 var(--display); letter-spacing: -0.02em; }
+.soon p { margin: 0; color: var(--paper-2); max-width: 40em; }
 .tabpanel[hidden] { display: none; }
 .code { position: relative; border-radius: 18px; background: #08070a; border: 1px solid var(--line-2); overflow: hidden; }
 .code .bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 10px 10px 18px; border-bottom: 1px solid var(--line); font: 500 12px/1 var(--mono); color: var(--paper-3); letter-spacing: .06em; }
@@ -396,7 +401,7 @@ footer nav a:hover { color: var(--amber); }
         </button>
         </div>
       </div>
-      <p class="fine" data-intro>Docker, Unraid, macOS and Linux. Images for amd64 and arm64, Raspberry Pi 4 and 5 included.</p>
+      <p class="fine" data-intro>Docker, macOS and Linux, with Unraid coming soon. Images for amd64 and arm64, Raspberry Pi 4 and 5 included.</p>
     </div>
 
     <div class="stage" id="hero-stage">
@@ -667,7 +672,7 @@ footer nav a:hover { color: var(--amber); }
         <button class="tab" role="tab" id="tab-installer" aria-controls="panel-installer" aria-selected="true">Guided installer</button>
         <button class="tab" role="tab" id="tab-compose" aria-controls="panel-compose" aria-selected="false" tabindex="-1">Docker Compose</button>
         <button class="tab" role="tab" id="tab-run" aria-controls="panel-run" aria-selected="false" tabindex="-1">docker run</button>
-        <button class="tab" role="tab" id="tab-unraid" aria-controls="panel-unraid" aria-selected="false" tabindex="-1">Unraid</button>
+        <button class="tab" role="tab" id="tab-unraid" aria-controls="panel-unraid" aria-selected="false" tabindex="-1">Unraid <span class="soon-tag">Soon</span></button>
         <button class="tab" role="tab" id="tab-uv" aria-controls="panel-uv" aria-selected="false" tabindex="-1">uv</button>
       </div>
 
@@ -708,10 +713,12 @@ footer nav a:hover { color: var(--amber); }
       </div>
 
       <div class="tabpanel" role="tabpanel" id="panel-unraid" aria-labelledby="tab-unraid" hidden>
-        <div class="code"><div class="bar"><span>UNRAID TERMINAL</span><button class="copy" type="button" data-copy-from="unraid-src"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>Copy</span></button></div>
-<pre id="unraid-src"><span class="k">wget</span> -O /boot/config/plugins/dockerMan/templates-user/my-Narratarr.xml \
-  https://raw.githubusercontent.com/narratarr/narratarr/main/unraid/narratarr.xml</pre></div>
-        <p class="after">Then in Docker choose Add Container and pick Narratarr from the template list. It runs as Unraid's usual <code>nobody:users</code>.</p>
+        <div class="soon">
+          <span class="soon-badge">Coming soon</span>
+          <h3>Narratarr on Unraid</h3>
+          <p>Narratarr isn't in Unraid's Community Applications yet. Once it is, you'll install it from the Apps tab like any other container. Join the Discord to hear the moment it lands.</p>
+          <a class="btn" href="https://discord.gg/kB5EgmfBrA">Get notified on Discord</a>
+        </div>
       </div>
 
       <div class="tabpanel" role="tabpanel" id="panel-uv" aria-labelledby="tab-uv" hidden>
@@ -732,7 +739,7 @@ footer nav a:hover { color: var(--amber); }
     </div>
     <div class="ggrid" id="ggrid">
       <a class="guide" href="https://github.com/narratarr/narratarr#-your-first-five-minutes"><span class="gno">01 · START</span><h3>Your first five minutes</h3><p>From the first page you see to pressing play on your first book.</p><span class="go">Read the guide <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></span></a>
-      <a class="guide" href="https://github.com/narratarr/narratarr#-install"><span class="gno">02 · INSTALL</span><h3>Install and update</h3><p>The guided installer and its options, Docker, Unraid and uv.</p><span class="go">Read the guide <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></span></a>
+      <a class="guide" href="https://github.com/narratarr/narratarr#-install"><span class="gno">02 · INSTALL</span><h3>Install and update</h3><p>The guided installer and its options, Docker and uv.</p><span class="go">Read the guide <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></span></a>
       <a class="guide" href="https://github.com/narratarr/narratarr#your-arr-stack-prowlarr-and-download-clients"><span class="gno">03 · CONNECT</span><h3>Prowlarr and download clients</h3><p>Indexers, debrid services, torrent clients, Usenet, and the paths they share.</p><span class="go">Read the guide <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></span></a>
       <a class="guide" href="https://github.com/narratarr/narratarr/blob/main/docs/download-routing.md"><span class="gno">04 · ROUTE</span><h3>Download routing</h3><p>Rules that pick a client per release, defaults per protocol, and testing a route.</p><span class="go">Read the guide <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></span></a>
       <a class="guide" href="https://github.com/narratarr/narratarr#folder-layout"><span class="gno">05 · FILE</span><h3>Folder layout</h3><p>Presets, every variable, and how missing parts drop out of a name.</p><span class="go">Read the guide <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></span></a>
@@ -839,7 +846,7 @@ footer nav a:hover { color: var(--amber); }
       t.tabIndex = on ? 0 : -1;
       $("#" + t.getAttribute("aria-controls")).hidden = !on;
     });
-    if (hasGsap && !reduced) gsap.fromTo("#" + tab.getAttribute("aria-controls") + " .code", { y: 14, autoAlpha: 0 }, { y: 0, autoAlpha: 1, duration: 0.5, ease: "power3.out" });
+    if (hasGsap && !reduced) gsap.fromTo($$("#" + tab.getAttribute("aria-controls") + " .code, #" + tab.getAttribute("aria-controls") + " .soon"), { y: 14, autoAlpha: 0 }, { y: 0, autoAlpha: 1, duration: 0.5, ease: "power3.out" });
   };
   tabs.forEach((t, i) => {
     t.addEventListener("click", () => select(t));
