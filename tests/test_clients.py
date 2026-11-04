@@ -518,3 +518,15 @@ async def test_a_draft_client_fails_with_a_clear_message_not_a_connection_error(
     assert row["status"] == "failed"
     assert "Deluge isn't set up yet" in row["error"], row["error"]
     assert "connection" not in row["error"].lower(), "it must not get as far as dialling anything"
+
+
+async def test_two_draft_clients_are_named_together(isolated_data):
+    config.update({"clients": [{"id": "deluge", "type": "deluge", "url": ""},
+                               {"id": "transmission", "type": "transmission", "url": ""}],
+                   "default_client": ""})
+    book = torrent_book()
+
+    await Worker(transport=httpx.MockTransport(FakeDeluge(isolated_data)))._run(book["id"])
+
+    error = db.get(book["id"])["error"]
+    assert "Deluge and Transmission aren't set up yet" in error, error

@@ -390,9 +390,17 @@ class Worker:
                 proto = "usenet" if book["protocol"] == "usenet" else "torrent"
                 drafts = [e for e in downloaders.entries(settings) if e.delivery == proto and not e.configured]
                 if drafts:
-                    names = " and ".join(e.label for e in drafts)
-                    raise ValueError(f"{names} isn't set up yet. Add its address and sign-in details "
-                                     "under Settings → Downloads, then grab this again.")
+                    def needs(e) -> str:
+                        if e.is_debrid:
+                            return "API key"
+                        return "address and API key" if e.type == "sabnzbd" else "address"
+                    if len(drafts) == 1:
+                        e = drafts[0]
+                        raise ValueError(f"{e.label} isn't set up yet. Add its {needs(e)} under "
+                                         "Settings → Downloads, then grab this again.")
+                    names = ", ".join(e.label for e in drafts[:-1]) + f" and {drafts[-1].label}"
+                    raise ValueError(f"{names} aren't set up yet. Fill them in under Settings → Downloads, "
+                                     "then grab this again.")
                 if book["protocol"] == "usenet":
                     raise ValueError("Nothing can take a Usenet release: add SABnzbd or NZBGet under "
                                      "Settings → Downloads.")
