@@ -349,9 +349,35 @@ function cardHTML(item, lib, i = 0) {
         <div class="title">${esc(item.title)}</div>
         <div class="author">${esc(item.author || (item.indexer ? `via ${item.indexer}` : "Unknown author"))}</div>
         ${facts.length ? `<div class="facts">${facts.map((f) => `<span>${esc(f)}</span>`).join("")}</div>` : ""}
+        ${ratingPillHTML(item)}
         ${clientChip(item)}
       </div>
     </article>`;
+}
+
+function ratingPillHTML(item) {
+  // `rating` is whatever provider Settings selected. `label` is the small mark beside the score:
+  // the source mark beside the score, e.g. "Audible".
+  // Switched off in Settings: no slot, no words. "Absent" is not "unrated".
+  if (item.rating_state === "off") return "";
+  const r = item.rating;
+  let inner = "";
+  if (r && (r.score_text || r.display)) {
+    const score = r.score_text || `★ ${Number(r.R).toFixed(1)}`;
+    const second = r.label || (r.count ? `${r.count}` : "");
+    const tip = r.tooltip || r.display || "";
+    inner = `<a class="rating-pill" href="${esc(r.url)}" target="_blank" rel="noopener" title="${esc(tip)}">
+        <span class="rating-score">${esc(score)}</span>
+        ${second ? `<span class="rating-mark">${esc(second)}</span>` : ""}
+      </a>`;
+  } else {
+    // Two different facts, so two different strings. "The source knows this book and nobody has
+    // rated it" is information; "we never found it" is not the same thing.
+    inner = `<span class="rating-pill empty">${item.rating_state === "unrated" ? "No Rating Available" : "No Rating"}</span>`;
+  }
+  // Always emit the slot so every card reserves the same space and the row
+  // sits at the same height whether or not a rating exists.
+  return `<div class="rating-slot">${inner}</div>`;
 }
 
 function clientChip(item) {
@@ -523,7 +549,8 @@ function Discover(root) {
     <div id="dym"></div>
     <div id="lang-note"></div>
     <div class="grid" id="grid"></div>
-    <div class="load-more" id="sentinel"></div>`;
+    <div class="load-more" id="sentinel"></div>
+  `;
 
   const grid = $("#grid", root);
   const sentinel = $("#sentinel", root);
@@ -546,7 +573,7 @@ function Discover(root) {
     // The unsorted order is whatever the source gave us: relevance, popularity or recency.
     const listedNewest = !d.q && (["torrent", "indexer"].includes(src.delivery) || d.category === "new");
     const natural = d.q ? "Best match" : listedNewest ? "Newest first" : "Most popular";
-    const sorts = [["", natural], ["newest", "Newest first"], ["largest", "Largest"], ["smallest", "Smallest"], ["title", "Title A–Z"]]
+    const sorts = [["", natural], ["rating", "Rating"], ["newest", "Newest first"], ["largest", "Largest"], ["smallest", "Smallest"], ["title", "Title A–Z"]]
       .filter(([v]) => !(v === "newest" && listedNewest));
     const shown = visibleItems().length;
     $("#refine", root).innerHTML = !d.items.length ? "" : `
@@ -565,6 +592,7 @@ function Discover(root) {
     let items = d.items.filter((i) => (!d.lang || i.language === d.lang) && (!d.fmt || i.format.toUpperCase() === d.fmt))
       .filter((i) => d.allLangs || i.lang_ok !== false);
     const by = {
+      rating: (a, b) => { const s = (x) => x.rating?.score ?? null; const av = s(a), bv = s(b); if (av == null && bv == null) return 0; if (av == null) return 1; if (bv == null) return -1; return bv - av; },
       newest: (a, b) => (Date.parse(b.posted) || 0) - (Date.parse(a.posted) || 0),
       largest: (a, b) => sizeOf(b.size) - sizeOf(a.size),
       smallest: (a, b) => sizeOf(a.size) - sizeOf(b.size),
@@ -622,6 +650,7 @@ function Discover(root) {
     try {
       const params = new URLSearchParams({ q: d.q, category: d.category, page: d.page + 1, source: d.source });
       if (src.name === "prowlarr") params.set("kind", d.kind);
+      if (d.sort === "rating") params.set("sort", "rating");
       const res = await api(`/api/discover?${params}`);
       if (token !== d.token) return;
       const seen = new Set(d.items.map((i) => i.url));
@@ -2391,6 +2420,22 @@ function Settings(root, page) {
       </section>
 
       <section class="panel" data-page="search">
+        <div class="ph"><h3>Rating metadata</h3><p class="desc">The star pill on every Discover card. Ratings are read from a local cache, never fetched while a page loads: a book with no rating yet is filled in the background and appears on your next search.</p></div>
+        <div class="body">
+          <div class="field">
+            <label class="switch"><input type="checkbox" name="ratings_enabled" ${s.ratings_enabled ? "checked" : ""}><i></i>Show ratings on book cards</label>
+            <span class="hint">A star score from Audible’s own average, for any book they sell. Ratings are read from a local cache, never fetched while a page loads, so a new book fills in the background and shows next time. Switching this off removes the pill from every card and makes no network requests at all.</span>
+          </div>
+          <div class="set-row">
+            <label><b>Audible storefronts</b><small>A book is only sold in some countries, and the ratings service only answers from a country that sells it. Narratarr asks your list in order, then the country the book itself came from, so the single United Kingdom entry is enough for most titles. The storefront that answered is remembered for that book. Add more only if the same cards keep showing <b>No Rating</b>: more regions means more coverage and more requests.</small></label>
+            <div id="audnex-regions"></div>
+            <input type="hidden" name="audnex_regions" value="${esc((s.audnex_regions || ["uk"]).join(","))}" />
+            <div><button class="btn" type="button" id="add-region">Add a region</button></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" data-page="search">
         <div class="ph"><h3>AudiobookBay</h3><p class="desc">The AudiobookBay tab on Discover. Change the address if the site moves.</p></div>
         <div class="body">
           <div class="field">
@@ -3016,6 +3061,76 @@ function Settings(root, page) {
     choose(seg.dataset.choice, form[seg.dataset.choice].value);
     seg.onclick = (e) => { const b = e.target.closest("[data-v]"); if (b) choose(seg.dataset.choice, b.dataset.v); };
   });
+
+  // Audible storefronts: an ordered list, because availability is per item and the order is the
+  // search order. Up/down move a row, Test asks that storefront about one known book.
+  const CODES = ["us", "uk", "ca", "au", "in", "de", "fr", "it", "es", "jp"];
+  const NAMES = { us: "United States", uk: "United Kingdom", ca: "Canada", au: "Australia",
+    in: "India", de: "Germany", fr: "France", it: "Italy", es: "Spain", jp: "Japan" };
+  const regionBox = $("#audnex-regions", root);
+  const loadRegions = () => (String(form.audnex_regions.value || "uk").split(",").map((r) => r.trim()).filter(Boolean));
+  const storeRegions = (list) => { form.audnex_regions.value = list.join(","); dirty(); };
+
+  const drawRegions = () => {
+    const list = loadRegions();
+    regionBox.innerHTML = list.map((code, i) => `
+      <div class="region-row" data-i="${i}" style="display:flex;align-items:center;gap:6px;margin:4px 0">
+        <select class="select" data-region style="max-width:220px" aria-label="Storefront for row ${i + 1}">
+          ${CODES.map((c) => `<option value="${c}" ${c === code ? "selected" : ""}>${esc(NAMES[c])} (${c})</option>`).join("")}
+        </select>
+        <button class="btn" type="button" data-act="up" ${i === 0 ? "disabled" : ""} aria-label="Move up">↑</button>
+        <button class="btn" type="button" data-act="down" ${i === list.length - 1 ? "disabled" : ""} aria-label="Move down">↓</button>
+        <button class="btn" type="button" data-act="test">Test</button>
+        <button class="btn" type="button" data-act="del" aria-label="Remove">✕</button>
+        <span class="hint" data-out></span>
+      </div>`).join("");
+  };
+
+  regionBox.onclick = async (e) => {
+    const btn = e.target.closest("[data-act]");
+    if (!btn) return;
+    const row = btn.closest("[data-i]");
+    const i = Number(row.dataset.i);
+    const list = loadRegions();
+    const act = btn.dataset.act;
+    if (act === "del") { list.splice(i, 1); storeRegions(list.length ? list : ["uk"]); drawRegions(); return; }
+    if (act === "up" && i > 0) { [list[i - 1], list[i]] = [list[i], list[i - 1]]; storeRegions(list); drawRegions(); return; }
+    if (act === "down" && i < list.length - 1) { [list[i + 1], list[i]] = [list[i], list[i + 1]]; storeRegions(list); drawRegions(); return; }
+    if (act === "test") {
+      const out = $("[data-out]", row);
+      spinBtn(btn, true);
+      try {
+        const got = await api("/api/settings/test-audnex-region", { method: "POST", body: { region: list[i] } });
+        out.innerHTML = got.ok
+          ? `<div class="rd-result"><span>${got.rating ? `<b>${esc(got.rating)}</b> average` : "no ratings yet"}</span></div>`
+          : `<div class="rd-result bad">${got.reason === "region unavailable"
+              ? "Region unavailable, this book isn&#39;t sold here" : esc(got.reason)}</div>`;
+      } catch (err) {
+        out.innerHTML = `<div class="rd-result bad">${esc(err.message)}</div>`;
+      }
+      spinBtn(btn, false);
+    }
+  };
+
+  regionBox.onchange = (e) => {
+    const sel = e.target.closest("[data-region]");
+    if (!sel) return;
+    const list = loadRegions();
+    const i = Number(sel.closest("[data-i]").dataset.i);
+    if (list.includes(sel.value)) { sel.value = list[i]; return; }  // no duplicates: it is an order
+    list[i] = sel.value;
+    storeRegions(list);
+    drawRegions();
+  };
+
+  $("#add-region", root).onclick = () => {
+    const list = loadRegions();
+    const spare = CODES.find((c) => !list.includes(c));
+    if (!spare) return;
+    storeRegions([...list, spare]);
+    drawRegions();
+  };
+  drawRegions();
   $("#open-import", root).onclick = async () => { await save(true); openImport(form.import_folder.value); };
   $("#whats-new", root).onclick = () => openWhatsNew();
   $("#check-updates", root).onclick = async (e) => {

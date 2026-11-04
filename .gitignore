@@ -5,3 +5,7 @@ __pycache__/
 .DS_Store
 /config/
 dist/
+
+# Per-instance ratings cache (never shipped: it is not a dataset we own)
+ratings.sqlite
+ratings.sqlite-*

@@ -26,8 +26,8 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from . import (apiv1, audible, audiobookshelf, auth, brave, config, db, downloaders, ebooks, importer, media, routing,
-               search, tokens, updates, users, wanted)
+from . import (apiv1, audible, audiobookshelf, auth, brave, config, db, downloaders, ebooks, importer, media, ratings,
+               routing, search, tokens, updates, users, wanted)
 from .audiobookshelf import Audiobookshelf, AudiobookshelfError
 from .downloaders import ClientError
 from . import alldebrid, languages, notify, tidy
@@ -43,6 +43,8 @@ log = logging.getLogger("narratarr.api")
 
 
 STATIC = Path(__file__).parent / "static"
+# A book Audnex serves from `uk` (Project Hail Mary). Its rating anchors the region Test button.
+PROBE_ASIN = "B08GB2RLKM"
 COVER_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".gif": "image/gif"}
 
 
@@ -55,6 +57,8 @@ async def lifespan(app: FastAPI):
     app.state.worker = worker
     app.state.tasks = set()
     worker.start()
+    if config.load().ratings_enabled:
+        ratings.start_filler()  # nothing is ever queued with the feature off
     yield
     await worker.stop()
 
@@ -216,7 +220,7 @@ async def sources():
 
 @app.get("/api/discover")
 async def discover(q: str = "", category: str = "", page: int = 1, source: str = "librivox",
-                   kind: Literal["audiobook", "ebook"] = "audiobook"):
+                   kind: Literal["audiobook", "ebook"] = "audiobook", sort: str = ""):
     try:
         src = get_source(source)
     except ValueError:
@@ -271,6 +275,15 @@ async def discover(q: str = "", category: str = "", page: int = 1, source: str =
             if decision.client_id:
                 item["client"] = {"id": decision.client_id, "label": entry.label if entry else "",
                                   "rule": decision.rule}
+    # Ratings: read from the cache only. Anything missing is filled in the background and shows
+    # up on the next search, so a slow ratings provider never holds up a page.
+    _provider = ratings.provider()
+    if _provider is not None:
+        ratings.ensure_filler()  # switched on since startup: the filler wasn't started then
+    for item in data["items"]:
+        ratings.enrich(item, provider_obj=_provider)
+    if sort == "rating":
+        data["items"] = ratings.sort_items(data["items"])
     if src.name == "prowlarr" and kind == "ebook" and not data["items"]:
         data["note"] = await _no_ebook_indexers(src)
     return data
@@ -1149,6 +1162,25 @@ async def test_prowlarr():
         return await Prowlarr(s.prowlarr_url, s.prowlarr_api_key).status(s.prowlarr_ebook_categories)
     except ProwlarrError as e:
         raise HTTPException(400, str(e))
+
+
+class RegionProbe(BaseModel):
+    region: str = ""
+
+
+@app.post("/api/settings/test-audnex-region")
+async def test_audnex_region(body: RegionProbe):
+    """Fetch one known ASIN from one storefront, so a user can see which of their regions answer."""
+    from .ratings.audnex import AudnexProvider, AudnexUnavailable
+
+    region = (body.region or "").strip().lower()
+    if region not in config.AUDNEX_REGIONS:
+        raise HTTPException(400, f"'{region}' isn't an Audible storefront Audnex serves.")
+    provider = AudnexProvider(ratings.get_store(), regions=[region])
+    try:
+        return await provider.check_region(PROBE_ASIN, region)
+    except AudnexUnavailable as e:
+        return {"region": region, "ok": False, "reason": str(e)}
 
 
 @app.post("/api/settings/test-torznab")

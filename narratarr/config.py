@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
@@ -80,6 +81,12 @@ class Settings:
     auto_search_hours: int = 12
     audible_region: str = "us"
     check_updates: bool = True  # one request a day to GitHub's releases API
+    # On by default, and on for an existing settings file that predates the key: `load()` starts
+    # from the dataclass defaults and only overwrites keys it finds, so an absent key means True.
+    ratings_enabled: bool = True
+    # Audible storefronts Audnex serves, in the order they are tried. `br` is not here: the API
+    # rejects it as an unsupported code, and a code that can only fail should not be offered.
+    audnex_regions: list[str] = field(default_factory=lambda: ["uk"])
     auth_local_bypass: bool = False  # skip sign-in for requests from this machine and the home network
     listener_approval: bool = True  # a listener's request waits for an admin before anything is searched or downloaded
     languages: str = ""  # the languages books should be in, e.g. "German, English" (blank: any)
@@ -215,7 +222,9 @@ def update(changes: dict) -> Settings:
                     for secret in SERVICE_SECRETS[k]:
                         if secret not in fresh:
                             setattr(s, secret, "")
-            if k == "clients":
+            if k == "audnex_regions":
+                v = parse_regions(v)
+            elif k == "clients":
                 v = _merge_client_secrets(validate_clients(v), s.clients)
             elif k == "client_routes":
                 from . import routing
@@ -277,6 +286,32 @@ def update(changes: dict) -> Settings:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         _write_private(SETTINGS_FILE, json.dumps(asdict(s), indent=2))
     return s
+
+
+AUDNEX_REGIONS = ("us", "uk", "ca", "au", "in", "de", "fr", "it", "es", "jp")
+
+
+def parse_regions(value) -> list[str]:
+    """An ordered, de-duplicated list of storefront codes, or a ValueError naming the bad one.
+
+    The order is the user's: availability is per item, so the list is a search order, not a set.
+    A code the API does not serve is refused here rather than saved and quietly 400-ing later.
+    """
+    if isinstance(value, str):
+        raw = [x for x in re.split(r"[,\s]+", value.strip()) if x]
+    elif isinstance(value, (list, tuple)):
+        raw = [str(x).strip() for x in value if str(x).strip()]
+    else:
+        raw = []
+    out: list[str] = []
+    for code in raw:
+        code = code.lower()
+        if code not in AUDNEX_REGIONS:
+            raise ValueError(
+                f"'{code}' isn't an Audible storefront Audnex serves. Use one of: {', '.join(AUDNEX_REGIONS)}.")
+        if code not in out:
+            out.append(code)
+    return out or ["uk"]
 
 
 # ---- download clients: one flat configuration per protocol, migrated into a list ------------

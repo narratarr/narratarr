@@ -1,0 +1,18 @@
+{
+  "asin": "B08GB2RLKM",
+  "title": "Project Hail Mary",
+  "authors": [
+    {
+      "asin": "B00G0WYW92",
+      "name": "Andy Weir"
+    }
+  ],
+  "rating": "4.9",
+  "isbn": "9781603935470",
+  "runtimeLengthMin": 970,
+  "publisherName": "Audible Studios",
+  "region": "uk",
+  "language": "english",
+  "releaseDate": "2021-05-04T00:00:00.000Z",
+  "_comment": "Captured live from api.audnex.us/books/B08GB2RLKM?region=uk on this host. Same ASIN returns 404 for region=us and with no region."
+}
