@@ -1,0 +1,16 @@
+// narratarr.com: the landing page, served as static assets by a Worker.
+// Deploy from this folder with `wrangler deploy`.
+{
+  "name": "narratarr-site",
+  "compatibility_date": "2026-11-01",
+  "assets": {
+    "directory": "./public",
+    "html_handling": "auto-trailing-slash"
+  },
+  "routes": [
+    { "pattern": "narratarr.com", "custom_domain": true },
+    { "pattern": "www.narratarr.com", "custom_domain": true }
+  ],
+  "workers_dev": false,
+  "preview_urls": false
+}

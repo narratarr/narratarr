@@ -1,0 +1,1124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Narratarr</title>
+<meta name="description" content="Narratarr is a self-hosted, *arr-style audiobook manager with a player built in. Find a book, click once, and it lands in your library, tagged, organized and ready to play.">
+<meta name="theme-color" content="#0c0a0f">
+<meta property="og:title" content="Narratarr: your audiobooks, found, fetched and playing">
+<meta property="og:description" content="A self-hosted, *arr-style audiobook manager with a player built in. Open source, MIT licensed.">
+<meta property="og:image" content="https://narratarr.com/images/library.webp">
+<meta property="og:url" content="https://narratarr.com/">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="canonical" href="https://narratarr.com/">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23f8c66e'/%3E%3Cstop offset='1' stop-color='%23ec6f55'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='16' fill='url(%23g)'/%3E%3Cpath d='M13 44.5c6-3.2 12.5-3.2 19 0 6.5-3.2 13-3.2 19 0' fill='none' stroke='%231a1016' stroke-width='3.2' stroke-linecap='round'/%3E%3Cg stroke='%231a1016' stroke-width='3.6' stroke-linecap='round'%3E%3Cpath d='M20 31v4'/%3E%3Cpath d='M26 24v11'/%3E%3Cpath d='M32 18v17'/%3E%3Cpath d='M38 23v12'/%3E%3Cpath d='M44 29v6'/%3E%3C/g%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT,WONK@0,9..144,300..900,0..100,0..1;1,9..144,300..900,0..100,0..1&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Narratarr after dark: the app's own listening-room palette, one committed dark world.
+   Layout idea: the page is an audiobook. Each section is a chapter, and a now-playing bar scrubs through them. */
+:root {
+  --ink: #0c0a0f;
+  --ink-2: #15111a;
+  --ink-3: #1e1824;
+  --paper: #f6f0e8;
+  --paper-2: #c9bfb4;
+  --paper-3: #948a80;
+  --amber: #f8c66e;
+  --coral: #ec6f55;
+  --plum: #8e5bb8;
+  --grad: linear-gradient(135deg, #f8c66e 0%, #ec6f55 100%);
+  --line: rgba(255, 244, 230, 0.09);
+  --line-2: rgba(255, 244, 230, 0.16);
+  --glass: rgba(24, 19, 28, 0.72);
+  --display: "Fraunces", "Iowan Old Style", Georgia, serif;
+  --body: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --gutter: max(16px, 4.5vw);
+  color-scheme: dark;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; background: var(--ink); }
+body {
+  margin: 0; background: var(--ink); color: var(--paper);
+  font: 400 17px/1.6 var(--body);
+  -webkit-font-smoothing: antialiased; overflow-x: hidden;
+}
+img { max-width: 100%; display: block; }
+a { color: inherit; }
+::selection { background: rgba(248, 198, 110, 0.35); color: var(--paper); }
+:focus-visible { outline: 2px solid var(--amber); outline-offset: 3px; border-radius: 6px; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* grain over everything, very quiet */
+body::after {
+  content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 90; opacity: 0.07; mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+.wrap { width: 100%; max-width: 1240px; margin: 0 auto; padding-inline: var(--gutter); }
+.display { font-family: var(--display); font-optical-sizing: auto; font-variation-settings: "SOFT" 40, "WONK" 0; letter-spacing: -0.03em; line-height: 0.98; font-weight: 400; text-wrap: balance; margin: 0; }
+.grad { background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; font-style: italic; padding-right: 0.08em; font-variation-settings: "SOFT" 100, "WONK" 1; }
+.eyebrow { font: 500 12.5px/1 var(--mono); letter-spacing: 0.16em; text-transform: uppercase; color: var(--amber); }
+.lead { font-size: clamp(18px, 1.5vw, 21px); line-height: 1.55; color: var(--paper-2); max-width: 36em; margin: 0; }
+code, .mono { font-family: var(--mono); font-size: 0.9em; }
+p code { background: rgba(255, 244, 230, 0.06); border: 1px solid var(--line); padding: 1px 6px; border-radius: 6px; color: var(--paper); }
+
+/* ---------- buttons ---------- */
+.btn {
+  --h: 52px; display: inline-flex; align-items: center; gap: 10px; height: var(--h); padding: 0 24px; border-radius: 999px;
+  font: 600 15.5px/1 var(--body); text-decoration: none; border: 1px solid var(--line-2); color: var(--paper);
+  background: rgba(255, 244, 230, 0.04); transition: background .3s var(--ease), border-color .3s var(--ease), transform .3s var(--ease); cursor: pointer;
+}
+.btn:hover { background: rgba(255, 244, 230, 0.09); border-color: rgba(255, 244, 230, 0.28); }
+.btn svg { width: 18px; height: 18px; flex: none; }
+.btn.primary { background: var(--grad); color: #1d1209; border-color: transparent; box-shadow: 0 10px 40px -10px rgba(236, 111, 85, 0.65), inset 0 1px 0 rgba(255,255,255,.35); }
+.btn.primary:hover { transform: translateY(-2px); box-shadow: 0 16px 50px -10px rgba(236, 111, 85, 0.8), inset 0 1px 0 rgba(255,255,255,.35); }
+
+/* ---------- nav ---------- */
+.nav { position: fixed; inset: 0 0 auto 0; z-index: 50; transition: transform .5s var(--ease), background .4s var(--ease), border-color .4s; border-bottom: 1px solid transparent; }
+.nav.solid { background: rgba(12, 10, 15, 0.72); backdrop-filter: blur(18px) saturate(1.4); -webkit-backdrop-filter: blur(18px) saturate(1.4); border-color: var(--line); }
+.nav.away { transform: translateY(-100%); }
+.nav .wrap { display: flex; align-items: center; gap: 28px; height: 72px; }
+.brand { display: inline-flex; align-items: center; gap: 12px; text-decoration: none; font: 500 22px/1 var(--display); letter-spacing: -0.02em; }
+.brand em { font-style: italic; background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; padding-right: .05em; }
+.brand svg { width: 36px; height: 36px; border-radius: 10px; box-shadow: 0 6px 20px -6px rgba(236,111,85,.6); }
+.nav-links { display: flex; gap: 4px; margin-left: auto; }
+.nav-links a { text-decoration: none; color: var(--paper-2); font-size: 15px; font-weight: 500; padding: 10px 14px; border-radius: 999px; transition: color .25s, background .25s; }
+.nav-links a:hover { color: var(--paper); background: rgba(255,244,230,.06); }
+.nav .btn { --h: 42px; padding: 0 18px; font-size: 14.5px; }
+@media (max-width: 860px) { .nav-links { display: none; } .nav .btn.ghost { display: none; } .nav .wrap { justify-content: space-between; } }
+
+/* ---------- hero ---------- */
+.hero { position: relative; padding: 128px 0 40px; isolation: isolate; overflow-x: clip; }
+.glow { position: absolute; border-radius: 50%; filter: blur(80px); pointer-events: none; z-index: -1; }
+.glow.a { width: 720px; height: 720px; left: -180px; top: -260px; background: radial-gradient(circle, rgba(246, 168, 80, 0.30), transparent 65%); }
+.glow.b { width: 640px; height: 640px; right: -200px; top: 120px; background: radial-gradient(circle, rgba(142, 91, 184, 0.28), transparent 65%); }
+.glow.c { width: 560px; height: 560px; left: 30%; top: 640px; background: radial-gradient(circle, rgba(236, 111, 85, 0.20), transparent 65%); }
+.hero-copy { display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; justify-items: start; position: relative; z-index: 2; }
+.hero h1 { font-size: clamp(50px, 7.6vw, 116px); font-variation-settings: "SOFT" 30, "WONK" 0, "opsz" 144; font-weight: 380; }
+.hero h1 .ln { display: block; overflow: hidden; padding: 0.02em 0.1em 0.16em 0; margin-bottom: -0.16em; }
+.hero h1 .w { display: inline-block; will-change: transform; }
+.hero-meta { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.cta-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; max-width: 100%; }
+.hero .cta-row .oneliner { flex: 1 1 360px; max-width: 560px; }
+.oneliner {
+  display: flex; align-items: center; gap: 4px; max-width: 100%; padding: 6px 6px 6px 18px; border-radius: 14px;
+  background: rgba(255, 244, 230, 0.04); border: 1px solid var(--line); font: 400 13.5px/1.4 var(--mono); color: var(--paper-2);
+}
+.oneliner .scroll { min-width: 0; overflow-x: auto; white-space: nowrap; scrollbar-width: none; padding: 8px 0; }
+.oneliner .scroll::-webkit-scrollbar { display: none; }
+.oneliner .scroll b { color: var(--amber); font-weight: 500; }
+.copy { flex: none; height: 38px; padding: 0 14px; border-radius: 10px; border: 1px solid var(--line-2); background: rgba(255,244,230,.05); color: var(--paper); font: 600 13px/1 var(--body); cursor: pointer; display: inline-flex; align-items: center; gap: 7px; transition: background .2s; }
+.copy:hover { background: rgba(255,244,230,.1); }
+.copy svg { width: 15px; height: 15px; }
+.copy.done { color: var(--amber); border-color: rgba(248,198,110,.4); }
+.fine { font-size: 14px; color: var(--paper-3); margin: 0; }
+
+.stage { position: relative; margin-top: 64px; perspective: 1800px; }
+.window {
+  position: relative; z-index: 2; border-radius: 18px; overflow: hidden; background: var(--ink-2);
+  border: 1px solid var(--line-2); box-shadow: 0 50px 120px -30px rgba(0,0,0,.85), 0 0 0 1px rgba(0,0,0,.4), 0 0 120px -20px rgba(236,111,85,.25);
+  transform-origin: 50% 0%; will-change: transform;
+}
+.chrome { display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 16px; background: rgba(255,244,230,.035); border-bottom: 1px solid var(--line); }
+.chrome i { width: 11px; height: 11px; border-radius: 50%; background: rgba(255,244,230,.14); }
+.chrome span { margin: 0 auto; font: 400 12px/1 var(--mono); color: var(--paper-3); padding: 6px 14px; border-radius: 8px; background: rgba(0,0,0,.25); }
+.window img { width: 100%; aspect-ratio: 16 / 10; object-fit: cover; }
+.float { position: absolute; z-index: 3; border-radius: 12px; overflow: hidden; box-shadow: 0 30px 60px -20px rgba(0,0,0,.8), 0 0 0 1px rgba(255,255,255,.06); will-change: transform; }
+.float img { width: 100%; height: 100%; object-fit: cover; }
+.f1 { width: 13%; aspect-ratio: 1; left: -4%; top: 12%; rotate: -9deg; }
+.f2 { width: 10%; aspect-ratio: 1; left: 3%; top: 64%; rotate: 7deg; z-index: 1; }
+.f3 { width: 12%; aspect-ratio: 1; right: -3%; top: 6%; rotate: 8deg; }
+.f4 { width: 9%; aspect-ratio: 1; right: 5%; top: 58%; rotate: -6deg; }
+.f5 { width: 8%; aspect-ratio: 1; left: 22%; top: -9%; rotate: 5deg; z-index: 1; }
+.f6 { width: 8.5%; aspect-ratio: 1; right: 26%; top: -7%; rotate: -7deg; z-index: 1; }
+@media (max-width: 700px) { .f5, .f6, .f2 { display: none; } .f1 { width: 22%; left: -3%; top: -10%; } .f3 { width: 20%; top: -12%; } .f4 { width: 18%; top: 70%; } .stage { margin-top: 64px; } }
+
+/* ---------- chapters ---------- */
+.chapter { position: relative; padding: 140px 0; }
+.chap-grid { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: clamp(32px, 6vw, 96px); align-items: center; }
+.chap-head { display: grid; gap: 22px; align-content: start; }
+.chap-no { display: flex; align-items: baseline; gap: 14px; }
+.chap-no .big {
+  font: italic 300 clamp(72px, 9vw, 132px)/0.8 var(--display); font-variation-settings: "SOFT" 100, "WONK" 1, "opsz" 144;
+  color: transparent; -webkit-text-stroke: 1.2px rgba(248, 198, 110, 0.55); letter-spacing: -0.04em;
+}
+.chap-head h2 { font-size: clamp(38px, 4.6vw, 68px); }
+.chap-head p { margin: 0; color: var(--paper-2); max-width: 34em; }
+.chap-head .points { list-style: none; padding: 0; margin: 6px 0 0; display: grid; gap: 12px; }
+.chap-head .points li { display: grid; grid-template-columns: 22px 1fr; gap: 12px; color: var(--paper-2); font-size: 16px; }
+.chap-head .points svg { width: 20px; height: 20px; color: var(--amber); margin-top: 3px; }
+@media (max-width: 959px) { .chap-grid { grid-template-columns: 1fr; } .chapter { padding: 96px 0; } }
+
+.panel { position: relative; border-radius: 22px; background: linear-gradient(180deg, rgba(255,244,230,.05), rgba(255,244,230,.02)); border: 1px solid var(--line); box-shadow: 0 40px 100px -40px rgba(0,0,0,.9); }
+
+/* chapter 1: find */
+.search-stage { padding: clamp(18px, 2.4vw, 32px); display: grid; gap: 18px; }
+.searchbar { display: flex; align-items: center; gap: 14px; height: 64px; padding: 0 8px 0 22px; border-radius: 18px; background: rgba(0,0,0,.35); border: 1px solid rgba(248,198,110,.35); box-shadow: 0 0 0 6px rgba(248,198,110,.06), 0 20px 50px -20px rgba(248,168,80,.35); }
+.searchbar svg { width: 22px; height: 22px; color: var(--paper-3); flex: none; }
+.q { flex: 1; min-width: 0; position: relative; font-size: 20px; color: var(--paper); white-space: nowrap; overflow: hidden; }
+.q .caret { display: inline-block; width: 2px; height: 1.1em; vertical-align: -0.18em; background: var(--amber); margin-left: 2px; animation: blink 1s steps(2) infinite; }
+.q .squiggle { position: absolute; left: 0; bottom: 4px; height: 6px; width: 7.2em; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='6'%3E%3Cpath d='M0 3 Q2 0 4 3 T8 3' fill='none' stroke='%23ec6f55' stroke-width='1.4'/%3E%3C/svg%3E") repeat-x; opacity: .9; }
+@keyframes blink { to { opacity: 0; } }
+.searchbar .go { height: 48px; padding: 0 22px; border-radius: 13px; background: var(--grad); color: #1d1209; font: 600 15px/48px var(--body); flex: none; }
+.fix { font-size: 15px; color: var(--paper-3); }
+.fix em { font-family: var(--display); color: var(--paper); font-size: 1.08em; }
+.fix span { color: var(--amber); font-weight: 500; }
+.results { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: clamp(10px, 1.4vw, 18px); }
+.book { display: grid; gap: 10px; }
+.book .cv { border-radius: 10px; overflow: hidden; aspect-ratio: 1; box-shadow: 0 1px 2px rgba(0,0,0,.4), 0 14px 30px -10px rgba(0,0,0,.7); }
+.book .cv img { width: 100%; height: 100%; object-fit: cover; }
+.book b { font: 500 clamp(13px, 1.1vw, 15.5px)/1.25 var(--display); }
+.book small { display: block; color: var(--paper-3); font-size: 12.5px; margin-top: 2px; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { font-size: 13.5px; padding: 8px 14px; border-radius: 999px; border: 1px solid var(--line-2); color: var(--paper-2); background: rgba(255,244,230,.03); }
+.chip.on { background: var(--paper); color: var(--ink); border-color: transparent; font-weight: 500; }
+@media (max-width: 600px) { .results { grid-template-columns: repeat(2, minmax(0, 1fr)); } .searchbar { height: 56px; } .q { font-size: 17px; } .searchbar .go { padding: 0 14px; height: 42px; line-height: 42px; } }
+
+/* marquee */
+.marquee { padding: 40px 0 0; overflow: hidden; display: grid; gap: 6px; mask-image: linear-gradient(90deg, transparent, #000 10%, #000 90%, transparent); -webkit-mask-image: linear-gradient(90deg, transparent, #000 10%, #000 90%, transparent); }
+.mrow { display: flex; width: max-content; }
+.mrow span { font: 300 clamp(40px, 6.4vw, 96px)/1.15 var(--display); letter-spacing: -0.03em; padding-right: 0.45em; white-space: nowrap; font-variation-settings: "SOFT" 60, "opsz" 144; }
+.mrow span:nth-child(odd) { color: var(--paper); }
+.mrow span:nth-child(even) { font-style: italic; color: transparent; -webkit-text-stroke: 1px rgba(246, 240, 232, 0.4); }
+.mrow span i { font-style: normal; color: var(--coral); -webkit-text-stroke: 0; }
+.marquee-cap { text-align: center; color: var(--paper-3); font-size: 15px; margin: 22px 0 0; }
+
+/* chapter 2: fetch */
+.flow { padding: clamp(14px, 2vw, 26px); }
+.flow svg { width: 100%; height: auto; display: block; overflow: visible; }
+.flow text { font-family: var(--body); fill: var(--paper-2); }
+.flow .t-title { font: 500 17px var(--display); fill: var(--paper); }
+.flow .t-small { font-size: 12.5px; fill: var(--paper-3); }
+.flow .t-mono { font: 500 11px var(--mono); letter-spacing: .12em; fill: var(--amber); }
+.flow .node { fill: rgba(255,244,230,.035); stroke: rgba(255,244,230,.14); stroke-width: 1; }
+.flow .wire { fill: none; stroke: rgba(255,244,230,.12); stroke-width: 1.5; stroke-dasharray: 4 6; }
+.flow .route { fill: none; stroke: url(#wireGrad); stroke-width: 2.5; stroke-linecap: round; }
+.flow .lit { stroke: #f8c66e; }
+.flow .client-name { font-size: 14px; fill: var(--paper-2); }
+.flow .client-on { fill: var(--paper); font-weight: 600; }
+
+/* chapter 3: file */
+.files { padding: clamp(18px, 2.6vw, 34px); display: grid; gap: 22px; font-family: var(--mono); font-size: clamp(12px, 1.05vw, 14.5px); }
+.tpl-label { font: 500 11px/1 var(--mono); letter-spacing: .14em; color: var(--paper-3); text-transform: uppercase; margin-bottom: 10px; }
+.tpl { color: var(--amber); padding: 14px 16px; border-radius: 12px; background: rgba(0,0,0,.3); border: 1px solid var(--line); overflow-x: auto; white-space: nowrap; }
+.paths { display: grid; gap: 10px; }
+.pathline { padding: 14px 16px; border-radius: 12px; background: rgba(255,244,230,.035); border: 1px solid var(--line); white-space: nowrap; overflow-x: auto; color: var(--paper); }
+.pathline .sep { color: var(--paper-3); }
+.pathline .seg { color: var(--paper); }
+.pathline .drop { display: inline-block; max-width: 0; opacity: 0; overflow: hidden; white-space: nowrap; vertical-align: bottom; color: var(--coral); }
+.tree { display: grid; gap: 2px; padding: 16px 18px; border-radius: 12px; background: rgba(0,0,0,.25); border: 1px solid var(--line); color: var(--paper-2); overflow-x: auto; }
+.tree div { white-space: nowrap; display: flex; align-items: center; gap: 9px; }
+.tree svg { width: 16px; height: 16px; flex: none; }
+.tree .d svg { color: var(--amber); }
+.tree .f svg { color: var(--paper-3); }
+.tree .i1 { padding-left: 22px; } .tree .i2 { padding-left: 44px; } .tree .i3 { padding-left: 66px; }
+.abs-note { display: flex; gap: 12px; align-items: center; font-family: var(--body); font-size: 14.5px; color: var(--paper-2); padding: 14px 16px; border-radius: 12px; border: 1px dashed rgba(248,198,110,.3); }
+.abs-note svg { width: 20px; height: 20px; color: var(--amber); flex: none; }
+
+/* chapter 4: listen */
+.listen-stage { position: relative; }
+.player { overflow: hidden; border-radius: 22px; border: 1px solid var(--line-2); box-shadow: 0 50px 120px -40px rgba(0,0,0,.9); }
+.player img { width: 100%; aspect-ratio: 16 / 10; object-fit: cover; }
+.phone { position: absolute; width: 27%; right: -5%; bottom: -12%; border-radius: 34px; padding: 7px; background: #0a080c; border: 1px solid rgba(255,244,230,.16); box-shadow: 0 40px 80px -20px rgba(0,0,0,.9); z-index: 2; }
+.phone img { border-radius: 27px; width: 100%; aspect-ratio: 780 / 1688; object-fit: cover; }
+.pills { position: absolute; left: 4%; bottom: -26px; display: flex; gap: 10px; z-index: 3; flex-wrap: wrap; }
+.pill { display: inline-flex; align-items: center; gap: 8px; padding: 11px 16px; border-radius: 999px; background: var(--glass); border: 1px solid var(--line-2); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); font-size: 14.5px; font-weight: 500; box-shadow: 0 16px 40px -14px rgba(0,0,0,.8); }
+.pill svg { width: 16px; height: 16px; color: var(--amber); }
+.pill .speed { font-variant-numeric: tabular-nums; min-width: 3.2ch; display: inline-block; color: var(--amber); }
+@media (max-width: 700px) { .phone { width: 34%; right: -2%; bottom: -16%; } .pills { position: static; margin-top: 18px; } }
+
+/* chapter 5: household (horizontal) */
+.household { padding: 140px 0 120px; overflow: hidden; }
+.household-head { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 24px; margin-bottom: 56px; }
+.household-head h2 { font-size: clamp(38px, 5vw, 76px); max-width: 11em; }
+.household-head p { max-width: 26em; margin: 0; color: var(--paper-2); }
+.track { display: flex; gap: 20px; padding-inline: var(--gutter); width: max-content; }
+.card {
+  width: min(380px, 82vw); min-height: 440px; flex: none; display: flex; flex-direction: column; gap: 16px; padding: 28px; border-radius: 22px;
+  background: linear-gradient(180deg, rgba(255,244,230,.055), rgba(255,244,230,.02)); border: 1px solid var(--line); position: relative; overflow: hidden;
+}
+.card::before { content: ""; position: absolute; inset: -1px; border-radius: inherit; padding: 1px; background: linear-gradient(160deg, rgba(248,198,110,.35), transparent 40%); -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; pointer-events: none; opacity: .7; }
+.card .ic { width: 52px; height: 52px; border-radius: 15px; display: grid; place-items: center; background: rgba(248,198,110,.08); border: 1px solid rgba(248,198,110,.2); color: var(--amber); }
+.card .ic svg { width: 26px; height: 26px; }
+.card h3 { font: 450 27px/1.1 var(--display); letter-spacing: -0.02em; margin: 6px 0 0; text-wrap: balance; }
+.card p { margin: 0; color: var(--paper-2); font-size: 15.5px; }
+.card .ui { margin-top: auto; display: grid; gap: 8px; }
+.mini { display: flex; align-items: center; gap: 10px; padding: 11px 13px; border-radius: 12px; background: rgba(0,0,0,.3); border: 1px solid var(--line); font-size: 13.5px; color: var(--paper-2); }
+.mini b { color: var(--paper); font-weight: 600; }
+.mini .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--amber); flex: none; box-shadow: 0 0 12px rgba(248,198,110,.7); }
+.mini .dot.ok { background: #73d6a6; box-shadow: 0 0 12px rgba(115,214,166,.6); }
+.mini .tag { margin-left: auto; font: 500 11px/1 var(--mono); letter-spacing: .08em; color: var(--paper-3); }
+@media (max-width: 959px) { .track-wrap { overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; } .track-wrap::-webkit-scrollbar { display: none; } .card { scroll-snap-align: center; } }
+
+/* privacy band */
+.privacy { padding: 80px 0; }
+.privacy .panel { padding: clamp(28px, 4vw, 56px); display: grid; grid-template-columns: auto 1fr auto; gap: 32px; align-items: center; }
+.privacy .shield { width: 84px; height: 84px; border-radius: 24px; display: grid; place-items: center; background: rgba(115,214,166,.08); border: 1px solid rgba(115,214,166,.25); color: #73d6a6; }
+.privacy .shield svg { width: 40px; height: 40px; }
+.privacy h2 { font-size: clamp(30px, 3.4vw, 48px); }
+.privacy p { margin: 10px 0 0; color: var(--paper-2); max-width: 44em; }
+@media (max-width: 800px) { .privacy .panel { grid-template-columns: 1fr; } }
+
+/* install */
+.install { padding: 120px 0; }
+.install-head { display: grid; gap: 18px; margin-bottom: 44px; max-width: 760px; }
+.install-head h2 { font-size: clamp(42px, 5.6vw, 84px); }
+.tabs { display: flex; gap: 6px; flex-wrap: wrap; padding: 6px; border-radius: 16px; background: rgba(255,244,230,.035); border: 1px solid var(--line); width: fit-content; max-width: 100%; }
+.tab { height: 44px; padding: 0 18px; border-radius: 11px; border: 0; background: transparent; color: var(--paper-2); font: 500 14.5px/1 var(--body); cursor: pointer; transition: background .25s, color .25s; }
+.tab:hover { color: var(--paper); }
+.tab[aria-selected="true"] { background: rgba(255,244,230,.1); color: var(--paper); }
+.tabpanel { margin-top: 18px; }
+.tabpanel[hidden] { display: none; }
+.code { position: relative; border-radius: 18px; background: #08070a; border: 1px solid var(--line-2); overflow: hidden; }
+.code .bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 10px 10px 18px; border-bottom: 1px solid var(--line); font: 500 12px/1 var(--mono); color: var(--paper-3); letter-spacing: .06em; }
+.code pre { margin: 0; padding: 20px 22px 24px; overflow-x: auto; font: 400 14px/1.75 var(--mono); color: var(--paper-2); }
+.code .k { color: var(--amber); } .code .s { color: #a8d8b9; } .code .c { color: #6f665e; } .code .v { color: #e9a6ff; }
+.after { margin-top: 18px; color: var(--paper-3); font-size: 15px; }
+.after a { color: var(--amber); }
+
+/* guides */
+.guides { padding: 120px 0; }
+.guides-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: end; gap: 20px; margin-bottom: 44px; }
+.guides-head h2 { font-size: clamp(42px, 5.6vw, 84px); }
+.guides-head p { margin: 0; color: var(--paper-2); max-width: 26em; }
+.ggrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 270px), 1fr)); gap: 14px; }
+.guide {
+  display: grid; grid-template-rows: auto auto 1fr auto; gap: 10px; padding: 24px; border-radius: 18px; text-decoration: none; min-height: 210px;
+  background: rgba(255,244,230,.03); border: 1px solid var(--line); transition: background .35s var(--ease), border-color .35s var(--ease), transform .35s var(--ease);
+}
+.guide:hover { background: rgba(255,244,230,.06); border-color: rgba(248,198,110,.35); transform: translateY(-4px); }
+.guide .gno { font: 500 11.5px/1 var(--mono); letter-spacing: .14em; color: var(--paper-3); }
+.guide h3 { font: 450 23px/1.15 var(--display); letter-spacing: -0.015em; margin: 0; }
+.guide p { margin: 0; font-size: 14.5px; color: var(--paper-2); }
+.guide .go { display: inline-flex; align-items: center; gap: 8px; font-size: 13.5px; font-weight: 600; color: var(--amber); }
+.guide .go svg { width: 15px; height: 15px; transition: transform .3s var(--ease); }
+.guide:hover .go svg { transform: translateX(4px); }
+
+/* community + footer */
+.community { padding: 120px 0 80px; text-align: center; position: relative; isolation: isolate; overflow-x: clip; }
+.community .glow { left: 50%; top: 50%; translate: -50% -50%; width: 900px; height: 600px; background: radial-gradient(ellipse, rgba(236,111,85,.22), transparent 65%); }
+.community h2 { font-size: clamp(46px, 7.4vw, 118px); }
+.community p { margin: 24px auto 34px; color: var(--paper-2); max-width: 32em; }
+.community .cta-row { justify-content: center; }
+.eq { display: inline-flex; gap: 6px; align-items: end; height: 54px; margin-bottom: 26px; }
+.eq i { width: 7px; border-radius: 4px; background: var(--grad); height: 40%; }
+footer { border-top: 1px solid var(--line); padding: 48px 0 140px; color: var(--paper-3); font-size: 14.5px; }
+footer .wrap { display: grid; grid-template-columns: 1.4fr 1fr; gap: 40px; }
+footer p { margin: 12px 0 0; max-width: 40em; }
+footer nav { display: flex; flex-wrap: wrap; gap: 8px 22px; justify-content: flex-end; align-content: start; }
+footer nav a { text-decoration: none; color: var(--paper-2); }
+footer nav a:hover { color: var(--amber); }
+@media (max-width: 800px) { footer .wrap { grid-template-columns: 1fr; } footer nav { justify-content: start; } }
+
+/* ---------- now playing ---------- */
+.np {
+  position: fixed; left: 50%; bottom: 18px; z-index: 60; width: min(760px, calc(100% - 24px)); translate: -50% 0;
+  display: grid; grid-template-columns: auto 1fr auto; gap: 14px; align-items: center; padding: 10px 12px 10px 10px; border-radius: 20px;
+  background: var(--glass); border: 1px solid var(--line-2); backdrop-filter: blur(22px) saturate(1.5); -webkit-backdrop-filter: blur(22px) saturate(1.5);
+  box-shadow: 0 24px 60px -18px rgba(0,0,0,.85);
+}
+.np .art { width: 46px; height: 46px; border-radius: 12px; overflow: hidden; flex: none; }
+.np .art svg { width: 100%; height: 100%; display: block; }
+.np .meta { min-width: 0; display: grid; gap: 6px; }
+.np .line1 { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.np .ttl { font: 500 15.5px/1.2 var(--display); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.np .sub { font-size: 12.5px; color: var(--paper-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.np .bar { position: relative; height: 16px; display: flex; align-items: center; cursor: pointer; }
+.np .rail { position: absolute; inset: 7px 0; border-radius: 2px; background: rgba(255,244,230,.12); }
+.np .fill { position: absolute; left: 0; top: 7px; height: 2px; border-radius: 2px; background: var(--grad); width: 0; }
+.np .tick { position: absolute; top: 4px; width: 2px; height: 8px; border-radius: 1px; background: rgba(255,244,230,.35); }
+.np .times { display: flex; justify-content: space-between; font: 400 11px/1 var(--mono); color: var(--paper-3); font-variant-numeric: tabular-nums; }
+.np .ctl { display: flex; align-items: center; gap: 2px; }
+.np button { width: 40px; height: 40px; border-radius: 12px; border: 0; background: transparent; color: var(--paper); display: grid; place-items: center; cursor: pointer; transition: background .2s; }
+.np button:hover { background: rgba(255,244,230,.08); }
+.np button svg { width: 20px; height: 20px; }
+.np .play { width: 46px; height: 46px; border-radius: 50%; background: var(--paper); color: var(--ink); }
+.np .play:hover { background: #fff; }
+.np .spd { width: auto; padding: 0 10px; font: 600 12.5px/1 var(--mono); color: var(--amber); }
+@media (max-width: 640px) { .np .sub, .np .times, .np .skip { display: none; } .np { gap: 10px; } }
+</style>
+</head>
+<body>
+
+<header class="nav" id="nav">
+  <div class="wrap">
+    <a class="brand" href="#prologue" aria-label="Narratarr, back to the top">
+      <svg viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="lg1" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f8c66e"/><stop offset="1" stop-color="#ec6f55"/></linearGradient></defs><rect width="64" height="64" rx="16" fill="url(#lg1)"/><path d="M13 44.5c6-3.2 12.5-3.2 19 0 6.5-3.2 13-3.2 19 0" fill="none" stroke="#1a1016" stroke-width="3.2" stroke-linecap="round"/><g stroke="#1a1016" stroke-width="3.6" stroke-linecap="round" class="logo-bars"><path d="M20 31v4"/><path d="M26 24v11"/><path d="M32 18v17"/><path d="M38 23v12"/><path d="M44 29v6"/></g></svg>
+      <span>Narrat<em>arr</em></span>
+    </a>
+    <nav class="nav-links" aria-label="Sections">
+      <a href="#find">Features</a>
+      <a href="#install">Install</a>
+      <a href="#guides">Guides</a>
+      <a href="https://discord.gg/kB5EgmfBrA">Discord</a>
+    </nav>
+    <a class="btn ghost" href="https://github.com/narratarr/narratarr">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.52-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.69 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.42-2.7 5.4-5.27 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z"/></svg>
+      GitHub
+    </a>
+    <a class="btn primary" href="#install">Install</a>
+  </div>
+</header>
+
+<main>
+
+<!-- PROLOGUE -->
+<section class="hero" id="prologue" data-chapter="Prologue">
+  <div class="glow a"></div><div class="glow b"></div><div class="glow c"></div>
+  <div class="wrap">
+    <div class="hero-copy">
+      <span class="eyebrow" data-intro>Self-hosted · Open source · MIT licensed</span>
+      <h1 class="display" id="hero-title">
+        <span class="ln"><span class="w">Your</span> <span class="w">audiobooks:</span></span>
+        <span class="ln"><span class="w">found,</span> <span class="w">fetched,</span></span>
+        <span class="ln"><span class="w">and</span> <span class="w grad">playing.</span></span>
+      </h1>
+      <p class="lead" data-intro>Narratarr is an *arr-style audiobook manager with a player built in. Find a book, click once, and it lands in your library, tagged, organized and ready to play.</p>
+      <div class="cta-row" data-intro>
+        <a class="btn primary" href="#install">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+          Install Narratarr
+        </a>
+        <a class="btn" href="https://github.com/narratarr/narratarr">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.52-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.69 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.42-2.7 5.4-5.27 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z"/></svg>
+          View on GitHub
+        </a>
+        <div class="oneliner">
+        <div class="scroll"><b>$</b> curl -fsSL https://raw.githubusercontent.com/narratarr/narratarr/main/install.sh | bash</div>
+        <button class="copy" type="button" data-copy="curl -fsSL https://raw.githubusercontent.com/narratarr/narratarr/main/install.sh | bash" aria-label="Copy the install command">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>Copy</span>
+        </button>
+        </div>
+      </div>
+      <p class="fine" data-intro>Docker, Unraid, macOS and Linux. Images for amd64 and arm64, Raspberry Pi 4 and 5 included.</p>
+    </div>
+
+    <div class="stage" id="hero-stage">
+      <div class="window" id="hero-window">
+        <div class="chrome"><i></i><i></i><i></i><span>localhost:8484</span></div>
+        <img src="images/library.webp" alt="The Narratarr library: a Continue listening shelf, counts of books, and a grid of audiobook covers" width="2000" height="1250">
+      </div>
+      <div class="float f1" data-depth="1.6"><img src="images/c-sherlock.jpg" alt="" width="270" height="270"></div>
+      <div class="float f2" data-depth="0.8"><img src="images/c-alice.jpg" alt="" width="270" height="270"></div>
+      <div class="float f3" data-depth="1.3"><img src="images/c-raven.jpg" alt="" width="270" height="270"></div>
+      <div class="float f4" data-depth="1.9"><img src="images/c-magi.jpg" alt="" width="270" height="270"></div>
+      <div class="float f5" data-depth="0.6"><img src="images/c-artofwar.jpg" alt="" width="270" height="270"></div>
+      <div class="float f6" data-depth="1.0"><img src="images/c-sleepy.jpg" alt="" width="270" height="270"></div>
+    </div>
+  </div>
+</section>
+
+<!-- CHAPTER 1: FIND -->
+<section class="chapter" id="find" data-chapter="Find">
+  <div class="wrap chap-grid pin-inner">
+    <div class="chap-head">
+      <div class="chap-no"><span class="big">01</span><span class="eyebrow">Chapter one</span></div>
+      <h2 class="display">Thirty thousand free books, and the shelves you already use.</h2>
+      <p>Browse more than 30,000 free, legal audiobooks and radio shows from LibriVox and Old-Time Radio, by genre, popularity or what's new. Connect Prowlarr or any Torznab indexer, such as Jackett, and they're searched too.</p>
+      <ul class="points">
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span>Search forgives typos. Type <code>sherlok holms</code> and you still get Sherlock Holmes.</span></li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span>Results are ranked by how well they match, with a way back to your exact words.</span></li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span>Hide books in languages you don't read, and see a release's length, format and size before you commit.</span></li>
+      </ul>
+    </div>
+    <div class="panel search-stage" id="find-stage">
+      <div class="searchbar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <div class="q" aria-label="Search box showing the query sherlok holms"><span id="q-text">sherlok holms</span><span class="caret" aria-hidden="true"></span><span class="squiggle" id="q-squiggle" aria-hidden="true"></span></div>
+        <span class="go">Search</span>
+      </div>
+      <div class="chips" id="find-chips">
+        <span class="chip on">LibriVox</span><span class="chip">Old-Time Radio</span><span class="chip">AudiobookBay</span><span class="chip">Prowlarr</span><span class="chip">Torznab</span><span class="chip">Audible catalog</span><span class="chip">Open Library</span>
+      </div>
+      <div class="fix" id="q-fix">Including results for <em>sherlock holmes</em> · <span>Show only close matches</span></div>
+      <div class="results">
+        <div class="book find-book"><div class="cv"><img src="images/c-sherlock.jpg" alt="Cover of The Adventures of Sherlock Holmes" width="270" height="270"></div><div><b>The Adventures of Sherlock Holmes</b><small>Sir Arthur Conan Doyle</small></div></div>
+        <div class="book find-book"><div class="cv"><img src="images/c-return.jpg" alt="Cover of The Return of Sherlock Holmes" width="270" height="270"></div><div><b>The Return of Sherlock Holmes</b><small>Sir Arthur Conan Doyle</small></div></div>
+        <div class="book find-book"><div class="cv"><img src="images/c-speckled.jpg" alt="Cover of The Speckled Band" width="270" height="270"></div><div><b>The Speckled Band</b><small>Sir Arthur Conan Doyle</small></div></div>
+        <div class="book find-book"><div class="cv"><img src="images/c-casebook.jpg" alt="Cover of The Case-Book of Sherlock Holmes" width="270" height="270"></div><div><b>The Case-Book of Sherlock Holmes</b><small>Sir Arthur Conan Doyle</small></div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="marquee" aria-label="Sources and download clients Narratarr works with">
+    <div class="mrow" id="m1"><span>LibriVox</span><span>Old-Time Radio</span><span>Prowlarr</span><span>Torznab</span><span>Jackett</span><span>AudiobookBay</span><span>Audible catalog</span><span>Open Library</span></div>
+    <div class="mrow" id="m2"><span>Real-Debrid</span><span>qBittorrent</span><span>AllDebrid</span><span>SABnzbd</span><span>TorBox</span><span>Transmission</span><span>Premiumize</span><span>NZBGet</span><span>Deluge</span><span>Audiobookshelf</span></div>
+  </div>
+  <p class="marquee-cap wrap">Plugs into the *arr stack you already run. Adding a new catalog is one small Python class.</p>
+</section>
+
+<!-- CHAPTER 2: FETCH -->
+<section class="chapter" id="fetch" data-chapter="Fetch">
+  <div class="wrap chap-grid pin-inner">
+    <div class="chap-head">
+      <div class="chap-no"><span class="big">02</span><span class="eyebrow">Chapter two</span></div>
+      <h2 class="display">One click sends it to the right place.</h2>
+      <p>Each release goes to the client you choose: a debrid service, a torrent client on your own machine, or a Usenet downloader. Routing rules pick the client by indexer, and by audiobook or ebook. Rules are checked top to bottom, the first match wins, and anything else goes to your default.</p>
+      <ul class="points">
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span>Every download shows on Activity as it happens, with who asked for it.</span></li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span>Test a rule and see exactly where a release would go, before anything downloads.</span></li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span>Follow authors and series, and new books are found and fetched on their own.</span></li>
+      </ul>
+    </div>
+    <div class="panel flow" id="fetch-stage">
+      <svg viewBox="0 0 1000 620" role="img" aria-label="A release from AudiobookBay matches routing rule 1 and goes to Real-Debrid, then finishes downloading into the library">
+        <defs>
+          <linearGradient id="wireGrad" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#f8c66e"/><stop offset="1" stop-color="#ec6f55"/></linearGradient>
+          <radialGradient id="dotGlow"><stop offset="0" stop-color="#f8c66e" stop-opacity=".9"/><stop offset="1" stop-color="#f8c66e" stop-opacity="0"/></radialGradient>
+          <clipPath id="relClip"><rect x="30" y="236" width="74" height="74" rx="10"/></clipPath>
+        </defs>
+        <!-- faint wires to every rule -->
+        <path class="wire" d="M300 300 C 340 300, 340 300, 380 300"/>
+        <path class="wire" d="M300 300 C 340 300, 340 420, 380 420"/>
+        <path class="wire" d="M640 300 C 680 300, 680 357, 720 357"/>
+        <path class="wire" d="M640 420 C 680 420, 680 465, 720 465"/>
+        <!-- the route this release takes -->
+        <path class="route" id="route" d="M300 300 C 340 300, 340 180, 380 180 L 640 180 C 680 180, 680 87, 720 87"/>
+
+        <!-- release card -->
+        <rect class="node" x="16" y="222" width="284" height="196" rx="18"/>
+        <image href="images/c-sherlock.jpg" x="30" y="236" width="74" height="74" clip-path="url(#relClip)" preserveAspectRatio="xMidYMid slice"/>
+        <text class="t-mono" x="118" y="254">RELEASE</text>
+        <text class="t-title" x="118" y="279">The Adventures</text>
+        <text class="t-title" x="118" y="300">of Sherlock Holmes</text>
+        <text class="t-small" x="30" y="340">AudiobookBay · M4B · audiobook</text>
+        <rect x="30" y="362" width="256" height="6" rx="3" fill="rgba(255,244,230,.1)"/>
+        <rect id="dl-bar" x="30" y="362" width="256" height="6" rx="3" fill="url(#wireGrad)"/>
+        <text class="t-small" id="dl-text" x="30" y="396">In your library</text>
+        <text class="t-small" id="dl-pct" x="286" y="396" text-anchor="end">100%</text>
+
+        <!-- rules -->
+        <text class="t-mono" x="380" y="128">ROUTING · FIRST MATCH WINS</text>
+        <g id="rule1"><rect class="node lit" id="rule1-box" x="380" y="146" width="260" height="68" rx="14"/><text class="t-mono" x="398" y="172">RULE 1</text><text x="398" y="196" font-size="15">Indexer is AudiobookBay</text></g>
+        <g><rect class="node" x="380" y="266" width="260" height="68" rx="14"/><text class="t-mono" x="398" y="292" style="fill: var(--paper-3)">RULE 2</text><text x="398" y="316" font-size="15">Kind is ebook</text></g>
+        <g><rect class="node" x="380" y="386" width="260" height="68" rx="14"/><text class="t-mono" x="398" y="412" style="fill: var(--paper-3)">DEFAULT</text><text x="398" y="436" font-size="15">Torrents and Usenet</text></g>
+
+        <!-- clients -->
+        <text class="t-mono" x="720" y="40">DOWNLOAD CLIENTS</text>
+        <g id="clients">
+          <rect class="node lit" id="rd-box" x="720" y="64" width="250" height="46" rx="12"/><text class="client-name client-on" x="740" y="92">Real-Debrid</text>
+          <rect class="node" x="720" y="118" width="250" height="46" rx="12"/><text class="client-name" x="740" y="146">AllDebrid</text>
+          <rect class="node" x="720" y="172" width="250" height="46" rx="12"/><text class="client-name" x="740" y="200">TorBox</text>
+          <rect class="node" x="720" y="226" width="250" height="46" rx="12"/><text class="client-name" x="740" y="254">Premiumize</text>
+          <rect class="node" x="720" y="334" width="250" height="46" rx="12"/><text class="client-name" x="740" y="362">qBittorrent</text>
+          <rect class="node" x="720" y="388" width="250" height="46" rx="12"/><text class="client-name" x="740" y="416">Transmission</text>
+          <rect class="node" x="720" y="442" width="250" height="46" rx="12"/><text class="client-name" x="740" y="470">Deluge</text>
+          <rect class="node" x="720" y="510" width="250" height="46" rx="12"/><text class="client-name" x="740" y="538">SABnzbd</text>
+          <rect class="node" x="720" y="564" width="250" height="46" rx="12"/><text class="client-name" x="740" y="592">NZBGet</text>
+          <text class="t-small" x="955" y="92" text-anchor="end">cloud</text>
+          <text class="t-small" x="955" y="362" text-anchor="end">your machine</text>
+          <text class="t-small" x="955" y="538" text-anchor="end">Usenet</text>
+        </g>
+        <circle id="dot-glow" r="22" cx="720" cy="87" fill="url(#dotGlow)"/>
+        <circle id="dot" r="6" cx="720" cy="87" fill="#fff"/>
+      </svg>
+    </div>
+  </div>
+</section>
+
+<!-- CHAPTER 3: FILE -->
+<section class="chapter" id="file" data-chapter="File">
+  <div class="wrap chap-grid pin-inner">
+    <div class="chap-head">
+      <div class="chap-no"><span class="big">03</span><span class="eyebrow">Chapter three</span></div>
+      <h2 class="display">Filed the way Audiobookshelf likes it.</h2>
+      <p>Finished books are named and moved into your folder layout, with the cover and description beside them. Pick a preset or write your own from <code>{author}</code>, <code>{series}</code>, <code>{series_number}</code>, <code>{year}</code>, <code>{title}</code> and <code>{narrator}</code>. When a book has no series, that part drops out along with the words around it.</p>
+      <ul class="points">
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span>Audiobookshelf rescans after every download and keeps everyone's place in each book.</span></li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span>Tidy library moves the books you already have into the layout, with a preview of every move and an undo.</span></li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span>Import the audiobooks you already own, or point it at an existing Audiobookshelf library.</span></li>
+      </ul>
+    </div>
+    <div class="panel files" id="file-stage">
+      <div>
+        <div class="tpl-label">Folder layout</div>
+        <div class="tpl">{author}/{series}/Vol {series_number} - {year} - {title}</div>
+      </div>
+      <div class="paths">
+        <div class="pathline" id="path-a"><span class="seg" data-tpl="{author}">Arthur Conan Doyle</span><span class="sep">/</span><span class="seg" data-tpl="{series}">Sherlock Holmes</span><span class="sep">/</span><span class="seg" data-tpl="Vol {series_number}">Vol 1</span><span class="sep"> - </span><span class="seg" data-tpl="{year}">1892</span><span class="sep"> - </span><span class="seg" data-tpl="{title}">The Adventures of Sherlock Holmes</span></div>
+        <div class="pathline" id="path-b"><span class="seg" data-tpl="{author}">Edgar Allan Poe</span><span class="sep">/</span><span class="drop" id="drop-1">{series}/</span><span class="drop" id="drop-2">Vol {series_number} - </span><span class="seg" data-tpl="{year}">1845</span><span class="sep"> - </span><span class="seg" data-tpl="{title}">The Raven</span></div>
+      </div>
+      <div class="tree" id="tree">
+        <div class="d"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>Arthur Conan Doyle</div>
+        <div class="d i1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>Sherlock Holmes</div>
+        <div class="d i2"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>Vol 1 - 1892 - The Adventures of Sherlock Holmes</div>
+        <div class="f i3"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/></svg>cover.jpg</div>
+        <div class="f i3"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z"/><path d="M14 3v6h6"/></svg>desc.txt</div>
+        <div class="f i3"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>01 - A Scandal in Bohemia.mp3</div>
+        <div class="f i3"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>02 - The Red-Headed League.mp3</div>
+        <div class="f i3"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>03 - A Case of Identity.mp3</div>
+      </div>
+      <div class="abs-note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>Audiobookshelf is rescanning, and keeps everyone's place in each book.</div>
+    </div>
+  </div>
+</section>
+
+<!-- CHAPTER 4: LISTEN -->
+<section class="chapter" id="listen" data-chapter="Listen">
+  <div class="wrap chap-grid pin-inner">
+    <div class="chap-head">
+      <div class="chap-no"><span class="big">04</span><span class="eyebrow">Chapter four</span></div>
+      <h2 class="display">A real player, right there.</h2>
+      <p>No other app needed. Chapters, including the markers inside <code>.m4b</code> files. Speeds from 0.75× to 3×. A sleep timer that can stop at the end of a chapter. It remembers your place in every book, and lock-screen and headphone controls work too.</p>
+      <ul class="points">
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span>Add it to your phone's home screen and listen anywhere on your Wi-Fi.</span></li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span>Want it as an ebook too? Read EPUBs right in Narratarr, filed next to the audiobook.</span></li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span>A Continue listening shelf, and finished books tracked for you.</span></li>
+      </ul>
+    </div>
+    <div class="listen-stage" id="listen-stage">
+      <div class="player" id="player"><img src="images/player.webp" alt="Now Playing: Six Creepy Tales by Edgar Allan Poe, chapter 3 of 6, with the chapter list beside the cover" width="2000" height="1250"></div>
+      <div class="phone" id="phone"><img src="images/phone-library.webp" alt="The Narratarr library on a phone" width="780" height="1688"></div>
+      <div class="pills" id="pills">
+        <span class="pill"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 12 16 8"/><path d="M3.5 15a9 9 0 1 1 17 0"/></svg><span class="speed" id="speed">1.5×</span> speed</span>
+        <span class="pill"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>Sleep: end of chapter</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- CHAPTER 5: HOUSEHOLD -->
+<section class="household" id="household" data-chapter="Settle in">
+  <div class="wrap household-head">
+    <div class="chap-head">
+      <div class="chap-no"><span class="big">05</span><span class="eyebrow">Chapter five</span></div>
+      <h2 class="display">Made for the whole household.</h2>
+    </div>
+    <p>Admins run things. Listeners browse, ask for books and listen, and everyone keeps their own place in every book.</p>
+  </div>
+  <div class="track-wrap">
+    <div class="track" id="track">
+      <article class="card">
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><circle cx="17.5" cy="9" r="2.5"/><path d="M16 14.2a5 5 0 0 1 5.5 4.8"/></svg></div>
+        <h3>Requests that wait for you</h3>
+        <p>A listener's request waits under Awaiting approval until an admin says yes. Nothing is searched for or downloaded before then.</p>
+        <div class="ui"><div class="mini"><span class="dot"></span><span><b>The Time Machine</b> · asked for by Sam</span><span class="tag">AWAITING</span></div><div class="mini"><span class="dot ok"></span><span><b>Treasure Island</b> · approved</span><span class="tag">DOWNLOADING</span></div></div>
+      </article>
+      <article class="card">
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg></div>
+        <h3>Notifications where you are</h3>
+        <p>Word goes to ntfy, Gotify, Discord or any webhook when someone wants a book, and when downloads start, finish or fail. An event log in Settings shows where each one went.</p>
+        <div class="ui"><div class="mini"><span class="dot ok"></span><span><b>Finished</b> · The Time Machine</span><span class="tag">NTFY ✓</span></div></div>
+      </article>
+      <article class="card">
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 2 8l10 5 10-5Z"/><path d="m2 13 10 5 10-5"/></svg></div>
+        <h3>Audiobookshelf in a click</h3>
+        <p>Narratarr finds your server, on this machine, in Docker, on your network or at a public address. Sign in once, and it rescans after every download.</p>
+        <div class="ui"><div class="mini"><span class="dot ok"></span><span>Found Audiobookshelf at <b>192.168.1.10:13378</b></span></div></div>
+      </article>
+      <article class="card">
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 17.8 5.8 21 7 14.1 2 9.3l7-1L12 2l3 6.3 7 1-5 4.8 1.2 6.9Z"/></svg></div>
+        <h3>Ratings on every card</h3>
+        <p>A star score from Audible's own average, shown only when the book matches exactly. A blank beats a wrong score. Switched off, it asks nobody.</p>
+        <div class="ui"><div class="mini"><span class="dot"></span><span>Sort Discover by <b>Rating</b></span></div></div>
+      </article>
+      <article class="card">
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2Z"/></svg></div>
+        <h3>A Wanted list that fills itself</h3>
+        <p>Follow authors and series. New releases are added to Wanted and fetched when they turn up, in the languages you read.</p>
+        <div class="ui"><div class="mini"><span class="dot"></span><span>Following <b>H. G. Wells</b></span><span class="tag">ALL CAUGHT UP</span></div></div>
+      </article>
+      <article class="card">
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 4h6a4 4 0 0 1 4 4v13a3 3 0 0 0-3-3H2Z"/><path d="M22 4h-6a4 4 0 0 0-4 4v13a3 3 0 0 1 3-3h7Z"/></svg></div>
+        <h3>Ebooks too</h3>
+        <p>Want any book as an audiobook, an ebook or both. The ebook lands beside its audiobook, so Audiobookshelf shows them as one book.</p>
+        <div class="ui"><div class="mini"><span class="dot ok"></span><span><b>Pride and Prejudice</b> · audiobook + EPUB</span></div></div>
+      </article>
+      <article class="card">
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 9-4 3 4 3"/><path d="m16 9 4 3-4 3"/><path d="m14 5-4 14"/></svg></div>
+        <h3>An API for your other apps</h3>
+        <p>Other apps can search, request and follow a book's progress with their own tokens, so a phone client can ask Narratarr for books.</p>
+        <div class="ui"><div class="mini"><span class="dot"></span><span class="mono">POST /api/v1/requests</span></div></div>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- privacy -->
+<section class="privacy" aria-labelledby="privacy-title">
+  <div class="wrap">
+    <div class="panel reveal">
+      <div class="shield"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/></svg></div>
+      <div>
+        <h2 class="display" id="privacy-title">No telemetry. It phones nobody.</h2>
+        <p>Your library stays on your machine. The fonts are bundled, so the app never calls a CDN, and the README lists every outside service Narratarr can contact, what it sends and when.</p>
+      </div>
+      <a class="btn" href="https://github.com/narratarr/narratarr#what-leaves-your-machine">What leaves your machine</a>
+    </div>
+  </div>
+</section>
+
+<!-- EPILOGUE: INSTALL -->
+<section class="install" id="install" data-chapter="Install">
+  <div class="wrap">
+    <div class="install-head reveal">
+      <span class="eyebrow">Epilogue</span>
+      <h2 class="display">Running in a <span class="grad">minute.</span></h2>
+      <p class="lead">Every option ends the same way: Narratarr at <code>http://localhost:8484</code>, ready for its first book.</p>
+    </div>
+    <div class="reveal">
+      <div class="tabs" role="tablist" aria-label="Ways to install">
+        <button class="tab" role="tab" id="tab-installer" aria-controls="panel-installer" aria-selected="true">Guided installer</button>
+        <button class="tab" role="tab" id="tab-compose" aria-controls="panel-compose" aria-selected="false" tabindex="-1">Docker Compose</button>
+        <button class="tab" role="tab" id="tab-run" aria-controls="panel-run" aria-selected="false" tabindex="-1">docker run</button>
+        <button class="tab" role="tab" id="tab-unraid" aria-controls="panel-unraid" aria-selected="false" tabindex="-1">Unraid</button>
+        <button class="tab" role="tab" id="tab-uv" aria-controls="panel-uv" aria-selected="false" tabindex="-1">uv</button>
+      </div>
+
+      <div class="tabpanel" role="tabpanel" id="panel-installer" aria-labelledby="tab-installer">
+        <div class="code"><div class="bar"><span>MACOS AND LINUX</span><button class="copy" type="button" data-copy="curl -fsSL https://raw.githubusercontent.com/narratarr/narratarr/main/install.sh | bash"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>Copy</span></button></div>
+<pre><span class="c"># asks a few friendly questions: Docker or native, where books go, start at login</span>
+<span class="k">curl</span> -fsSL https://raw.githubusercontent.com/narratarr/narratarr/main/install.sh | <span class="k">bash</span></pre></div>
+        <p class="after">Run the same command again to update. Add <code>--docker --yes</code> to skip the questions.</p>
+      </div>
+
+      <div class="tabpanel" role="tabpanel" id="panel-compose" aria-labelledby="tab-compose" hidden>
+        <div class="code"><div class="bar"><span>DOCKER-COMPOSE.YML</span><button class="copy" type="button" data-copy-from="compose-src"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>Copy</span></button></div>
+<pre id="compose-src"><span class="k">services:</span>
+  <span class="k">narratarr:</span>
+    <span class="v">image:</span> <span class="s">ghcr.io/narratarr/narratarr:latest</span>
+    <span class="v">container_name:</span> narratarr
+    <span class="v">restart:</span> unless-stopped
+    <span class="v">ports:</span>
+      - <span class="s">"8484:8484"</span>
+    <span class="v">environment:</span>
+      - PUID=1000          <span class="c"># run `id -u` to find yours</span>
+      - PGID=1000          <span class="c"># run `id -g` to find yours</span>
+      - TZ=Etc/UTC
+    <span class="v">volumes:</span>
+      - ./config:/config            <span class="c"># settings + library database</span>
+      - ~/Audiobooks:/audiobooks    <span class="c"># where finished books go</span></pre></div>
+        <p class="after">Then <code>docker compose up -d</code>. The container runs as your PUID and PGID, so the files it writes belong to you.</p>
+      </div>
+
+      <div class="tabpanel" role="tabpanel" id="panel-run" aria-labelledby="tab-run" hidden>
+        <div class="code"><div class="bar"><span>SHELL</span><button class="copy" type="button" data-copy-from="run-src"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>Copy</span></button></div>
+<pre id="run-src"><span class="k">docker run</span> -d --name narratarr --restart unless-stopped \
+  -p 8484:8484 \
+  -e PUID=$(id -u) -e PGID=$(id -g) \
+  -v "$PWD/config:/config" \
+  -v "$HOME/Audiobooks:/audiobooks" \
+  <span class="s">ghcr.io/narratarr/narratarr:latest</span></pre></div>
+      </div>
+
+      <div class="tabpanel" role="tabpanel" id="panel-unraid" aria-labelledby="tab-unraid" hidden>
+        <div class="code"><div class="bar"><span>UNRAID TERMINAL</span><button class="copy" type="button" data-copy-from="unraid-src"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>Copy</span></button></div>
+<pre id="unraid-src"><span class="k">wget</span> -O /boot/config/plugins/dockerMan/templates-user/my-Narratarr.xml \
+  https://raw.githubusercontent.com/narratarr/narratarr/main/unraid/narratarr.xml</pre></div>
+        <p class="after">Then in Docker choose Add Container and pick Narratarr from the template list. It runs as Unraid's usual <code>nobody:users</code>.</p>
+      </div>
+
+      <div class="tabpanel" role="tabpanel" id="panel-uv" aria-labelledby="tab-uv" hidden>
+        <div class="code"><div class="bar"><span>SHELL</span><button class="copy" type="button" data-copy="uv tool install git+https://github.com/narratarr/narratarr"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>Copy</span></button></div>
+<pre><span class="k">uv tool install</span> git+https://github.com/narratarr/narratarr
+<span class="k">narratarr</span>                     <span class="c"># → http://127.0.0.1:8484</span></pre></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- GUIDES -->
+<section class="guides" id="guides">
+  <div class="wrap">
+    <div class="guides-head reveal">
+      <div class="chap-head"><span class="eyebrow">The manual</span><h2 class="display">Guides for everything.</h2></div>
+      <p>Each guide lives on GitHub next to the code, so it always matches the version you run.</p>
+    </div>
+    <div class="ggrid" id="ggrid">
+      <a class="guide" href="https://github.com/narratarr/narratarr#-your-first-five-minutes"><span class="gno">01 · START</span><h3>Your first five minutes</h3><p>From the first page you see to pressing play on your first book.</p><span class="go">Read the guide <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></span></a>
+      <a class="guide" href="https://github.com/narratarr/narratarr#-install"><span class="gno">02 · INSTALL</span><h3>Install and update</h3><p>The guided installer and its options, Docker, Unraid and uv.</p><span class="go">Read the guide <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></span></a>
+      <a class="guide" href="https://github.com/narratarr/narratarr#your-arr-stack-prowlarr-and-download-clients"><span class="gno">03 · CONNECT</span><h3>Prowlarr and download clients</h3><p>Indexers, debrid services, torrent clients, Usenet, and the paths they share.</p><span class="go">Read the guide <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></span></a>
+      <a class="guide" href="https://github.com/narratarr/narratarr/blob/main/docs/download-routing.md"><span class="gno">04 · ROUTE</span><h3>Download routing</h3><p>Rules that pick a client per release, defaults per protocol, and testing a route.</p><span class="go">Read the guide <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></span></a>
+      <a class="guide" href="https://github.com/narratarr/narratarr#folder-layout"><span class="gno">05 · FILE</span><h3>Folder layout</h3><p>Presets, every variable, and how missing parts drop out of a name.</p><span class="go">Read the guide <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></span></a>
+      <a class="guide" href="https://github.com/narratarr/narratarr#tidy-library"><span class="gno">06 · TIDY</span><h3>Tidy library</h3><p>Move the books you already have into your layout, with a preview and undo.</p><span class="go">Read the guide <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></span></a>
+      <a class="guide" href="https://github.com/narratarr/narratarr#accounts"><span class="gno">07 · SHARE</span><h3>Accounts and requests</h3><p>Admins and listeners, approvals, and signing in from phones.</p><span class="go">Read the guide <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></span></a>
+      <a class="guide" href="https://github.com/narratarr/narratarr#listening-on-your-phone"><span class="gno">08 · LISTEN</span><h3>Listening on your phone</h3><p>Reach it on your Wi-Fi, add it to your home screen, and keep it safe from the internet.</p><span class="go">Read the guide <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></span></a>
+      <a class="guide" href="https://github.com/narratarr/narratarr/blob/main/docs/ratings.md"><span class="gno">09 · RATE</span><h3>Ratings</h3><p>Where the score comes from, how strictly books are matched, and what's cached.</p><span class="go">Read the guide <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></span></a>
+      <a class="guide" href="https://github.com/narratarr/narratarr/blob/main/docs/api.md"><span class="gno">10 · BUILD</span><h3>The app API</h3><p>Tokens, search, requests and status, for apps that ask Narratarr for books.</p><span class="go">Read the guide <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></span></a>
+      <a class="guide" href="https://github.com/narratarr/narratarr#-how-it-works"><span class="gno">11 · UNDERSTAND</span><h3>How it works</h3><p>Sources, Wanted books, following authors and importing what you own.</p><span class="go">Read the guide <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></span></a>
+      <a class="guide" href="https://github.com/narratarr/narratarr#-faq"><span class="gno">12 · ASK</span><h3>FAQ</h3><p>The questions people ask most, answered.</p><span class="go">Read the guide <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></span></a>
+    </div>
+  </div>
+</section>
+
+<!-- COMMUNITY -->
+<section class="community" id="community">
+  <div class="glow"></div>
+  <div class="wrap">
+    <div class="eq" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+    <h2 class="display">Press <span class="grad">play.</span></h2>
+    <p>Get help, share ideas and hear about new versions first on the Narratarr Discord. Bugs and pull requests are welcome on GitHub.</p>
+    <div class="cta-row">
+      <a class="btn primary" href="https://discord.gg/kB5EgmfBrA">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2Z"/></svg>
+        Join the Discord
+      </a>
+      <a class="btn" href="https://github.com/narratarr/narratarr">Star on GitHub</a>
+      <a class="btn" href="https://github.com/narratarr/narratarr/releases">What's new</a>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <div>
+      <a class="brand" href="#prologue" aria-label="Narratarr, back to the top">
+        <svg viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="lg2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f8c66e"/><stop offset="1" stop-color="#ec6f55"/></linearGradient></defs><rect width="64" height="64" rx="16" fill="url(#lg2)"/><path d="M13 44.5c6-3.2 12.5-3.2 19 0 6.5-3.2 13-3.2 19 0" fill="none" stroke="#1a1016" stroke-width="3.2" stroke-linecap="round"/><g stroke="#1a1016" stroke-width="3.6" stroke-linecap="round"><path d="M20 31v4"/><path d="M26 24v11"/><path d="M32 18v17"/><path d="M38 23v12"/><path d="M44 29v6"/></g></svg>
+        <span>Narrat<em>arr</em></span>
+      </a>
+      <p>Narratarr is for managing audiobooks you're allowed to have. LibriVox and Old-Time Radio recordings are in the public domain or freely distributable. For anything else, make sure what you download is lawful where you live.</p>
+      <p>Open source under the MIT License. Covers shown are LibriVox recordings of public-domain books.</p>
+    </div>
+    <nav aria-label="Footer">
+      <a href="https://github.com/narratarr/narratarr">GitHub</a>
+      <a href="https://github.com/narratarr/narratarr/releases">Releases</a>
+      <a href="https://github.com/narratarr/narratarr/blob/main/CHANGELOG.md">Changelog</a>
+      <a href="https://github.com/narratarr/narratarr/issues">Report a bug</a>
+      <a href="https://discord.gg/kB5EgmfBrA">Discord</a>
+      <a href="https://github.com/narratarr/narratarr/blob/main/LICENSE">License</a>
+    </nav>
+  </div>
+</footer>
+
+<!-- now playing: the page as an audiobook -->
+<div class="np" id="np" role="region" aria-label="Page player: jump between chapters, or press play to scroll through">
+  <div class="art"><svg viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="lg3" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f8c66e"/><stop offset="1" stop-color="#ec6f55"/></linearGradient></defs><rect width="64" height="64" fill="url(#lg3)"/><path d="M13 44.5c6-3.2 12.5-3.2 19 0 6.5-3.2 13-3.2 19 0" fill="none" stroke="#1a1016" stroke-width="3.2" stroke-linecap="round"/><g stroke="#1a1016" stroke-width="3.6" stroke-linecap="round" class="np-bars"><path d="M20 31v4"/><path d="M26 24v11"/><path d="M32 18v17"/><path d="M38 23v12"/><path d="M44 29v6"/></g></svg></div>
+  <div class="meta">
+    <div class="line1"><span class="ttl" id="np-title">Prologue</span><span class="sub" id="np-sub">Narratarr · the landing page</span></div>
+    <div class="bar" id="np-bar" role="slider" tabindex="0" aria-label="Position in the page" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="rail"></div><div class="fill" id="np-fill"></div></div>
+    <div class="times"><span id="np-elapsed">0:00</span><span id="np-remain">-29:54</span></div>
+  </div>
+  <div class="ctl">
+    <button class="skip" type="button" id="np-prev" aria-label="Previous chapter"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 5h2v14H6zM20 5v14L9 12z"/></svg></button>
+    <button class="play" type="button" id="np-play" aria-label="Play: scroll through the page"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" id="np-icon"><path d="M8 5v14l11-7z"/></svg></button>
+    <button class="skip" type="button" id="np-next" aria-label="Next chapter"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16 5h2v14h-2zM4 5v14l11-7z"/></svg></button>
+    <button class="spd" type="button" id="np-speed" aria-label="Playback speed, 1×">1×</button>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollToPlugin.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/MotionPathPlugin.min.js"></script>
+<script>
+(() => {
+  const $ = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+  const hasGsap = !!(window.gsap && window.ScrollTrigger);
+  const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  /* ---------- copy buttons ---------- */
+  $$("[data-copy], [data-copy-from]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const text = btn.dataset.copy || ($("#" + btn.dataset.copyFrom)?.textContent ?? "");
+      const label = btn.querySelector("span");
+      try {
+        await navigator.clipboard.writeText(text);
+        btn.classList.add("done"); if (label) label.textContent = "Copied";
+      } catch {
+        if (label) label.textContent = "Select and copy";
+      }
+      setTimeout(() => { btn.classList.remove("done"); if (label) label.textContent = "Copy"; }, 1800);
+    });
+  });
+
+  /* ---------- install tabs ---------- */
+  const tabs = $$('[role="tab"]');
+  const select = (tab) => {
+    tabs.forEach((t) => {
+      const on = t === tab;
+      t.setAttribute("aria-selected", on ? "true" : "false");
+      t.tabIndex = on ? 0 : -1;
+      $("#" + t.getAttribute("aria-controls")).hidden = !on;
+    });
+    if (hasGsap && !reduced) gsap.fromTo("#" + tab.getAttribute("aria-controls") + " .code", { y: 14, autoAlpha: 0 }, { y: 0, autoAlpha: 1, duration: 0.5, ease: "power3.out" });
+  };
+  tabs.forEach((t, i) => {
+    t.addEventListener("click", () => select(t));
+    t.addEventListener("keydown", (e) => {
+      if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+      const next = tabs[(i + (e.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length];
+      next.focus(); select(next);
+    });
+  });
+
+  /* ---------- now playing: the page as an audiobook ---------- */
+  const TOTAL = 29 * 60 + 54; // the length of "The Black Cat", the chapter playing in the screenshot
+  const chapters = $$("[data-chapter]");
+  const np = { title: $("#np-title"), sub: $("#np-sub"), fill: $("#np-fill"), bar: $("#np-bar"), el: $("#np-elapsed"), rem: $("#np-remain") };
+  const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+  const maxScroll = () => Math.max(1, document.documentElement.scrollHeight - innerHeight);
+  const topOf = (el) => {
+    // a pinned section's start is where its ScrollTrigger begins
+    const st = hasGsap && ScrollTrigger.getAll().find((t) => t.trigger === el && t.pin);
+    return st ? st.start : el.getBoundingClientRect().top + scrollY;
+  };
+  const drawTicks = () => {
+    $$(".tick", np.bar).forEach((t) => t.remove());
+    chapters.slice(1).forEach((c) => {
+      const t = document.createElement("span");
+      t.className = "tick"; t.style.left = (Math.min(1, topOf(c) / maxScroll()) * 100) + "%";
+      np.bar.appendChild(t);
+    });
+  };
+  let current = -1;
+  const update = () => {
+    const p = Math.min(1, Math.max(0, scrollY / maxScroll()));
+    np.fill.style.width = (p * 100) + "%";
+    np.bar.setAttribute("aria-valuenow", String(Math.round(p * 100)));
+    np.el.textContent = fmt(p * TOTAL);
+    np.rem.textContent = "-" + fmt(TOTAL - p * TOTAL);
+    let idx = 0;
+    chapters.forEach((c, i) => { if (topOf(c) <= scrollY + innerHeight * 0.45) idx = i; });
+    if (idx !== current) {
+      current = idx;
+      np.title.textContent = chapters[idx].dataset.chapter;
+      const n = idx === 0 ? "Narratarr · the landing page" : idx >= chapters.length - 1 ? "Narratarr · epilogue" : `Chapter ${idx} of ${chapters.length - 2}`;
+      np.sub.textContent = n;
+      if (hasGsap && !reduced) gsap.fromTo([np.title, np.sub], { y: 8, autoAlpha: 0 }, { y: 0, autoAlpha: 1, duration: 0.45, ease: "power3.out", stagger: 0.05 });
+    }
+  };
+  const goTo = (y) => {
+    if (hasGsap && window.ScrollToPlugin && !reduced) gsap.to(window, { scrollTo: { y, autoKill: true }, duration: 1.1, ease: "power3.inOut" });
+    else scrollTo({ top: y, behavior: reduced ? "auto" : "smooth" });
+  };
+  $("#np-next").addEventListener("click", () => { const c = chapters[Math.min(chapters.length - 1, current + 1)]; goTo(topOf(c) + 1); });
+  $("#np-prev").addEventListener("click", () => {
+    const here = topOf(chapters[current]);
+    const target = scrollY - here > innerHeight * 0.3 ? here : topOf(chapters[Math.max(0, current - 1)]);
+    goTo(target + (target > 0 ? 1 : 0));
+  });
+  const seek = (clientX) => { const r = np.bar.getBoundingClientRect(); goTo(((clientX - r.left) / r.width) * maxScroll()); };
+  np.bar.addEventListener("click", (e) => seek(e.clientX));
+  np.bar.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowRight") { e.preventDefault(); goTo(Math.min(maxScroll(), scrollY + innerHeight * 0.6)); }
+    if (e.key === "ArrowLeft") { e.preventDefault(); goTo(Math.max(0, scrollY - innerHeight * 0.6)); }
+  });
+
+  // play reads the page to you: a slow, steady scroll. Any wheel, touch or key from you takes over.
+  const SPEEDS = [1, 1.5, 2, 3];
+  let speedIdx = 0, playing = false, last = 0, carry = 0;
+  const icon = $("#np-icon"), playBtn = $("#np-play"), speedBtn = $("#np-speed");
+  const setPlaying = (on) => {
+    playing = on;
+    icon.innerHTML = on ? '<path d="M7 5h4v14H7zM13 5h4v14h-4z"/>' : '<path d="M8 5v14l11-7z"/>';
+    playBtn.setAttribute("aria-label", on ? "Pause" : "Play: scroll through the page");
+    if (on) { last = performance.now(); requestAnimationFrame(tick); }
+  };
+  const tick = (now) => {
+    if (!playing) return;
+    const dt = Math.min(64, now - last); last = now;
+    carry += (dt / 1000) * 70 * SPEEDS[speedIdx];
+    const step = Math.floor(carry);
+    if (step) { carry -= step; scrollBy(0, step); }
+    if (scrollY >= maxScroll() - 1) { setPlaying(false); return; }
+    requestAnimationFrame(tick);
+  };
+  playBtn.addEventListener("click", () => setPlaying(!playing));
+  speedBtn.addEventListener("click", () => {
+    speedIdx = (speedIdx + 1) % SPEEDS.length;
+    speedBtn.textContent = SPEEDS[speedIdx] + "×";
+    speedBtn.setAttribute("aria-label", `Playback speed, ${SPEEDS[speedIdx]}×`);
+  });
+  ["wheel", "touchstart"].forEach((ev) => addEventListener(ev, () => playing && setPlaying(false), { passive: true }));
+  addEventListener("keydown", (e) => { if (playing && ["ArrowDown", "ArrowUp", "PageDown", "PageUp", " ", "Home", "End"].includes(e.key) && e.target === document.body) setPlaying(false); });
+
+  let ticking = false;
+  addEventListener("scroll", () => { if (!ticking) { ticking = true; requestAnimationFrame(() => { update(); ticking = false; }); } }, { passive: true });
+  addEventListener("resize", () => { drawTicks(); update(); });
+
+  // nav: solid once you scroll, out of the way while you read down, back when you scroll up
+  const nav = $("#nav"); let lastY = 0;
+  addEventListener("scroll", () => {
+    const y = scrollY;
+    nav.classList.toggle("solid", y > 24);
+    nav.classList.toggle("away", y > 600 && y > lastY + 4);
+    if (y < lastY - 4) nav.classList.remove("away");
+    lastY = y;
+  }, { passive: true });
+
+  if (!hasGsap) { drawTicks(); update(); return; }
+
+  gsap.registerPlugin(ScrollTrigger, ScrollToPlugin, MotionPathPlugin);
+  ScrollTrigger.addEventListener("refresh", () => { drawTicks(); update(); });
+
+  /* ---------- ambient: equalizer bars that never stop ---------- */
+  const bounce = (sel) => $$(sel).forEach((bar, i) => {
+    gsap.to(bar, { scaleY: () => gsap.utils.random(0.35, 1.25), transformOrigin: "50% 100%", duration: () => gsap.utils.random(0.28, 0.6), ease: "sine.inOut", repeat: -1, yoyo: true, repeatRefresh: true, delay: i * 0.07 });
+  });
+
+  const mm = gsap.matchMedia();
+  mm.add({ desktop: "(min-width: 960px)", mobile: "(max-width: 959px)", motion: "(prefers-reduced-motion: no-preference)" }, (ctx) => {
+    const { desktop, motion } = ctx.conditions;
+    if (!motion) return;
+
+    bounce(".logo-bars path"); bounce(".np-bars path"); bounce(".eq i");
+
+    /* ---------- prologue: the opening sequence ---------- */
+    const intro = gsap.timeline({ defaults: { ease: "expo.out" } });
+    intro
+      .from("#hero-title .w", { yPercent: 115, rotate: 6, duration: 1.4, stagger: 0.07 })
+      .from("[data-intro]", { y: 24, autoAlpha: 0, duration: 1.1, stagger: 0.08 }, 0.35)
+      .from("#hero-window", { y: 160, rotateX: 32, scale: 0.88, autoAlpha: 0, duration: 1.8 }, 0.45)
+      .from(".float", { scale: 0.4, autoAlpha: 0, rotate: (i) => (i % 2 ? 30 : -30), duration: 1.3, stagger: 0.07, ease: "back.out(1.6)" }, 0.9)
+      .from("#np", { yPercent: 160, autoAlpha: 0, duration: 1.2 }, 1.2)
+      .from(".glow", { scale: 0.6, autoAlpha: 0, duration: 2.4, stagger: 0.2, ease: "power2.out" }, 0);
+
+    // drifting glows
+    $$(".hero .glow").forEach((g, i) => gsap.to(g, { x: gsap.utils.random(-80, 80), y: gsap.utils.random(-60, 60), duration: gsap.utils.random(7, 11), repeat: -1, yoyo: true, ease: "sine.inOut", delay: i }));
+
+    // the app window settles flat as you scroll into it; covers fly past at their own depth
+    gsap.fromTo("#hero-window", { rotateX: 16, scale: 0.94 }, { rotateX: 0, scale: 1, ease: "none", scrollTrigger: { trigger: "#hero-stage", start: "top 95%", end: "top 25%", scrub: 1 } });
+    $$(".float").forEach((f) => {
+      const d = parseFloat(f.dataset.depth || "1");
+      gsap.to(f, { y: -220 * d, rotate: `+=${d * 14}`, ease: "none", scrollTrigger: { trigger: "#hero-stage", start: "top bottom", end: "bottom top", scrub: 1.2 } });
+    });
+    gsap.to(".hero-copy", { y: -90, autoAlpha: 0.25, ease: "none", scrollTrigger: { trigger: ".hero", start: "top top", end: "45% top", scrub: true } });
+
+    // covers lean toward the pointer
+    if (desktop) {
+      const movers = $$(".float").map((f) => ({ d: parseFloat(f.dataset.depth || "1"), x: gsap.quickTo(f, "x", { duration: 1.2, ease: "power3.out" }), r: gsap.quickTo(f, "rotationY", { duration: 1.2, ease: "power3.out" }) }));
+      const onMove = (e) => {
+        const nx = e.clientX / innerWidth - 0.5;
+        movers.forEach((m) => { m.x(nx * 50 * m.d); m.r(nx * 14); });
+      };
+      addEventListener("pointermove", onMove);
+      ctx.add(() => () => removeEventListener("pointermove", onMove));
+    }
+
+    /* ---------- sources marquee, faster when you scroll faster ---------- */
+    const loops = ["#m1", "#m2"].map((sel, i) => {
+      const row = $(sel);
+      if (!row.dataset.doubled) { row.innerHTML += row.innerHTML; row.dataset.doubled = "1"; } // two copies, so the loop is seamless
+      return gsap.fromTo(row, { xPercent: i ? -50 : 0 }, { xPercent: i ? 0 : -50, duration: 38 + i * 6, ease: "none", repeat: -1 });
+    });
+    ScrollTrigger.create({
+      trigger: ".marquee", start: "top bottom", end: "bottom top",
+      onUpdate: (self) => {
+        const boost = 1 + Math.min(6, Math.abs(self.getVelocity()) / 400);
+        loops.forEach((l) => gsap.to(l, { timeScale: boost * (self.direction || 1), duration: 0.2, overwrite: true }));
+        gsap.delayedCall(0.25, () => loops.forEach((l) => gsap.to(l, { timeScale: 1, duration: 1.2, overwrite: true })));
+      },
+    });
+
+    if (desktop) {
+      // each chapter's words and stage arrive as it comes into view; the pinned set piece follows
+      ["#find", "#fetch", "#file", "#listen"].forEach((id) => {
+        const head = $$(id + " .chap-head > *"), stage = $(id + " .chap-grid > :last-child");
+        gsap.timeline({ scrollTrigger: { trigger: id + " .pin-inner", start: "top 85%", end: "top 35%", scrub: 1 } })
+          .from(head, { y: 60, autoAlpha: 0, stagger: 0.1, ease: "power3.out" })
+          .from(stage, { y: 90, rotateX: -10, transformPerspective: 1400, autoAlpha: 0, ease: "power3.out" }, 0.1);
+      });
+
+      /* ---------- chapter 1: typing a typo, and forgiving it ---------- */
+      const qText = $("#q-text"), typed = qText.textContent;
+      const typing = { n: 0 };
+      const find = gsap.timeline({ defaults: { ease: "power3.out" }, scrollTrigger: { trigger: "#find .pin-inner", start: "center center", end: "+=1600", scrub: 1, pin: true, anticipatePin: 1 } });
+      find
+        .fromTo(typing, { n: 0 }, { n: typed.length, duration: 1.4, ease: "none", onUpdate: () => { qText.textContent = typed.slice(0, Math.round(typing.n)); } })
+        .from("#q-squiggle", { scaleX: 0, transformOrigin: "0% 50%", duration: 0.35 })
+        .from("#find-chips .chip", { y: 14, autoAlpha: 0, stagger: 0.05, duration: 0.4 }, "<")
+        .from("#q-fix", { y: 12, autoAlpha: 0, duration: 0.5 })
+        .from(".find-book", { y: 90, rotate: (i) => (i - 1.5) * 6, autoAlpha: 0, stagger: 0.14, duration: 0.9, ease: "back.out(1.4)" })
+        .to({}, { duration: 0.4 });
+      ctx.add(() => () => { qText.textContent = typed; });
+
+      /* ---------- chapter 2: one release, one route ---------- */
+      const route = $("#route");
+      const len = route.getTotalLength();
+      const pct = $("#dl-pct"), dlText = $("#dl-text"), prog = { v: 0 };
+      const fetchTl = gsap.timeline({ defaults: { ease: "power2.out" }, scrollTrigger: { trigger: "#fetch .pin-inner", start: "center center", end: "+=1800", scrub: 1, pin: true, anticipatePin: 1 } });
+      fetchTl
+        .from("#clients rect, #clients text", { x: 30, autoAlpha: 0, stagger: 0.03, duration: 0.5 })
+        .fromTo(route, { strokeDasharray: len, strokeDashoffset: len }, { strokeDashoffset: 0, duration: 2, ease: "none" })
+        .fromTo(["#dot", "#dot-glow"], { motionPath: { path: route, align: route, alignOrigin: [0.5, 0.5], start: 0, end: 0 } }, { motionPath: { path: route, align: route, alignOrigin: [0.5, 0.5], start: 0, end: 1 }, duration: 2, ease: "none" }, "<")
+        .fromTo("#rule1-box", { attr: { stroke: "rgba(255,244,230,.14)" } }, { attr: { stroke: "#f8c66e" }, duration: 0.3 }, "<0.75")
+        .fromTo("#rd-box", { attr: { stroke: "rgba(255,244,230,.14)" } }, { attr: { stroke: "#f8c66e" }, duration: 0.3 }, ">0.8")
+        .fromTo("#dot-glow", { scale: 1, transformOrigin: "50% 50%" }, { scale: 2.2, autoAlpha: 0.2, duration: 0.6, repeat: 1, yoyo: true })
+        .fromTo("#dl-bar", { attr: { width: 0 } }, {
+          attr: { width: 256 }, duration: 1.6, ease: "none",
+          onUpdate: function () { prog.v = Math.round(this.progress() * 100); pct.textContent = prog.v + "%"; dlText.textContent = prog.v < 100 ? "Downloading via Real-Debrid" : "In your library"; },
+        })
+        .to({}, { duration: 0.5 });
+      ctx.add(() => () => { pct.textContent = "100%"; dlText.textContent = "In your library"; });
+
+      /* ---------- chapter 3: a template becomes a path ---------- */
+      const GLYPHS = "abcdefghijklmnopqrstuvwxyz{}_/0123456789";
+      const scramble = (el, from, to, p) => {
+        const n = Math.round(to.length * p);
+        let out = to.slice(0, n);
+        const rest = Math.max(0, Math.round(from.length + (to.length - from.length) * p) - n);
+        for (let i = 0; i < rest; i++) out += p < 0.02 ? from[n + i] || "" : GLYPHS[(Math.random() * GLYPHS.length) | 0];
+        el.textContent = p >= 1 ? to : out;
+      };
+      const segs = $$("#file-stage .seg");
+      segs.forEach((s) => { s.dataset.final = s.textContent; });
+      const fileTl = gsap.timeline({ defaults: { ease: "power3.out" }, scrollTrigger: { trigger: "#file .pin-inner", start: "center center", end: "+=1700", scrub: 1, pin: true, anticipatePin: 1 } });
+      fileTl
+        .from(".pathline", { x: -30, autoAlpha: 0, stagger: 0.15, duration: 0.6 });
+      segs.forEach((s, i) => {
+        const state = { p: 0 };
+        fileTl.fromTo(state, { p: 0 }, { p: 1, duration: 0.55, ease: "none", onUpdate: () => scramble(s, s.dataset.tpl, s.dataset.final, state.p) }, i === 0 ? ">" : "<0.28");
+      });
+      fileTl
+        .fromTo(["#drop-1", "#drop-2"], { maxWidth: "24ch", autoAlpha: 1 }, { maxWidth: 0, autoAlpha: 0, duration: 0.7, stagger: 0.12, ease: "power2.inOut" })
+        .from("#tree > div", { x: -24, autoAlpha: 0, stagger: 0.09, duration: 0.5 })
+        .from(".abs-note", { y: 16, autoAlpha: 0, duration: 0.5 })
+        .to({}, { duration: 0.4 });
+      ctx.add(() => () => segs.forEach((s) => { s.textContent = s.dataset.final; }));
+
+      /* ---------- chapter 4: the player opens up ---------- */
+      const SPEED_STEPS = ["0.75×", "1×", "1.25×", "1.5×", "2×", "3×", "1.5×"];
+      const speedEl = $("#speed");
+      const listenTl = gsap.timeline({ defaults: { ease: "power3.out" }, scrollTrigger: { trigger: "#listen .pin-inner", start: "center center", end: "+=1500", scrub: 1, pin: true, anticipatePin: 1 } });
+      listenTl
+        .fromTo("#player", { clipPath: "circle(8% at 32% 38%)", scale: 0.92 }, { clipPath: "circle(120% at 32% 38%)", scale: 1, duration: 1.6, ease: "power2.inOut" }, 0.2)
+        .from("#phone", { x: 160, y: 80, rotate: 14, autoAlpha: 0, duration: 1.1 }, ">-0.4")
+        .from("#pills .pill", { y: 30, autoAlpha: 0, stagger: 0.12, duration: 0.6 }, "<0.3")
+        .to({ i: 0 }, { i: SPEED_STEPS.length - 1, duration: 1.4, ease: "none", onUpdate: function () { speedEl.textContent = SPEED_STEPS[Math.round(this.targets()[0].i)]; } })
+        .to("#phone", { y: -30, rotate: -3, duration: 1, ease: "sine.inOut" }, "<")
+        .to({}, { duration: 0.3 });
+      ctx.add(() => () => { speedEl.textContent = "1.5×"; });
+
+      /* ---------- chapter 5: the household, sideways ---------- */
+      const track = $("#track");
+      const distance = () => Math.max(0, track.scrollWidth - innerWidth);
+      const side = gsap.to(track, { x: () => -distance(), ease: "none", scrollTrigger: { trigger: "#household", start: "top top", end: () => "+=" + distance(), scrub: 1, pin: true, anticipatePin: 1, invalidateOnRefresh: true } });
+      $$("#track .card").forEach((card) => {
+        gsap.from(card.querySelectorAll(".ic, h3, p, .ui"), { y: 40, autoAlpha: 0, stagger: 0.08, ease: "power3.out", scrollTrigger: { trigger: card, containerAnimation: side, start: "left 92%", end: "left 55%", scrub: 1 } });
+        gsap.fromTo(card, { rotateY: -10, transformPerspective: 1200 }, { rotateY: 0, ease: "none", scrollTrigger: { trigger: card, containerAnimation: side, start: "left right", end: "left 50%", scrub: 1 } });
+      });
+      gsap.from("#household .household-head > *", { y: 50, autoAlpha: 0, stagger: 0.12, ease: "power3.out", scrollTrigger: { trigger: "#household", start: "top 75%", end: "top 25%", scrub: 1 } });
+    } else {
+      /* ---------- phones and small windows: the same story, simply revealed ---------- */
+      $$(".chap-head, .panel, .listen-stage, .card").forEach((el) => {
+        gsap.from(el, { y: 50, autoAlpha: 0, duration: 1, ease: "power3.out", scrollTrigger: { trigger: el, start: "top 88%", once: true } });
+      });
+    }
+
+    /* ---------- the rest: install, guides, the finale ---------- */
+    $$(".reveal").forEach((el) => gsap.from(el, { y: 50, autoAlpha: 0, duration: 1.1, ease: "power3.out", scrollTrigger: { trigger: el, start: "top 86%", once: true } }));
+    ScrollTrigger.batch(".guide", {
+      start: "top 90%", once: true,
+      onEnter: (els) => gsap.from(els, { y: 60, rotateX: -18, transformPerspective: 900, autoAlpha: 0, duration: 1, stagger: 0.07, ease: "expo.out" }),
+    });
+    gsap.from(".community h2", { scale: 0.82, autoAlpha: 0, ease: "none", scrollTrigger: { trigger: ".community", start: "top 85%", end: "center 60%", scrub: 1 } });
+    gsap.from(".community .glow", { scale: 0.4, autoAlpha: 0, ease: "none", scrollTrigger: { trigger: ".community", start: "top bottom", end: "center center", scrub: 1 } });
+  });
+
+  // fonts and images change heights: measure again once they're in
+  addEventListener("load", () => ScrollTrigger.refresh());
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => ScrollTrigger.refresh());
+  drawTicks(); update();
+})();
+</script>
+</body>
+</html>
