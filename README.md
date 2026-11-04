@@ -310,8 +310,8 @@ Narratarr searches category `3030` (*Audio › Audiobook*) for audiobooks and `7
 ### Ratings on the cards
 
 Discover can show a star score on each book, taken from the average Audible publishes for the
-audiobook edition. It is **on by default** and switched off in **Settings → Rating metadata**;
-switched off, no requests are made at all and no pill is shown.
+audiobook edition. It is **on by default** and switched off in **Settings → Search & sources →
+Rating metadata**; switched off, no requests are made at all and no pill is shown.
 
 A score appears only when the book we found is the book we asked for: the title must match exactly
 after normalising, and the surname must match too. A near miss leaves the card reading **No Rating**,

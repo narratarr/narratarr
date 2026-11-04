@@ -1,9 +1,9 @@
 # Ratings on book cards
 
 Discover can show a star score on each book card, taken from the average Audible publishes for the
-audiobook edition. It is on by default and can be switched off in **Settings → Rating metadata**.
-This page explains where the number comes from, how a book is matched to it, what is cached, and
-what the feature cannot do.
+audiobook edition. It is on by default and can be switched off in **Settings → Search & sources →
+Rating metadata**. This page explains where the number comes from, how a book is matched to it,
+what is cached, and what the feature cannot do.
 
 ## Where the data comes from
 
