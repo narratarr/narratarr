@@ -341,6 +341,13 @@ async def library():
     for b in books:
         b["companion_id"] = pairs[b["id"]]["id"] if b["id"] in pairs else None  # the same book in its other format
         b["requested_by_name"] = names.get(b.get("requested_by"), "")
+    # The same rating the card would show on Discover. Read from the cache only, so a slow provider
+    # never holds up the library; anything missing is filled in the background and appears next time.
+    _provider = ratings.provider()
+    if _provider is not None:
+        ratings.ensure_filler()
+    for b in books:
+        ratings.enrich(b, provider_obj=_provider)
     return books
 
 
