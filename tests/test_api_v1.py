@@ -35,13 +35,13 @@ def fresh(monkeypatch):
     for limiter in (apiv1.search_limit, apiv1.request_limit, apiv1.refresh_failures):
         limiter._hits.clear()
 
-    async def book(asin, client=None):
+    async def book(asin, client=None, r=None):
         return CATALOG.get(asin)
 
     async def search_books(q, page=1, client=None):
         return [b for b in CATALOG.values() if q.lower() in (b["title"] + b["author"]).lower()], 1
 
-    async def no_search(book):
+    async def no_search(book, hold=False):
         return None
 
     monkeypatch.setattr(audible, "book", book)

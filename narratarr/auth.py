@@ -62,7 +62,7 @@ def current_user(request) -> dict | None:
 def admin_only(method: str, path: str) -> bool:
     if path.startswith(ADMIN_PREFIXES) or (path == "/api/settings" and method != "GET"):
         return True
-    if path.startswith("/api/library/") and path.endswith("/approve"):
+    if path.startswith("/api/library/") and path.endswith(("/approve", "/keep-looking")):
         return True
     # Removing a book is checked in the route itself: a listener may cancel their own request.
     return method == "PATCH" and path.startswith("/api/library/")

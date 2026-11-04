@@ -19,7 +19,7 @@ from urllib.parse import urlencode
 
 from rapidfuzz import fuzz
 
-from . import audible, config, db, downloaders, ebooks, languages
+from . import audible, config, db, downloaders, ebooks, languages, notify
 from .search import clean_title, normalize
 from .sources import CATALOGS, ProwlarrError, TorznabError, ebook_indexers, ebook_torznab, get_source
 
@@ -127,8 +127,11 @@ async def find_releases(book: dict) -> list[dict]:
     return found
 
 
-def best(found: list[dict]) -> dict | None:
+def best(found: list[dict], skip: list[str] | tuple = ()) -> dict | None:
+    """The release to take on our own: usable, in a wanted language, a sure match, not turned down before."""
     for item in found:
+        if item["url"] in skip:
+            continue
         if item["usable"] and item.get("language_ok", True) and item["match"] >= AUTO_MATCH and item.get("seeders") != 0:
             return item
     return None
@@ -146,20 +149,38 @@ async def grab(book_id: int, url: str, source_name: str, status: str = "queued")
         size=d.size or book["size"], indexer=d.indexer, release=d.release or d.title,
         description=book["description"] or d.description, cover_url=book["cover_url"] or d.cover_url,
         status=status, error="", detail="", progress=0, client_job_id="", download_client="", rd_torrent_id="",
-        search_note="",
+        search_note="", found_by_search=0,
     )
     return db.get(book_id)
 
 
-async def search_and_grab(book: dict) -> dict | None:
-    """Look for a Wanted book once. Returns the chosen release, or None if nothing good turned up."""
+def keep_looking(book: dict) -> dict:
+    """Turn down the release a search found for a book and go back to looking. That release is
+    remembered, so the next search doesn't pick it again."""
+    source = next((n for n in CATALOGS if get_source(n).owns(book["source_url"].split("#")[0])), "")
+    if not source:
+        raise ValueError("This book didn't come from a catalog, so there's nothing to go back to looking for.")
+    skipped = list(dict.fromkeys([*(book.get("skipped_releases") or []), book["release_url"]]))
+    db.update(
+        book["id"], source=source, status="wanted", release_url="", protocol="", download_url="", info_hash="",
+        trackers=[], files=[], indexer="", release="", found_by_search=0, skipped_releases=[u for u in skipped if u],
+        error="", detail="", search_note="Turned down a release. Still looking.", last_searched=time.time(),
+    )
+    return db.get(book["id"])
+
+
+async def search_and_grab(book: dict, hold: bool = False) -> dict | None:
+    """Look for a Wanted book once. Returns the chosen release, or None if nothing good turned up.
+
+    With `hold`, the release isn't downloaded: the book waits under Awaiting approval with it
+    picked, and the admins are told, so someone can check its language, format and size first."""
     db.update(book["id"], last_searched=time.time())
     try:
         found = await find_releases(book)
     except ProwlarrError as e:
         db.update(book["id"], search_note=str(e))
         raise
-    pick = best(found)
+    pick = best(found, book.get("skipped_releases") or [])
     if not pick:
         close = [f for f in found if f["match"] >= AUTO_MATCH]
         note = (
@@ -173,6 +194,11 @@ async def search_and_grab(book: dict) -> dict | None:
                         "Add one that does in Prowlarr.")
         db.update(book["id"], search_note=note)
         return None
+    if hold:
+        await grab(book["id"], pick["url"], pick["source"], "requested")
+        db.update(book["id"], found_by_search=1)
+        notify.emit("found", db.get(book["id"]))
+        return pick
     await grab(book["id"], pick["url"], pick["source"])
     return pick
 
@@ -197,14 +223,14 @@ def due_for_search() -> list[dict]:
 
 
 async def auto_search() -> int:
-    """One round of automatic searching. Returns how many books were grabbed."""
+    """One round of automatic searching. Returns how many books were grabbed (or held for approval)."""
     s = config.load()
     if not (s.auto_search and ((s.prowlarr_url and s.prowlarr_api_key) or (s.torznab_url and s.torznab_api_key))):
         return 0
     grabbed = 0
     for b in due_for_search():
         try:
-            if await search_and_grab(b):
+            if await search_and_grab(b, hold=s.found_needs_approval):
                 grabbed += 1
         except Exception as e:  # one bad search shouldn't stop the round
             log.info("Automatic search for %s failed: %s", b["title"], e)

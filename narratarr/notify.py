@@ -28,6 +28,7 @@ log = logging.getLogger("narratarr.notify")
 KINDS = {"ntfy": "ntfy", "gotify": "Gotify", "discord": "Discord", "webhook": "Webhook"}
 EVENTS = {
     "wanted": "Added to Wanted",
+    "found": "Release found",
     "grabbed": "Download started",
     "completed": "In your library",
     "failed": "Download failed",
@@ -35,7 +36,7 @@ EVENTS = {
 # What a webhook body can use. The book* names are the ones AudioBookRequest uses, so bodies written
 # for it work here too.
 VARIABLES = (
-    "event", "eventLabel", "message", "title", "author", "narrator", "format", "cover", "username", "error",
+    "event", "eventLabel", "message", "title", "author", "narrator", "format", "cover", "username", "error", "release",
     "bookId", "bookTitle", "bookAuthors", "bookCover",
 )
 DEFAULT_BODY = """{
@@ -106,6 +107,8 @@ def context(event: str, book: dict, username: str = "", error: str = "") -> dict
     message = {
         "wanted": f"{username or 'Someone'} wants {what}"
                   + (". It's waiting for your approval" if book.get("status") == "requested" else ""),
+        "found": f"Found {book.get('release') or 'a release'} for {what}" + (f", wanted by {username}" if username else "")
+                 + ". It's waiting for your approval",
         "grabbed": f"Downloading {what}" + (f", for {username}" if username else ""),
         "completed": f"{what} is in your library" + (f", for {username}" if username else ""),
         "failed": f"{what} couldn't download: {error or 'unknown error'}",
@@ -122,6 +125,7 @@ def context(event: str, book: dict, username: str = "", error: str = "") -> dict
         "cover": cover if cover.startswith(("http://", "https://")) else "",
         "username": username,
         "error": error,
+        "release": book.get("release") or "",
         "bookId": str(book.get("id") or ""),
     }
     ctx.update(bookTitle=title, bookAuthors=author, bookCover=ctx["cover"])

@@ -65,7 +65,7 @@ class AudibleCatalog:
             "num_results": 40, "page": page - 1, "response_groups": catalog.GROUPS,  # Audible counts from 0
             "products_sort_by": "-ReleaseDate" if category == "new" else "BestSellers",
         }
-        if category and category != "new":
+        if category and category != "new" and catalog.region() == "us":  # the genre IDs are the US store's
             params["category_id"] = category
         data = await catalog._get(f"{catalog.api_base()}/products", params) or {}
         books = catalog._keep([catalog.to_book(p) for p in data.get("products") or []], catalog.region())
@@ -76,7 +76,7 @@ class AudibleCatalog:
         return Page(items=[to_details(b) for b in books], page=page, total_pages=total)
 
     async def details(self, url: str) -> Details:
-        b = await catalog.book(catalog.asin_from_url(url))
+        b = await catalog.book(catalog.asin_from_url(url), r=catalog.region_from_url(url) or None)
         if not b:
             raise ValueError("Audible doesn't have that book any more.")
         d = to_details(b)

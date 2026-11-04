@@ -67,7 +67,7 @@ async def test_wanted_ebooks_use_the_ebook_categories(jackett):
 async def test_automatic_search_runs_with_only_torznab(jackett, monkeypatch):
     calls = []
 
-    async def fake_search_and_grab(b):
+    async def fake_search_and_grab(b, hold=False):
         calls.append(b["id"])
         return None
 

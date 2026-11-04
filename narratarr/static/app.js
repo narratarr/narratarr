@@ -239,6 +239,9 @@ async function bookAction(id, action) {
     const out = await api(`/api/library/${id}?delete_files=${!!res.files}`, { method: "DELETE" });
     toast(out?.kept ? `Removed. Its files were kept at ${out.kept}` : takeBack ? "Request taken back" : decline ? "Request declined" : "Removed from library",
       out?.kept ? { kind: "ok" } : {});
+  } else if (action === "keep-looking") {
+    const book = await api(`/api/library/${id}/keep-looking`, { method: "POST" });
+    toast(`Turned that release down. Still looking for ${book.title}`, { kind: "ok", cover: book.cover_url });
   } else if (action === "approve") {
     const book = await api(`/api/library/${id}/approve`, { method: "POST" });
     toast(book.status === "queued" ? `Approved. ${book.title} is downloading` : `Approved. Looking for ${book.title} now`, { kind: "ok", cover: book.cover_url });
@@ -560,9 +563,9 @@ function Discover(root) {
     $("#disc-title", root).innerHTML = d.q
       ? `Results for <em style="font-style:italic">“${esc(d.q)}”</em> <span class="in-src">in ${esc(src.label)}${src.name === "prowlarr" && d.kind === "ebook" ? " · ebooks" : ""}</span>`
       : esc(cat ? cat.name : defaultLabel);
-    $("#dym", root).innerHTML = d.dym
+    $("#dym", root).innerHTML = (d.dym
       ? `<p class="dym">Including results for <em>${esc(d.dym)}</em> · <button data-literal>Show only close matches for “${esc(d.q)}”</button></p>`
-      : "";
+      : "") + (d.storeNote ? `<p class="dym">${esc(d.storeNote)}</p>` : "");
     refine();
   }
 
@@ -576,11 +579,21 @@ function Discover(root) {
     const sorts = [["", natural], ["rating", "Rating"], ["newest", "Newest first"], ["largest", "Largest"], ["smallest", "Smallest"], ["title", "Title A–Z"]]
       .filter(([v]) => !(v === "newest" && listedNewest));
     const shown = visibleItems().length;
-    $("#refine", root).innerHTML = !d.items.length ? "" : `
+    $("#refine", root).innerHTML = !d.items.length ? storePicker() : `
       <span class="muted">${shown}${shown !== d.items.length ? ` of ${d.items.length}` : ""} books</span>
       <select class="select" data-r="lang" aria-label="Language">${opts(d.items.map((i) => i.language), d.lang, "All languages")}</select>
       <select class="select" data-r="fmt" aria-label="Format">${opts(d.items.map((i) => i.format.toUpperCase()), d.fmt, "All formats")}</select>
-      <select class="select" data-r="sort" aria-label="Sort">${sorts.map(([v, l]) => `<option value="${v}" ${v === d.sort ? "selected" : ""}>${l}</option>`).join("")}</select>`;
+      <select class="select" data-r="sort" aria-label="Sort">${sorts.map(([v, l]) => `<option value="${v}" ${v === d.sort ? "selected" : ""}>${l}</option>`).join("")}</select>`
+      + storePicker();
+  }
+
+  // The Audible catalog can be searched in the other stores an admin turned on.
+  function storePicker() {
+    const stores = src.name === "audible" ? audibleStores() : [];
+    if (stores.length < 2) return "";
+    const cur = d.store || d.storeUsed || stores[0];
+    return `<select class="select" data-store-pick aria-label="Audible store">${stores.map((v) =>
+      `<option value="${v}" ${v === cur ? "selected" : ""}>${esc(storeName(v))} store</option>`).join("")}</select>`;
   }
 
   const sizeOf = (s) => {
@@ -638,7 +651,7 @@ function Discover(root) {
   async function load(reset) {
     if (d.loading && !reset) return;
     const token = ++d.token;
-    if (reset) { d.items = []; d.page = 0; d.total = 1; d.error = ""; d.dym = ""; d.note = ""; grid.innerHTML = skeletons(12); }
+    if (reset) { d.items = []; d.page = 0; d.total = 1; d.error = ""; d.dym = ""; d.note = ""; d.storeNote = ""; grid.innerHTML = skeletons(12); }
     d.loading = true;
     heading();
     footer();
@@ -650,6 +663,7 @@ function Discover(root) {
     try {
       const params = new URLSearchParams({ q: d.q, category: d.category, page: d.page + 1, source: d.source });
       if (src.name === "prowlarr") params.set("kind", d.kind);
+      if (src.name === "audible" && d.store) params.set("region", d.store);
       if (d.sort === "rating") params.set("sort", "rating");
       const res = await api(`/api/discover?${params}`);
       if (token !== d.token) return;
@@ -657,7 +671,7 @@ function Discover(root) {
       d.items.push(...res.items.filter((i) => !seen.has(i.url)));
       d.page = res.page;
       d.total = res.total_pages;
-      if (reset) { d.dym = res.did_you_mean || ""; d.note = res.note || ""; }
+      if (reset) { d.dym = res.did_you_mean || ""; d.note = res.note || ""; d.storeUsed = res.region || ""; d.storeNote = res.region_note || ""; }
     } catch (e) {
       if (token !== d.token) return;
       d.error = e.message;
@@ -729,6 +743,10 @@ function Discover(root) {
   input.addEventListener("search", () => { if (!input.value && d.q) search(""); });
 
   $("#refine", root).onchange = (e) => {
+    if (e.target.matches("[data-store-pick]")) {
+      d.store = e.target.value === audibleStores()[0] ? "" : e.target.value;
+      return load(true);
+    }
     const r = e.target.dataset.r;
     if (!r) return;
     d[r] = e.target.value;
@@ -869,7 +887,7 @@ function libCardHTML(b, i) {
     : ebook ? `<a class="quick" href="/api/library/${b.id}/ebook" download aria-label="Download the ebook of ${esc(b.title)}" title="Download ebook">${I.down}</a>`
     : `<button class="quick play-quick" data-play="${b.id}" aria-label="Play ${esc(b.title)}" title="Play">${I.play}</button>`;
   const facts = listening ? [ebook ? readLeft(b) : fmtLeft(b.listen_duration - b.listen_position)]
-    : b.status === "requested" ? [b.requested_by_name ? `Asked by ${b.requested_by_name}` : "Awaiting approval"]
+    : b.status === "requested" ? [b.found_by_search ? "Found a release: awaiting approval" : b.requested_by_name ? `Asked by ${b.requested_by_name}` : "Awaiting approval"]
     : b.status === "wanted" ? [b.last_searched ? `Looked ${ago(b.last_searched)}` : "Not looked for yet"]
     : b.status === "failed" ? [(b.error || "Couldn’t download").slice(0, 70)]
     : active ? [b.status === "queued" ? "Waiting for a free slot" : b.detail || STATUS[b.status]]
@@ -953,6 +971,22 @@ function requestsTrayHTML() {
         const picked = !isCatalog(b.source);
         const what = picked ? `picked “${esc(b.release || b.title)}”${b.size ? ` · ${esc(b.size)}` : ""}`
           : admin ? "no release picked: approving starts the search" : "any good release";
+        if (b.found_by_search) {
+          return `
+        <div class="req-row" data-id="${b.id}">
+          ${coverHTML(b)}
+          <div class="req-copy">
+            <b>${esc(b.title)}</b> <span class="req-by">· ${esc(firstAuthor(b.author) || "Unknown author")}</span>${isEbook(b) ? ` <span class="kind-inline">${I.book}Ebook</span>` : ""}
+            <small>Automatic search found “${esc(b.release || b.title)}”${b.size ? ` · ${esc(b.size)}` : ""} · ${esc(ago(b.updated_at))}${b.requested_by_name ? ` · wanted by ${esc(b.requested_by_name)}` : ""}</small>
+          </div>
+          <div class="req-actions">${admin ? `
+            <button class="btn primary sm" data-act="approve">${I.check} Approve</button>
+            <button class="btn sm" data-act="releases">Pick another</button>
+            <button class="btn sm ghost" data-act="keep-looking">Keep looking</button>`
+            : `<button class="btn sm ghost danger" data-act="remove" data-mine>Take back</button>`}
+          </div>
+        </div>`;
+        }
         return `
         <div class="req-row" data-id="${b.id}">
           ${coverHTML(b)}
@@ -2045,6 +2079,15 @@ const LAYOUT_VARS = [
   ["series", "The series name"], ["series_number", "The book's number in its series, like 1 or 2.5"], ["year", "The year it came out"],
 ];
 // The languages offered under Settings → Search & sources (as narratarr/languages.py COMMON).
+const AUDIBLE_STORES = [["us", "United States"], ["uk", "United Kingdom"], ["ca", "Canada"], ["au", "Australia"], ["in", "India"],
+  ["de", "Germany"], ["fr", "France"], ["it", "Italy"], ["es", "Spain"], ["jp", "Japan"]];
+const storeName = (code) => (AUDIBLE_STORES.find(([v]) => v === code) || [code, code.toUpperCase()])[1];
+// The Audible stores people can search: the main one first, then the ones an admin added.
+function audibleStores() {
+  const main = state.settings?.audible_region || "us";
+  return [main, ...(state.settings?.audible_extra_regions || []).filter((r) => r !== main)];
+}
+
 const LANGUAGES = ["English", "German", "French", "Spanish", "Italian", "Dutch", "Portuguese", "Polish", "Swedish", "Danish",
   "Norwegian", "Finnish", "Czech", "Hungarian", "Russian", "Japanese", "Chinese", "Korean"];
 
@@ -2410,11 +2453,25 @@ function Settings(root, page) {
             </div>
           </div>
           <div class="set-row">
+            <label class="switch"><input type="checkbox" name="found_needs_approval" ${s.found_needs_approval ? "checked" : ""}><i></i><span><b>Ask before downloading what it finds</b><small>A release found for a Wanted book waits under Library → Awaiting approval, so you can check its language, format and size first. Approve it, pick another, or keep looking. Add the Release found event to a notification to hear about each one.</small></span></label>
+          </div>
+          <div class="set-row">
             <label for="audible_region"><b>Audible store for book details</b><small>Covers, series and release dates come from here. Nothing is downloaded from Audible.</small></label>
             <select class="select" id="audible_region" name="audible_region">
-              ${[["us", "United States"], ["uk", "United Kingdom"], ["ca", "Canada"], ["au", "Australia"], ["in", "India"], ["de", "Germany"], ["fr", "France"], ["it", "Italy"], ["es", "Spain"], ["jp", "Japan"]]
+              ${AUDIBLE_STORES
                 .map(([v, l]) => `<option value="${v}" ${s.audible_region === v ? "selected" : ""}>${l}</option>`).join("")}
             </select>
+          </div>
+          <div class="field">
+            <label><b>More Audible stores to search</b></label>
+            <input type="hidden" name="audible_extra_regions" id="audible_extra_regions" value="${esc((s.audible_extra_regions || []).join(", "))}" />
+            <div class="lang-chips" id="store-chips" role="group" aria-label="More Audible stores">
+              ${AUDIBLE_STORES.filter(([v]) => v !== (s.audible_region || "us")).map(([v, l]) => {
+                const on = (s.audible_extra_regions || []).includes(v);
+                return `<button type="button" class="fpill ${on ? "on" : ""}" data-store="${v}" aria-pressed="${on}">${l}</button>`;
+              }).join("")}
+            </div>
+            <span class="hint">Books that are only sold in another country, such as French titles on audible.fr, can be found there. Everyone, listeners too, can switch the Audible catalog to these stores for a search, and a search that finds nothing in your main store tries them in this order.</span>
           </div>
         </div>
       </section>
@@ -2599,6 +2656,16 @@ function Settings(root, page) {
     input.setSelectionRange(at + text.length, at + text.length);
     input.dispatchEvent(new Event("input", { bubbles: true }));
   }));
+  $("#store-chips", root).onclick = (e) => {
+    const b = e.target.closest("[data-store]");
+    if (!b) return;
+    const on = b.getAttribute("aria-pressed") !== "true";
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-pressed", String(on));
+    form.audible_extra_regions.value = $$("[data-store][aria-pressed=true]", root).map((x) => x.dataset.store).join(", ");
+    form.audible_extra_regions.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+
   $("#lang-chips", root).onclick = (e) => {
     const b = e.target.closest("[data-lang]");
     if (!b) return;
@@ -3335,7 +3402,7 @@ function Settings(root, page) {
     </div>`;
   const openEditor = (n) => {
     let kind = n?.kind || "ntfy";
-    const events = n?.events || ["wanted", "completed", "failed"];
+    const events = n?.events || ["wanted", "found", "completed", "failed"];
     $("#add-notifier", root).hidden = true;
     editor.hidden = false;
     editor.innerHTML = `
@@ -3369,7 +3436,7 @@ function Settings(root, page) {
       <fieldset class="ne-events">
         <legend>Tell me when</legend>
         ${Object.entries(notifyMeta.events).map(([k, label]) => `<label class="switch"><input type="checkbox" value="${k}" ${events.includes(k) ? "checked" : ""}><i></i>${{
-          wanted: "Someone adds a book to Wanted", grabbed: "A download starts", completed: "A book is in the library", failed: "A download fails",
+          wanted: "Someone adds a book to Wanted", found: "Searching finds a release to approve", grabbed: "A download starts", completed: "A book is in the library", failed: "A download fails",
         }[k] || esc(label)}</label>`).join("")}
       </fieldset>
       <div class="cta-row" style="justify-content:flex-start">
@@ -3474,7 +3541,7 @@ function Settings(root, page) {
   renderNotifiers();
 
   // The event log: what Narratarr announced, and where each event went. Refreshes itself while open.
-  const LOG_EVENTS = [["", "All", ""], ["wanted", "Requests", "accent"], ["grabbed", "Started", "info"], ["completed", "Finished", "ok"], ["failed", "Failed", "bad"]];
+  const LOG_EVENTS = [["", "All", ""], ["wanted", "Requests", "accent"], ["found", "Found", "accent"], ["grabbed", "Started", "info"], ["completed", "Finished", "ok"], ["failed", "Failed", "bad"]];
   const logState = { event: "", q: "", items: [], more: false, open: new Set(), counts: {}, kept: 500 };
   const logList = $("#log-list", root);
   const logStamp = (at) => {
@@ -3906,6 +3973,26 @@ function libraryLiveHTML(lib) {
       <button class="btn primary" data-act="add">${I.down} Download</button>
       <button class="btn" data-act="want">${I.bookmark} Add to Wanted</button>
     </div>`;
+  }
+  if (lib.status === "requested" && lib.found_by_search) {
+    const found = esc(lib.release || lib.title);
+    if (isAdmin()) {
+      return `<div class="state requested">
+          <div class="top"><span>${I.bell} Found by automatic search</span><span>${esc(ago(lib.updated_at || lib.added_at))}</span></div>
+          <p>Narratarr found <b>${found}</b>${lib.size ? ` (${esc(lib.size)})` : ""}${lib.requested_by_name ? ` for ${esc(lib.requested_by_name)}` : ""}. Check its language and format, then approve it to download. Keep looking turns this release down, and Narratarr won’t pick it again.</p>
+        </div>
+        <div class="cta">
+          <button class="btn primary" data-act="approve">${I.check} Approve</button>
+          <button class="btn" data-act="releases">${I.list} Pick another</button>
+          <button class="btn" data-act="keep-looking">${I.search} Keep looking</button>
+          <button class="btn ghost danger" data-act="remove">${I.trash} Decline</button>
+        </div>`;
+    }
+    return `<div class="state requested">
+        <div class="top"><span>${I.bell} Awaiting approval</span><span>${esc(ago(lib.updated_at || lib.added_at))}</span></div>
+        <p>Narratarr found <b>${found}</b>. It’ll download once an admin approves it.</p>
+      </div>
+      ${mine(lib) ? `<div class="cta"><button class="btn ghost danger" data-act="remove" data-mine>${I.trash} Take back request</button></div>` : ""}`;
   }
   if (lib.status === "requested") {
     const who = lib.requested_by_name ? esc(lib.requested_by_name) : "A listener";

@@ -220,13 +220,38 @@ async def sources():
 
 @app.get("/api/discover")
 async def discover(q: str = "", category: str = "", page: int = 1, source: str = "librivox",
-                   kind: Literal["audiobook", "ebook"] = "audiobook", sort: str = ""):
+                   kind: Literal["audiobook", "ebook"] = "audiobook", sort: str = "", region: str = ""):
     try:
         src = get_source(source)
     except ValueError:
         raise HTTPException(400, "Unknown source.")
     if src.name == "prowlarr" and kind == "ebook":
         src = ebook_indexers()  # the same indexers, searched in their ebook categories
+    # The Audible catalog can be searched in another store an admin turned on, for this search only.
+    stores = audible.regions() if src.name == "audible" else []
+    region = region.strip().lower()
+    if region and src.name == "audible" and region not in stores:
+        raise HTTPException(400, "That Audible store isn't one you can search here. "
+                                 "An admin can add it under Settings → Search & sources.")
+    if src.name == "audible":
+        with audible.using(region):
+            data = await _discover_fetch(src, q, category, page, kind)
+        data["region"] = region or stores[0]
+        if q.strip() and not region and not data["items"]:
+            # Nothing in the main store: try the others, in the order the admin listed them.
+            for other in stores[1:]:
+                with audible.using(other):
+                    found = await _discover_fetch(src, q, category, page, kind)
+                if found["items"]:
+                    data = {**found, "region": other, "region_note":
+                            f"Nothing in the {audible.NAMES[stores[0]]} store, so these are from {audible.NAMES[other]}."}
+                    break
+    else:
+        data = await _discover_fetch(src, q, category, page, kind)
+    return await _discover_finish(data, src, kind, sort)
+
+
+async def _discover_fetch(src, q: str, category: str, page: int, kind: str) -> dict:
     settings = config.load()
     use_brave = src.name == "audiobookbay" and settings.search_provider == "brave" and settings.brave_api_key
     try:
@@ -250,6 +275,10 @@ async def discover(q: str = "", category: str = "", page: int = 1, source: str =
         raise _source_error(e, src.label)
     except brave.BraveError as e:
         raise HTTPException(502, str(e))
+    return data
+
+
+async def _discover_finish(data: dict, src, kind: str, sort: str) -> dict:
     books = db.list_books()
     owned = {b["release_url"]: b for b in books if b["release_url"]} | {b["source_url"]: b for b in books}
     want = languages.parse(config.load().languages)
@@ -425,7 +454,7 @@ async def _catalog_book(url: str, source: str) -> dict:
     """A catalog book's details, in the shape wanted.add_wanted takes."""
     if source == "audible":
         try:
-            b = await audible.book(audible.asin_from_url(url))
+            b = await audible.book(audible.asin_from_url(url), r=audible.region_from_url(url) or None)
         except audible.AudibleError as e:
             raise HTTPException(502, str(e))
         if not b:
@@ -470,7 +499,7 @@ def _background(coro) -> None:
 
 async def _search_in_background(book_id: int) -> None:
     try:
-        if await wanted.search_and_grab(db.get(book_id)):
+        if await wanted.search_and_grab(db.get(book_id), hold=config.load().found_needs_approval):
             _worker().poke()
     except Exception as e:
         db.update(book_id, search_note=readable_error(e))
@@ -845,10 +874,25 @@ async def approve(book_id: int):
         db.update(book_id, status="wanted", error="", search_note="")
         _background(_search_in_background(book_id))
     else:
-        db.update(book_id, status="queued", error="", progress=0, detail="")
+        db.update(book_id, status="queued", error="", progress=0, detail="", found_by_search=0)
         _worker().poke()
     log.info("Approved %s (book %s)", book["title"], book_id)
     return db.get(book_id)
+
+
+@app.post("/api/library/{book_id}/keep-looking")
+async def keep_looking(book_id: int):
+    """An admin turns down the release a search found: the book goes back to Wanted, and that release
+    is never picked again."""
+    book = _get_or_404(book_id)
+    if book["status"] != "requested" or not book.get("found_by_search"):
+        raise HTTPException(409, "Only a release that searching found on its own can be turned down this way.")
+    try:
+        book = wanted.keep_looking(book)
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+    log.info("Turned down the release found for %s (book %s); still looking", book["title"], book_id)
+    return book
 
 
 # ---- import ---------------------------------------------------------------------
@@ -1124,8 +1168,9 @@ async def apply_update(body: Update):
 LISTENER_SETTINGS = (
     "rd_configured", "ad_configured", "tb_configured", "pm_configured", "brave_configured", "prowlarr_configured", "torznab_configured", "indexer_configured",
     "usenet_configured", "torrent_configured",
-    "usenet_client", "torrent_client", "smart_search", "search_provider", "audible_region", "check_updates",
-    "auto_search", "auto_search_hours", "listener_approval", "languages",
+    "usenet_client", "torrent_client", "smart_search", "search_provider", "audible_region", "audible_extra_regions",
+    "check_updates",
+    "auto_search", "auto_search_hours", "listener_approval", "languages", "found_needs_approval",
 )
 
 

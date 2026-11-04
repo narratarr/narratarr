@@ -253,7 +253,7 @@ def test_downloading_the_ebook_file(client, isolated_data):
 
 
 def test_wanting_a_catalog_book_in_both_formats(client, monkeypatch):
-    async def book(asin, client=None):
+    async def book(asin, client=None, r=None):
         return DUNE if asin == DUNE["asin"] else None
 
     monkeypatch.setattr(audible, "book", book)

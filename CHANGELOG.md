@@ -2,6 +2,11 @@
 
 All notable changes to Narratarr. The app shows this under **Settings → Updates**.
 
+## Unreleased
+
+- **Ask before downloading what automatic search finds.** Turn on **Ask before downloading what it finds** under Settings → Search & sources, and a release found for a Wanted book waits under **Library → Awaiting approval** instead of downloading, with that release picked. Check its language, format and size, then **Approve** it, **Pick another**, or **Keep looking**: Narratarr goes back to searching and never picks that release again. A new **Release found** notification says what was found and who wanted the book. Off by default. Suggested by aarsenca.
+- **More Audible stores.** Some books are only sold in another country, such as French titles on audible.fr. Choose **More Audible stores to search**, and everyone, listeners too, can switch the Audible catalog to one of them for a search, without changing the store for anyone else. A search that finds nothing in your main store tries the others in order and says where the results came from, and a book added from another store keeps its details from there. Suggested by aarsenca.
+
 ## 0.9.2 — 2026-11-04
 
 - **A download client you haven't finished adding is never used.** A client saved before its address or API key was filled in could be picked as the default, or by a routing rule, and the download then failed with a connection error. Narratarr now passes over it for a client that works, and a rule pointing at one is skipped, with the reason shown when you test the rule. If nothing usable is left, the download says which client to finish and what it needs: an API key for Real-Debrid, AllDebrid, TorBox and Premiumize, or an address for the rest. Reported by Alvenzz, fixed by curator8888.

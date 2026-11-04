@@ -70,12 +70,14 @@ MIGRATIONS = {
     "last_searched": "REAL",
     "search_note": "TEXT NOT NULL DEFAULT ''",
     "requested_by": "INTEGER",  # the user who added it, when known
-    "kind": "TEXT NOT NULL DEFAULT 'audiobook'",  # or "ebook"; a book wanted in both formats is two rows
+    "kind": "TEXT NOT NULL DEFAULT 'audiobook'",
+    "found_by_search": "INTEGER NOT NULL DEFAULT 0",  # the release awaiting approval was picked by a search, not a person
+    "skipped_releases": "TEXT NOT NULL DEFAULT '[]'",  # releases an admin turned down for this book; never picked again  # or "ebook"; a book wanted in both formats is two rows
 }
 
 KINDS = ("audiobook", "ebook")
 
-JSON_COLUMNS = ("narrators", "categories", "trackers", "files", "series")
+JSON_COLUMNS = ("narrators", "categories", "trackers", "files", "series", "skipped_releases")
 
 FOLLOWS = """
 CREATE TABLE IF NOT EXISTS follows (

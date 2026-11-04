@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import asyncio
 import re
+from contextlib import contextmanager
+from contextvars import ContextVar
 
 import httpx
 
@@ -32,9 +34,42 @@ class AudibleError(Exception):
     pass
 
 
+NAMES = {
+    "us": "United States", "uk": "United Kingdom", "ca": "Canada", "au": "Australia", "in": "India",
+    "de": "Germany", "fr": "France", "it": "Italy", "es": "Spain", "jp": "Japan",
+}
+_REGION_OF_TLD = {tld: r for r, tld in TLDS.items()}
+# One search can ask another store than the main one (a listener looking for a French book on audible.fr),
+# without changing the setting for everyone. Set only for the length of that request.
+_override: ContextVar[str] = ContextVar("audible_region", default="")
+
+
 def region() -> str:
-    r = config.load().audible_region
+    r = _override.get() or config.load().audible_region
     return r if r in TLDS else "us"
+
+
+def regions() -> list[str]:
+    """The stores people can search: the main one first, then the extra ones an admin turned on."""
+    s = config.load()
+    main = s.audible_region if s.audible_region in TLDS else "us"
+    return [main] + [r for r in s.audible_extra_regions if r in TLDS and r != main]
+
+
+@contextmanager
+def using(r: str):
+    """Ask this store for the rest of the block. An empty or unknown code means the main store."""
+    token = _override.set(r if r in TLDS else "")
+    try:
+        yield
+    finally:
+        _override.reset(token)
+
+
+def region_from_url(url: str) -> str:
+    """The store a book link is from: audible.fr/pd/... is "fr". "" when it isn't an Audible link."""
+    m = re.search(r"audible\.([a-z.]+)/pd/", url or "")
+    return _REGION_OF_TLD.get(m.group(1), "") if m else ""
 
 
 def api_base(r: str | None = None) -> str:
@@ -162,8 +197,8 @@ async def search_books(query: str, page: int = 1, client=None) -> tuple[list[dic
     return _keep([to_book(p, r) for p in data.get("products") or []], r), max(1, min(10, -(-total // 40)))
 
 
-async def products(asins: list[str], client=None) -> list[dict]:
-    r = region()
+async def products(asins: list[str], client=None, r: str | None = None) -> list[dict]:
+    r = r if r in TLDS else region()
     out = []
     for i in range(0, len(asins), 50):
         chunk = asins[i : i + 50]
@@ -172,8 +207,9 @@ async def products(asins: list[str], client=None) -> list[dict]:
     return out
 
 
-async def book(asin: str, client=None) -> dict | None:
-    found = await products([asin], client)
+async def book(asin: str, client=None, r: str | None = None) -> dict | None:
+    """One book, from the store `r` (a book added from audible.fr is looked up there), else the main one."""
+    found = await products([asin], client, r)
     return found[0] if found else None
 
 

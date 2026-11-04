@@ -79,7 +79,10 @@ class Settings:
     # Look for Wanted books on Prowlarr (and LibriVox) every few hours.
     auto_search: bool = True
     auto_search_hours: int = 12
+    # A release that searching finds on its own waits under Awaiting approval instead of downloading.
+    found_needs_approval: bool = False
     audible_region: str = "us"
+    audible_extra_regions: list[str] = field(default_factory=list)  # more Audible stores people can search
     check_updates: bool = True  # one request a day to GitHub's releases API
     # On by default, and on for an existing settings file that predates the key: `load()` starts
     # from the dataclass defaults and only overwrites keys it finds, so an absent key means True.
@@ -224,6 +227,8 @@ def update(changes: dict) -> Settings:
                             setattr(s, secret, "")
             if k == "audnex_regions":
                 v = parse_regions(v)
+            elif k == "audible_extra_regions":
+                v = parse_audible_stores(v)
             elif k == "clients":
                 v = _merge_client_secrets(validate_clients(v), s.clients)
             elif k == "client_routes":
@@ -286,6 +291,24 @@ def update(changes: dict) -> Settings:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         _write_private(SETTINGS_FILE, json.dumps(asdict(s), indent=2))
     return s
+
+
+def parse_audible_stores(value) -> list[str]:
+    """The extra Audible stores people may search, in the admin's order. Codes from CHOICES["audible_region"]."""
+    if isinstance(value, str):
+        raw = [x for x in re.split(r"[,\s]+", value.strip()) if x]
+    elif isinstance(value, (list, tuple)):
+        raw = [str(x).strip() for x in value if str(x).strip()]
+    else:
+        raw = []
+    out: list[str] = []
+    for code in raw:
+        code = code.lower()
+        if code not in CHOICES["audible_region"]:
+            raise ValueError(f"'{code}' isn't an Audible store. Use one of: {', '.join(CHOICES['audible_region'])}.")
+        if code not in out:
+            out.append(code)
+    return out
 
 
 AUDNEX_REGIONS = ("us", "uk", "ca", "au", "in", "de", "fr", "it", "es", "jp")
