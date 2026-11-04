@@ -2,6 +2,10 @@
 
 All notable changes to Narratarr. The app shows this under **Settings → Updates**.
 
+## 0.9.2 — 2026-11-04
+
+- **A download client you haven't finished adding is never used.** A client saved before its address or API key was filled in could be picked as the default, or by a routing rule, and the download then failed with a connection error. Narratarr now passes over it for a client that works, and a rule pointing at one is skipped, with the reason shown when you test the rule. If nothing usable is left, the download says which client to finish and what it needs: an API key for Real-Debrid, AllDebrid, TorBox and Premiumize, or an address for the rest. Reported by Alvenzz, fixed by curator8888.
+
 ## 0.9.1 — 2026-11-04
 
 - **Connecting to Audiobookshelf, SABnzbd and the rest now says what's wrong.** Instead of "Couldn't reach", Narratarr says whether no machine by that name could be found, nothing is answering on that port, nothing answered at all, or the address doesn't speak https. In Docker, typing `localhost` explains that it means Narratarr's own container, and asks for the IP address of the machine the app runs on.
