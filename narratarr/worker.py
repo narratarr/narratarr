@@ -384,6 +384,15 @@ class Worker:
                 raise ValueError(f"A route sent this release to '{decision.client_id}', which does not exist. "
                                  "Fix it under Settings → Downloads → Routing.")
             if chosen is None:
+                # Nothing usable, but there may be a client that was saved before anyone filled it
+                # in. Naming it is the difference between "add a download client" and "your Deluge
+                # needs an address".
+                proto = "usenet" if book["protocol"] == "usenet" else "torrent"
+                drafts = [e for e in downloaders.entries(settings) if e.delivery == proto and not e.configured]
+                if drafts:
+                    names = " and ".join(e.label for e in drafts)
+                    raise ValueError(f"{names} isn't set up yet. Add its address and sign-in details "
+                                     "under Settings → Downloads, then grab this again.")
                 if book["protocol"] == "usenet":
                     raise ValueError("Nothing can take a Usenet release: add SABnzbd or NZBGet under "
                                      "Settings → Downloads.")

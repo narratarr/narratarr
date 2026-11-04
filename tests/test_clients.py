@@ -503,3 +503,18 @@ async def test_a_route_to_a_deleted_client_is_reported_and_the_default_takes_it(
     assert "'gone'" in warnings and "not a client you have any more" in warnings
     assert db.get(book["id"])["status"] == "completed"
     assert db.get(book["id"])["download_client"] == "transmission"
+
+
+async def test_a_draft_client_fails_with_a_clear_message_not_a_connection_error(isolated_data):
+    """Issue #12 end to end: a saved client with no address must not be handed the release. Before
+    the fix this built Deluge("") and failed with a connection error."""
+    use("deluge", url="")            # a draft: the row exists, the address does not
+    config.update({"default_client": "deluge"})
+    book = torrent_book()
+
+    await Worker(transport=httpx.MockTransport(FakeDeluge(isolated_data)))._run(book["id"])
+
+    row = db.get(book["id"])
+    assert row["status"] == "failed"
+    assert "Deluge isn't set up yet" in row["error"], row["error"]
+    assert "connection" not in row["error"].lower(), "it must not get as far as dialling anything"

@@ -531,3 +531,76 @@ async def test_an_audiobookbay_grab_is_routed_by_the_source_name(flat, monkeypat
     monkeypatch.setattr(Worker, "_process_torrent_client", stop_here)
     await Worker().process(book["id"])
     assert picked == ["deluge"]
+
+
+# ---- issue #12: an unconfigured client is not a candidate -------------------------------------
+
+def _draft_client(**over):
+    """One client, saved the way Settings saves a draft: the row exists, the address does not."""
+    base = {"id": "deluge", "type": "deluge", "url": "", "password": ""}
+    return {**base, **over}
+
+
+def test_an_unconfigured_client_is_never_the_default():
+    """The issue verbatim. A saved-but-empty client used to be handed the release, so the worker built
+    Deluge("") and died with a connection error instead of saying to add a client."""
+    s = config.Settings()
+    s.clients = [_draft_client()]
+    s.client_routes = {"version": 1, "rules": []}
+    s.torrent_client, s.usenet_client, s.default_client = "qbittorrent", "sabnzbd", ""
+
+    assert routing.default_for(s, "torrent") == ""
+    assert routing.default_for(s, "usenet") == ""
+    d = routing.resolve(s, "prowlarr", "ebook", "torrent")
+    assert d.client_id == "" and d.rule is None
+    assert "none configured" in d.reason
+
+
+def test_a_configured_client_of_the_same_protocol_still_wins():
+    """The guard must not throw away a working client: only the unusable one goes."""
+    s = config.Settings()
+    s.clients = [_draft_client(), {"id": "qbit", "type": "qbittorrent", "url": "http://nas:8080"}]
+    s.client_routes = {"version": 1, "rules": []}
+    s.torrent_client, s.default_client = "qbittorrent", ""
+    assert routing.default_for(s, "torrent") == "qbit"
+    assert routing.resolve(s, "prowlarr", "ebook", "torrent").client_id == "qbit"
+
+
+def test_the_flat_choice_pointing_at_a_draft_falls_through_to_a_usable_client():
+    s = config.Settings()
+    s.clients = [_draft_client(), {"id": "transmission", "type": "transmission", "url": "http://nas:9091"}]
+    s.client_routes = {"version": 1, "rules": []}
+    s.torrent_client = "deluge"       # the flat choice IS the draft
+    s.default_client = "deluge"
+    assert routing.default_for(s, "torrent") == "transmission"
+
+
+def test_a_rule_naming_an_unconfigured_client_is_skipped_and_reported():
+    """The second door into the same bug: resolve()'s rule path checked delivery, never configured."""
+    s = config.Settings()
+    s.clients = [_draft_client(), {"id": "qbit", "type": "qbittorrent", "url": "http://nas:8080"}]
+    s.client_routes = {"version": 1, "rules": [
+        {"match": {"indexers": ["prowlarr"]}, "client": "deluge"},
+    ]}
+    s.torrent_client, s.default_client = "qbittorrent", "qbit"
+
+    d = routing.resolve(s, "prowlarr", "ebook", "torrent")
+    assert d.client_id == "qbit", "the draft rule was skipped, the fall-through found a real client"
+    assert d.rule is None
+    assert any("isn't filled in yet" in p and "Deluge" in p for p in d.problems)
+
+
+def test_a_draft_can_still_be_saved_but_is_never_selectable():
+    """validate_clients keeps accepting a half-filled entry on purpose: Settings saves a row before
+    you type the address, and the Test button works on an unsaved entry. What must never happen is
+    that entry taking a release."""
+    from narratarr import config as cfg
+
+    s = cfg.Settings()
+    saved = cfg.validate_clients([_draft_client()])
+    assert len(saved) == 1, "a draft must be storable, or the add-then-fill flow dies"
+
+    s.clients = saved
+    s.client_routes = {"version": 1, "rules": []}
+    s.torrent_client, s.default_client = "", ""
+    assert routing.default_for(s, "torrent") == ""

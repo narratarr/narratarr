@@ -91,6 +91,7 @@ def resolve(settings: config.Settings, indexer: str, kind: str, protocol: str = 
     known = {e.id for e in listed}
     delivery = {e.id: e.delivery for e in listed}
     label = {e.id: e.label for e in listed}
+    ready = {e.id: e.configured for e in listed}
     proto = protocol or "torrent"  # a release with no protocol recorded is a torrent
     decision = Decision()
 
@@ -102,6 +103,14 @@ def resolve(settings: config.Settings, indexer: str, kind: str, protocol: str = 
             )
             continue
         if not matches(rule, indexer, kind):
+            continue
+        if not ready.get(client_id):
+            # A draft entry can be saved before it has an address. A rule that names one is reported
+            # rather than obeyed, for the same reason the fall-through skips it.
+            decision.problems.append(
+                f"Rule {i + 1} sends to {label.get(client_id, client_id)}, which isn't filled in yet, "
+                "so it was skipped."
+            )
             continue
         if delivery.get(client_id) != proto:
             # A category rule ("audiobooks -> Deluge") matches Usenet releases too, and Deluge can't
@@ -138,7 +147,11 @@ def default_for(settings: config.Settings, protocol: str) -> str:
     """
     from .downloaders import entries
 
-    capable = [e for e in entries(settings) if e.delivery == protocol]
+    # `configured` matters as much as `delivery`: a client entry can be saved before its address is
+    # filled in (Settings saves drafts, and the Test button works on an unsaved entry), and handing a
+    # release to one makes the worker build e.g. Deluge("") and fail with a connection error instead
+    # of saying there is nothing to download with.
+    capable = [e for e in entries(settings) if e.delivery == protocol and e.configured]
     flat = str(getattr(settings, "usenet_client" if protocol == "usenet" else "torrent_client", "") or "")
     chosen = str(getattr(settings, "default_client", "") or "")
     by_id = {e.id: e for e in capable}

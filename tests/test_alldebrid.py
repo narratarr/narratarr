@@ -160,10 +160,17 @@ async def test_new_location_and_bad_key_messages():
 
 
 async def test_missing_key_fails_with_helpful_message(isolated_data):
-    config.update({"ad_api_key": ""})
+    # AllDebrid has to be the only candidate, or a configured entry wins the fall-through and this
+    # stops testing what it says it tests. The list is set directly for that reason: the flat mirror
+    # leaves earlier entries in place, so a stale Real-Debrid could otherwise take the grab.
+    config.update({"clients": [{"id": "alldebrid", "type": "alldebrid", "api_key": ""}],
+                   "default_client": "alldebrid"})
     book = make_book()
     await Worker(transport=httpx.MockTransport(FakeAD({})))._run(book["id"])
-    assert "Connect AllDebrid" in db.get(book["id"])["error"]
+    # An unconfigured client is never handed the release any more (issue #12), so the error comes
+    # from the router and names the client that isn't finished rather than from its constructor.
+    error = db.get(book["id"])["error"]
+    assert "AllDebrid" in error and "set up" in error
 
 
 def test_file_names_keep_sub_folders():
