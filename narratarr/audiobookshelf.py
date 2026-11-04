@@ -17,17 +17,24 @@ from urllib.parse import urlparse
 
 import httpx
 
+from . import reach
+
 log = logging.getLogger("narratarr.audiobookshelf")
 
 PORT = 13378
 KEY_NAME = "Narratarr"
-# Where Audiobookshelf usually is: on this machine, or next to Narratarr in Docker.
+# Where Audiobookshelf usually is: on this machine, or next to Narratarr in Docker. Inside Docker,
+# Audiobookshelf's own container listens on port 80; 13378 is the port people publish on the host.
 NEARBY = (
     f"http://localhost:{PORT}",
     "http://audiobookshelf",
     f"http://audiobookshelf:{PORT}",
+    "http://abs",
+    f"http://abs:{PORT}",
     f"http://host.docker.internal:{PORT}",
 )
+EXAMPLE = "192.168.1.10:13378"
+ROUTE = "/proc/net/route"  # the kernel's routing table, for the Docker host
 PROBE_TIMEOUT = httpx.Timeout(4, connect=1.5, pool=None)
 SWEEP_TIMEOUT = httpx.Timeout(2, connect=0.75, pool=None)
 SWEEP_AT_ONCE = 64
@@ -149,15 +156,49 @@ def where(url: str) -> str:
     return "internet" if is_public(url) else "network"
 
 
+def _docker_host() -> str:
+    """The machine Docker runs on, as seen from inside a container: the default gateway. "" outside Docker.
+
+    On Linux, host.docker.internal only exists when the container is started with it, but the
+    default gateway of a bridge network is always the host, and ports published there answer on it.
+    """
+    if not reach.in_docker():
+        return ""
+    try:
+        with open(ROUTE) as f:
+            for line in f.read().splitlines()[1:]:
+                parts = line.split()
+                if len(parts) > 2 and parts[1] == "00000000":
+                    return socket.inet_ntoa(bytes.fromhex(parts[2])[::-1])
+    except (OSError, ValueError):
+        pass
+    return ""
+
+
 async def find_nearby(sweep: bool = True) -> list[dict]:
     """Audiobookshelf on this machine or beside it in Docker; failing that, anywhere on the home network."""
-    servers = await _first(list(NEARBY), PROBE_TIMEOUT)
+    urls = list(NEARBY)
+    host = await asyncio.to_thread(_docker_host)
+    if host:
+        urls += [f"http://{host}:{PORT}", f"http://{host}"]
+    servers = await _first(urls, PROBE_TIMEOUT)
     if servers or not sweep:
         return servers[:1]  # localhost and a Docker name are often the same server
     net = await asyncio.to_thread(_local_network)
     if not net:
         return []
-    return await _first([f"http://{ip}:{PORT}" for ip in net.hosts()], SWEEP_TIMEOUT)
+    # In Docker the network we can see is Docker's own, where Audiobookshelf's container listens on 80.
+    ports = (PORT, 80) if reach.in_docker() else (PORT,)
+    return await _first([f"http://{ip}:{port}" for ip in net.hosts() for port in ports], SWEEP_TIMEOUT)
+
+
+def nothing_nearby() -> str:
+    """Why Find came back empty, and what to type instead."""
+    if reach.in_docker():
+        return ("No Audiobookshelf found. Narratarr runs in Docker, so it can only look at its own Docker network "
+                "and the machine Docker runs on, not your whole home network. Type the IP address of the machine "
+                f"running Audiobookshelf and the port it uses, like {EXAMPLE}, and press Find.")
+    return "No Audiobookshelf found nearby. Type its address and press Find."
 
 
 def addresses_for(address: str) -> list[str]:
@@ -184,12 +225,67 @@ def addresses_for(address: str) -> list[str]:
     return urls
 
 
+def _parsed(address: str):
+    address = address.strip().rstrip("/")
+    return urlparse(address if "://" in address else f"//{address}")
+
+
+def _other_ports(address: str) -> tuple[int | None, list[str]]:
+    """When the user gave a port: the same host on Audiobookshelf's usual ports instead.
+
+    The commonest wrong port is 13378 for a container beside Narratarr's: that's the port published on
+    the host, while the container itself listens on 80.
+    """
+    u = _parsed(address)
+    try:
+        given = u.port
+    except ValueError:
+        return None, []
+    if not given or not u.hostname:
+        return None, []
+    host = f"[{u.hostname}]" if ":" in u.hostname else u.hostname
+    paths = [u.path] if u.path else ["", "/audiobookshelf"]
+    return given, [f"http://{host}{'' if port == 80 else f':{port}'}{path}"
+                   for port in (80, PORT) if port != given for path in paths]
+
+
 async def find_at(address: str) -> list[dict]:
     """Audiobookshelf at an address the user typed: a LAN or public IP, or a domain."""
     urls = addresses_for(address)
     if not urls:
         raise AudiobookshelfError("That doesn't look like an address. Try something like 203.0.113.7 or abs.example.com.")
-    return (await _first(urls, PROBE_TIMEOUT))[:1]  # the first answer in order: https before http
+    found = (await _first(urls, PROBE_TIMEOUT))[:1]  # the first answer in order: https before http
+    if found:
+        return found
+    given, others = _other_ports(address)
+    found = (await _first(others, PROBE_TIMEOUT))[:1]
+    for server in found:
+        port = urlparse(server["url"]).port or 80
+        server["note"] = f"Found it on port {port}, not {given}."
+        if port == 80:
+            server["note"] += (" Inside Docker, Audiobookshelf's own container listens on port 80;"
+                               f" {given} is only the port published on the machine it runs on.")
+    return found
+
+
+async def why_not(address: str) -> str:
+    """Why there's no Audiobookshelf at this address, in a sentence the user can act on."""
+    u = _parsed(address)
+    if not u.hostname:
+        return "That doesn't look like an address. Try something like 192.168.1.10:13378."
+    url = address.strip().rstrip("/")
+    if "://" not in url:  # what they most likely meant: https for a domain on the internet, else http
+        url = f"{'https' if is_public(f'http://{u.hostname}') else 'http'}://{url}"
+    hint = reach.localhost_hint(url, "Audiobookshelf", EXAMPLE)
+    try:
+        async with _client(PROBE_TIMEOUT) as client:
+            resp = await client.get(f"{url}/status")
+    except httpx.HTTPError as e:
+        return reach.explain(e, url, "Audiobookshelf", EXAMPLE)
+    if hint:  # something answered, but in Docker that's Narratarr's own container
+        return hint
+    return (f"Something answered at {url}, but it isn't Audiobookshelf ({resp.status_code}). "
+            "Check the port: it's the one you open Audiobookshelf's web page on.")
 
 
 # ---- talking to it -------------------------------------------------------------
@@ -214,8 +310,8 @@ class Audiobookshelf:
         headers = {"Authorization": f"Bearer {token}"} if token else {}
         try:
             resp = await self._client.request(method, f"{self.url}{path}", headers=headers, **kw)
-        except httpx.HTTPError:
-            raise AudiobookshelfError("Couldn't reach Audiobookshelf. Check the address.")
+        except httpx.HTTPError as e:
+            raise AudiobookshelfError(reach.explain(e, self.url, "Audiobookshelf", f"http://{EXAMPLE}")) from e
         if resp.status_code == 401:
             raise AudiobookshelfError("Audiobookshelf didn't accept Narratarr's key. Sign in again.")
         if resp.status_code == 403:
@@ -230,8 +326,8 @@ class Audiobookshelf:
         """Log in once and create an API key for Narratarr. Returns the key; the password goes no further."""
         try:
             resp = await self._client.post(f"{self.url}/login", json={"username": username, "password": password})
-        except httpx.HTTPError:
-            raise AudiobookshelfError("Couldn't reach Audiobookshelf. Check the address.")
+        except httpx.HTTPError as e:
+            raise AudiobookshelfError(reach.explain(e, self.url, "Audiobookshelf", f"http://{EXAMPLE}")) from e
         if resp.status_code == 401:
             raise AudiobookshelfError("Audiobookshelf didn't accept that username and password.")
         if resp.status_code == 429:
@@ -250,8 +346,8 @@ class Audiobookshelf:
                 f"{self.url}/api/api-keys", headers={"Authorization": f"Bearer {session}"},
                 json={"name": KEY_NAME, "userId": user.get("id"), "isActive": True},
             )
-        except httpx.HTTPError:
-            raise AudiobookshelfError("Couldn't reach Audiobookshelf. Check the address.")
+        except httpx.HTTPError as e:
+            raise AudiobookshelfError(reach.explain(e, self.url, "Audiobookshelf", f"http://{EXAMPLE}")) from e
         if resp.status_code == 404 and user.get("token"):
             return user["token"]  # before 2.26 there are no API keys; the account's own token never expires
         if resp.status_code >= 400:
@@ -264,7 +360,7 @@ class Audiobookshelf:
     async def status(self) -> dict:
         found = await probe(self._client, self.url)
         if not found:
-            raise AudiobookshelfError("Couldn't reach Audiobookshelf. Check the address.")
+            raise AudiobookshelfError(await why_not(self.url))
         return found
 
     async def libraries(self) -> list[dict]:

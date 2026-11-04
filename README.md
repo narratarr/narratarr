@@ -306,6 +306,12 @@ Narratarr searches category `3030` (*Audio › Audiobook*) for audiobooks and `7
 > If the paths have to differ (say the client uses `/downloads` and Narratarr uses `/data/downloads`), fill in **Settings → Download folders → Path mapping**. Use your containers' names as the addresses, e.g. `http://prowlarr:9696`.
 >
 > **qBittorrent in Docker:** keep `WEBUI_PORT` the same as the port you publish (e.g. `8080:8080`). qBittorrent refuses connections that arrive on a different port.
+>
+> **Addresses from inside Docker:** `localhost` means Narratarr's own container, so use the IP address of the machine the other app runs on (e.g. `http://192.168.1.10:8080`), or its container name when both are on the same Docker network.
+>
+> **SABnzbd by container name:** SABnzbd only answers to names on its own list, so `http://sabnzbd:8080` is turned away until you add `sabnzbd` under SABnzbd's **Config → Special → host_whitelist** and restart it. Its IP address always works.
+>
+> **Audiobookshelf by container name:** inside a Docker network, Audiobookshelf listens on port 80, so its address is `http://audiobookshelf`, not `:13378` (that's the port published on the host).
 
 ### Ratings on the cards
 

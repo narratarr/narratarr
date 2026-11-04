@@ -16,6 +16,7 @@ from urllib.parse import parse_qs, parse_qsl, unquote, urlencode, urlparse, urlu
 
 import httpx
 
+from .. import reach
 from ..cache import Cache
 from .base import Category, Details, Page
 
@@ -217,8 +218,8 @@ class Prowlarr:
                     resp = await client.get(f"{self.base}{path}", params=params, headers=headers)
         except httpx.TimeoutException:
             raise ProwlarrError("Prowlarr took too long to answer. One of your indexers may be slow or down.")
-        except httpx.HTTPError:
-            raise ProwlarrError(f"Couldn't reach Prowlarr at {self.base}. Check the address in Settings.")
+        except httpx.HTTPError as e:
+            raise ProwlarrError(reach.explain(e, self.base, "Prowlarr", "http://192.168.1.10:9696")) from e
         if resp.status_code == 401:
             raise ProwlarrError("Prowlarr rejected the API key. Check it in Settings.")
         if resp.status_code >= 400:

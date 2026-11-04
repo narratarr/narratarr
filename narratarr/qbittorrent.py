@@ -9,6 +9,7 @@ import asyncio
 
 import httpx
 
+from . import reach
 from .downloaders import ClientError, Job
 
 CHECKING = {"checkingUP", "checkingDL", "checkingResumeData", "moving", "allocating"}
@@ -41,8 +42,8 @@ class QBittorrent:
     async def _send(self, method: str, path: str, **kw) -> httpx.Response:
         try:
             return await self._client.request(method, path, **kw)
-        except httpx.HTTPError:
-            raise QBittorrentError("Couldn't reach qBittorrent. Check the address in Settings.")
+        except httpx.HTTPError as e:
+            raise QBittorrentError(reach.explain(e, str(self._client.base_url), "qBittorrent", "http://192.168.1.10:8080")) from e
 
     async def _login(self) -> None:
         if self._logged_in or not (self._user or self._password):

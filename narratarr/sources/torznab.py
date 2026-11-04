@@ -26,6 +26,7 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import httpx
 
+from .. import reach
 from ..cache import Cache
 from .base import Category, Details, Page
 from .prowlarr import ProwlarrError, _BITRATE_RE, _FORMAT_RE, _fmt_size, fetch as prowlarr_fetch, parse_magnet, tidy_title
@@ -232,8 +233,8 @@ class Torznab:
                     resp = await client.get(self.base, params=params)
         except httpx.TimeoutException:
             raise TorznabError("Your indexer took too long to answer. One of its sources may be slow or down.")
-        except httpx.HTTPError:
-            raise TorznabError(f"Couldn't reach the indexer at {self.base}. Check the address in Settings.")
+        except httpx.HTTPError as e:
+            raise TorznabError(reach.explain(e, self.base, "the indexer", "http://192.168.1.10:9117")) from e
         if resp.status_code in (401, 403):
             raise TorznabError("Your indexer rejected the API key. Check it in Settings.")
         body = resp.content

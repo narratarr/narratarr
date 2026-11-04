@@ -9,6 +9,7 @@ import base64
 
 import httpx
 
+from . import reach
 from .downloaders import ClientError, Job
 
 QUEUE_LABELS = {
@@ -49,8 +50,8 @@ class NZBGet:
     async def _call(self, method: str, *params):
         try:
             resp = await self._client.post("/jsonrpc", json={"method": method, "params": list(params), "id": 1})
-        except httpx.HTTPError:
-            raise NZBGetError("Couldn't reach NZBGet. Check the address in Settings.")
+        except httpx.HTTPError as e:
+            raise NZBGetError(reach.explain(e, str(self._client.base_url), "NZBGet", "http://192.168.1.10:6789")) from e
         if resp.status_code in (401, 403):
             raise NZBGetError("NZBGet rejected the username or password. Check them in Settings.")
         if resp.status_code >= 400:

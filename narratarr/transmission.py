@@ -10,6 +10,7 @@ import posixpath
 
 import httpx
 
+from . import reach
 from .downloaders import ClientError, Job
 
 FIELDS = [
@@ -45,8 +46,8 @@ class Transmission:
         for _ in range(2):
             try:
                 resp = await self._client.post(self._rpc, json=body, headers={"X-Transmission-Session-Id": self._session})
-            except httpx.HTTPError:
-                raise TransmissionError("Couldn't reach Transmission. Check the address in Settings.")
+            except httpx.HTTPError as e:
+                raise TransmissionError(reach.explain(e, self._rpc, "Transmission", "http://192.168.1.10:9091")) from e
             if resp.status_code == 409:  # Transmission's CSRF handshake: retry with the session id it hands back
                 self._session = resp.headers.get("X-Transmission-Session-Id", "")
                 continue

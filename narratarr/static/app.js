@@ -2500,7 +2500,7 @@ function Settings(root, page) {
               <input class="input mono" id="audiobookshelf_url" name="audiobookshelf_url" placeholder="Empty to search, or an IP or domain" value="${esc(s.audiobookshelf_url)}" />
               <button class="btn" type="button" id="abs-find">${I.search} Find</button>
             </div>
-            <span class="hint">Empty: looks on this computer, in Docker, then across your home network. With an address (a LAN or public IP, or a domain): finds Audiobookshelf there, trying https first.</span>
+            <span class="hint">Empty: looks on this computer, in Docker, then across your home network. With an address (a LAN or public IP, or a domain): finds Audiobookshelf there, trying https first. If Narratarr runs in Docker, use the IP address of the machine Audiobookshelf runs on, not localhost.</span>
             <div id="abs-found"></div>
           </div>
 
@@ -3615,6 +3615,7 @@ function Settings(root, page) {
     absServer = server;
     form.audiobookshelf_url.value = server.url;
     $("#abs-found", root).innerHTML = okLine(`Found Audiobookshelf <b>${esc(server.version)}</b> at <code>${esc(server.url)}</code>`)
+      + (server.note ? `<span class="hint">${esc(server.note)}</span>` : "")
       + (server.ready ? "" : badLine("Finish setting up Audiobookshelf first: it doesn’t have an admin account yet."))
       + (server.password_login ? "" : badLine("This server only allows single sign-on, so paste an API key below instead."));
     $("#abs-insecure", root).hidden = !server.insecure;
@@ -3633,7 +3634,7 @@ function Settings(root, page) {
     spinBtn(btn, true);
     out.innerHTML = `<span class="hint">${address ? `Looking for Audiobookshelf at ${esc(address)}…` : "Looking on this computer, in Docker, then across your home network…"}</span>`;
     try {
-      const { servers } = await api("/api/audiobookshelf/find", { method: "POST", body: { address } });
+      const { servers, reason } = await api("/api/audiobookshelf/find", { method: "POST", body: { address } });
       if (servers.length === 1) {
         absFound(servers[0]);
       } else if (servers.length) {
@@ -3641,9 +3642,9 @@ function Settings(root, page) {
           <div class="abs-pick">${servers.map((sv, i) => `<button class="btn" type="button" data-i="${i}"><span class="mono">${esc(sv.url)}</span><small>${esc(sv.version)}</small></button>`).join("")}</div>`;
         $$(".abs-pick [data-i]", out).forEach((b) => { b.onclick = () => absFound(servers[b.dataset.i]); });
       } else {
-        out.innerHTML = badLine(address
+        out.innerHTML = badLine(reason || (address
           ? `Audiobookshelf didn’t answer at ${address}. Check the address, and that this machine can reach it.`
-          : "No Audiobookshelf found nearby. Type its address and press Find.");
+          : "No Audiobookshelf found nearby. Type its address and press Find."));
       }
     } catch (err) {
       out.innerHTML = badLine(err.message);

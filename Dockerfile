@@ -23,6 +23,7 @@ ENV PATH="/app/.venv/bin:$PATH" \
     NARRATARR_PORT=8484 \
     NARRATARR_DATA=/config \
     NARRATARR_LIBRARY=/audiobooks \
+    NARRATARR_DOCKER=1 \
     PUID=1000 \
     PGID=1000
 VOLUME ["/config", "/audiobooks"]

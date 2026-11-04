@@ -1620,7 +1620,10 @@ async def abs_find(body: FindServer):
     for server in servers:
         server["public"] = await asyncio.to_thread(audiobookshelf.is_public, server["url"])
         server["insecure"] = server["public"] and server["url"].startswith("http://")
-    return {"servers": servers}
+    reason = ""
+    if not servers:  # say why, and what to type instead
+        reason = await audiobookshelf.why_not(body.address) if body.address.strip() else audiobookshelf.nothing_nearby()
+    return {"servers": servers, "reason": reason}
 
 
 class SignIn(BaseModel):

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import httpx
 
+from . import reach
 from .downloaders import ClientError, Job
 
 
@@ -52,8 +53,16 @@ class SABnzbd:
                 resp = await self._client.post("/api", params=params, files=files)
             else:
                 resp = await self._client.get("/api", params=params)
-        except httpx.HTTPError:
-            raise SABnzbdError("Couldn't reach SABnzbd. Check the address in Settings.")
+        except httpx.HTTPError as e:
+            raise SABnzbdError(reach.explain(e, str(self._client.base_url), "SABnzbd", "http://192.168.1.10:8080")) from e
+        if resp.status_code == 403 and "hostname" in resp.text.lower():
+            # SABnzbd only answers names on its own list, and says so with a 403 that is easy to read
+            # as a bad key. It is the address, not the key: the IP always works.
+            host = self._client.base_url.host
+            raise SABnzbdError(
+                f"SABnzbd refused the name “{host}”: it only answers to names on its own list. Use its IP "
+                f"address instead, or in SABnzbd add {host} under Config → Special → host_whitelist, save, "
+                "and restart SABnzbd.")
         if resp.status_code in (401, 403):
             raise SABnzbdError("SABnzbd rejected the API key. Check it in Settings.")
         if resp.status_code >= 400:

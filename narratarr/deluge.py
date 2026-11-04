@@ -17,6 +17,7 @@ import posixpath
 
 import httpx
 
+from . import reach
 from .downloaders import ClientError, Job
 
 # get_torrent_status returns only the keys asked for.
@@ -56,8 +57,8 @@ class Deluge:
         body = {"method": method, "params": params or [], "id": self._seq}
         try:
             resp = await self._client.post(self._rpc, json=body)
-        except httpx.HTTPError:
-            raise DelugeError("Couldn't reach Deluge. Check the address in Settings.")
+        except httpx.HTTPError as e:
+            raise DelugeError(reach.explain(e, self._rpc, "Deluge", "http://192.168.1.10:8112")) from e
         if resp.status_code == 401:
             raise DelugeError("Deluge rejected the password. Check it in Settings.")
         if resp.status_code == 404:
