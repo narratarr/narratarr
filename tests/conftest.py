@@ -39,15 +39,15 @@ def fixture_html():
     return lambda name: (FIXTURES / name).read_text()
 
 
-# A real admin and a real listener, through the real middleware. Lives here rather than in one
-# module: more than one test file needs to prove a permission boundary rather than assume it.
+# A real admin and a real listener, through the real middleware: more than one test file needs to
+# prove a permission boundary rather than assume it.
 HOME = ("192.168.1.20", 50000)
 
 
 @pytest.fixture
 def accounts(monkeypatch):
+    """A real admin and a real listener, signed in through the actual middleware."""
     from fastapi.testclient import TestClient
-
     from narratarr import api, auth, users
 
     auth._failures.clear()
@@ -60,3 +60,5 @@ def accounts(monkeypatch):
     assert made.status_code == 200, made.text
     yield c
     c.__exit__(None, None, None)
+
+

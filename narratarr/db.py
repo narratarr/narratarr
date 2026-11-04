@@ -145,6 +145,15 @@ CREATE TABLE IF NOT EXISTS events (             -- what Narratarr announced, and
     line       TEXT NOT NULL,                   -- exactly as written to the log
     deliveries TEXT NOT NULL DEFAULT '[]'       -- [{id, name, kind, state: sending|sent|failed|not sent, error, ms}]
 );
+CREATE TABLE IF NOT EXISTS tidy_moves (         -- every folder Tidy library moved, so Undo can put it back
+    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    batch   TEXT NOT NULL,
+    at      REAL NOT NULL,
+    src     TEXT NOT NULL,
+    dst     TEXT NOT NULL,
+    paths   TEXT NOT NULL DEFAULT '[]',         -- [[book_id, path before, path after], ...]
+    undone  INTEGER NOT NULL DEFAULT 0
+);
 """
 
 # Whose listening progress book rows carry: set per request to the signed-in user.
@@ -405,3 +414,30 @@ def list_events(event: str = "", query: str = "", before: int | None = None, lim
 def event_counts() -> dict[str, int]:
     with connect() as conn:
         return {r["event"]: r["n"] for r in conn.execute("SELECT event, COUNT(*) AS n FROM events GROUP BY event")}
+
+
+# ---- Tidy library ---------------------------------------------------------------------------
+
+TIDY_KEPT = 5000
+
+
+def add_tidy_move(batch: str, src: str, dst: str, paths: list) -> None:
+    with connect() as conn:
+        cur = conn.execute("INSERT INTO tidy_moves (batch, at, src, dst, paths) VALUES (?,?,?,?,?)",
+                           (batch, time.time(), src, dst, json.dumps(paths)))
+        conn.execute("DELETE FROM tidy_moves WHERE id <= ?", (cur.lastrowid - TIDY_KEPT,))
+
+
+def last_tidy_batch() -> tuple[str, list[dict]]:
+    """The most recent batch of moves that hasn't been undone, oldest move first."""
+    with connect() as conn:
+        row = conn.execute("SELECT batch FROM tidy_moves WHERE undone=0 ORDER BY id DESC LIMIT 1").fetchone()
+        if not row:
+            return "", []
+        rows = conn.execute("SELECT * FROM tidy_moves WHERE batch=? AND undone=0 ORDER BY id", (row["batch"],)).fetchall()
+    return row["batch"], [{**dict(r), "paths": json.loads(r["paths"] or "[]")} for r in rows]
+
+
+def mark_tidy_undone(move_id: int) -> None:
+    with connect() as conn:
+        conn.execute("UPDATE tidy_moves SET undone=1 WHERE id=?", (move_id,))

@@ -27,10 +27,10 @@ from typing import Literal
 from pydantic import BaseModel
 
 from . import (apiv1, audible, audiobookshelf, auth, brave, config, db, downloaders, ebooks, importer, media, ratings,
-               search, tokens, updates, users, wanted)
+               routing, search, tokens, updates, users, wanted)
 from .audiobookshelf import Audiobookshelf, AudiobookshelfError
 from .downloaders import ClientError
-from . import alldebrid, languages, notify
+from . import alldebrid, languages, notify, tidy
 from .alldebrid import AllDebrid, AllDebridError
 from . import torbox
 from .premiumize import Premiumize, PremiumizeError
@@ -253,6 +253,10 @@ async def discover(q: str = "", category: str = "", page: int = 1, source: str =
     books = db.list_books()
     owned = {b["release_url"]: b for b in books if b["release_url"]} | {b["source_url"]: b for b in books}
     want = languages.parse(config.load().languages)
+    # Which client would take each result, resolved once per request. The chip is a hint, not a
+    # promise: the grab re-resolves, because a rule can change between showing a row and clicking it.
+    settings = config.load()
+    client_by_id = {e.id: e for e in downloaders.entries(settings)}
     for item in data["items"]:
         b, e = owned.get(item["url"]), owned.get(wanted.url_for(item["url"], "ebook"))
         item["source"] = src.name
@@ -261,6 +265,16 @@ async def discover(q: str = "", category: str = "", page: int = 1, source: str =
             languages.detect(item.get("title") or "") if src.name in ("prowlarr", "torznab", "audiobookbay") else "")
         item["lang_ok"] = languages.allowed(item["language"], want)
         item["library"] = {"id": (b or e)["id"], "status": (b or e)["status"]} if b or e else None
+        item["client"] = None
+        if src.delivery != "direct":  # a direct source needs no client, so the row has no chip
+            # A source that does not report an indexer per row (AudiobookBay) is routed by its own
+            # name, which is what the indexer picker offers and what coverage() reports on.
+            decision = routing.resolve(settings, item.get("indexer") or src.label, kind,
+                                       item.get("protocol") or ("usenet" if item.get("nzb_url") else "torrent"))
+            entry = client_by_id.get(decision.client_id)
+            if decision.client_id:
+                item["client"] = {"id": decision.client_id, "label": entry.label if entry else "",
+                                  "rule": decision.rule}
     # Ratings: read from the cache only. Anything missing is filled in the background and shows
     # up on the next search, so a slow ratings provider never holds up a page.
     _provider = ratings.provider()
@@ -496,14 +510,13 @@ async def _drop_from_client(book: dict) -> None:
     """Stopping a download in Narratarr stops it in SABnzbd, NZBGet, qBittorrent, Transmission or Deluge too."""
     if not book["client_job_id"] or book["status"] not in db.ACTIVE:
         return
-    s = config.load()
-    name = book["download_client"]
+    entry = downloaders.entry_for_job(config.load(), book["download_client"])
     try:
-        if name in downloaders.USENET_CLIENTS:
-            async with downloaders.usenet_client(s, name=name) as client:
+        if entry and entry.delivery == "usenet":
+            async with downloaders.client_for(entry) as client:
                 await client.delete(book["client_job_id"])
-        elif name in ("qbittorrent", "transmission", "deluge"):
-            async with downloaders.torrent_client(s, name=name) as client:
+        elif entry and entry.type in ("qbittorrent", "transmission", "deluge"):
+            async with downloaders.client_for(entry) as client:
                 await client.delete(book["client_job_id"], files=True, tag=f"narratarr-{book['id']}")
     except ClientError:
         pass
@@ -612,7 +625,9 @@ def _clear_tmp(book: dict, settings: config.Settings) -> str:
     copy sitting in there. Those go back where they came from, or to a "recovered" folder.
     """
     tmp = tmp_dir(book, settings)
-    came_from_elsewhere = book["import_mode"] == "move" or book["download_client"] in downloaders.USENET_CLIENTS
+    job = downloaders.entry_for_job(settings, book["download_client"])
+    usenet = book["download_client"] in downloaders.USENET_CLIENTS or (job is not None and job.delivery == "usenet")
+    came_from_elsewhere = book["import_mode"] == "move" or usenet
     if not (has_files(tmp) and came_from_elsewhere):
         shutil.rmtree(tmp, ignore_errors=True)
         return ""
@@ -905,6 +920,69 @@ async def import_check_folder():
     return {"queued": await _worker().watch_folder()}
 
 
+# ---- tidy library ---------------------------------------------------------------------------
+
+
+class TidyOptions(BaseModel):
+    prefer: Literal["library", "tags"] = "library"
+    books: list[int] = []
+    tags: bool = False
+    sidecars: bool = False
+
+
+def _busy() -> set[int]:
+    return set(_worker().running)
+
+
+@app.post("/api/tidy/preview")
+async def tidy_preview(body: TidyOptions):
+    """Where every finished book would go under the folder layout in Settings. Moves nothing."""
+    return await asyncio.to_thread(tidy.preview, config.load(), body.prefer, _busy())
+
+
+@app.get("/api/tidy/status")
+async def tidy_status():
+    return await asyncio.to_thread(tidy.JOB.as_dict)
+
+
+@app.post("/api/tidy/apply")
+async def tidy_apply(body: TidyOptions):
+    if tidy.JOB.running:
+        raise HTTPException(409, "Tidying is already under way.")
+    if not body.books:
+        raise HTTPException(400, "Pick at least one book to move.")
+    tidy.JOB = job = tidy.Job(running=True, total=len(body.books))
+    settings = config.load()
+
+    async def run() -> None:
+        try:
+            await asyncio.to_thread(tidy.apply, settings, body.books[:10000], body.prefer, _busy(),
+                                    body.tags, body.sidecars, job)
+            if job.moved:
+                await _worker()._notify_audiobookshelf(settings)
+        except Exception as e:  # never leave the job looking busy forever
+            log.exception("Tidy library failed")
+            job.failed.append({"id": None, "title": "", "error": f"Unexpected error: {e}"})
+        finally:
+            tidy.finished(job)
+
+    _background(run())
+    return job.as_dict()
+
+
+@app.post("/api/tidy/undo")
+async def tidy_undo():
+    if tidy.JOB.running:
+        raise HTTPException(409, "Wait for tidying to finish first.")
+    settings = config.load()
+    result = await asyncio.to_thread(tidy.undo, settings, _busy())
+    if result["back"]:
+        await _worker()._notify_audiobookshelf(settings)
+    tidy.JOB = tidy.Job(undone=result["back"], failed=[{"id": None, "title": f["path"], "error": f["error"]} for f in result["failed"]],
+                        finished_at=time.time())
+    return {**result, "undo": len(db.last_tidy_batch()[1])}
+
+
 # ---- authors and series ----------------------------------------------------------
 
 
@@ -1112,6 +1190,149 @@ async def test_torznab():
         return await Torznab(s.torznab_url, s.torznab_api_key, s.torznab_categories).status()
     except TorznabError as e:
         raise HTTPException(400, str(e))
+
+
+@app.get("/api/download-clients")
+async def download_clients():
+    """The configured clients, secrets masked, plus what the UI needs to offer in a picker."""
+    s = config.load()
+    out = []
+    for entry in downloaders.entries(s):
+        row = entry.public()
+        row["default"] = entry.id == s.default_client
+        out.append(row)
+    return {
+        "clients": out,
+        "default_client": s.default_client,
+        # Where a release with no matching rule goes, per protocol: what the cards show as Default.
+        "defaults": {"torrent": routing.default_for(s, "torrent"), "usenet": routing.default_for(s, "usenet")},
+        "types": [{"type": t, "label": downloaders.LABELS[t], "delivery": downloaders.DELIVERY[t]}
+                  for t in downloaders.DELIVERY],
+    }
+
+
+class ClientProbe(BaseModel):
+    id: str = ""
+    entry: dict | None = None
+
+
+async def _debrid_account(entry) -> dict:
+    """What a debrid service says about the account behind a key, in one line for the Test button."""
+    async with downloaders.client_for(entry) as cloud:
+        user = await cloud.user()
+    if entry.type == "realdebrid":
+        until = str(user.get("expiration") or "")[:10]
+        return {"summary": f"Connected as {user.get('username')} · {user.get('type')}" + (f" until {until}" if until else "")}
+    if entry.type == "alldebrid":
+        u = _ad_user(user)
+        if not u["premium"] and not u["trial"]:
+            raise ClientError(f"Connected as {u['username']}, but the account isn't premium. AllDebrid needs premium for torrents.")
+        return {"summary": f"Connected as {u['username']} · {'free trial' if u['trial'] else 'premium'}"}
+    if entry.type == "torbox":
+        u = _tb_user(user)
+        return {"summary": "Connected" + (f" as {u['email']}" if u["email"] else "") + (f" · {u['plan']} plan" if u["plan"] else "")}
+    if not user.get("premium"):
+        raise ClientError("Connected, but the account isn't premium. Premiumize needs premium for torrents.")
+    return {"summary": "Connected · premium"}
+
+
+@app.post("/api/settings/test-download-client")
+async def test_download_client(body: ClientProbe):
+    """Prove one client can reach its daemon. Accepts an unsaved entry so Test works before Save.
+
+    A masked secret in an unsaved entry is filled from the saved client with the same id, under the
+    same rule saving uses: only while it still points at the same machine.
+    """
+    s = config.load()
+    raw = body.entry
+    if not raw and body.id:
+        raw = next((c for c in s.clients if c.get("id") == body.id), None)
+    try:
+        cleaned = config.validate_clients([raw]) if isinstance(raw, dict) and raw.get("type") else []
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if cleaned:
+        cleaned = config._merge_client_secrets(cleaned, s.clients)
+    entry = downloaders.entry_from_dict(cleaned[0]) if cleaned else None
+    if entry is None:
+        raise HTTPException(400, "Pick a client type first.")
+    if not entry.configured:
+        need = "its API key" if entry.is_debrid else "its address"
+        raise HTTPException(400, f"{entry.label} needs {need} filled in first.")
+    try:
+        if entry.is_debrid:
+            return {"label": entry.label, **await _debrid_account(entry)}
+        async with downloaders.client_for(entry) as client:
+            return {"label": client.label, "version": await client.version()}
+    except (ClientError, AllDebridError, TorBoxError, PremiumizeError, RealDebridError) as e:
+        raise HTTPException(400, str(e))
+    except httpx.HTTPError:
+        raise HTTPException(502, f"Couldn't reach {entry.label}.")
+
+
+@app.get("/api/indexers")
+async def indexers():
+    """The indexers the user's sources actually advertise, for the routing picker.
+
+    Populated from Prowlarr and from the Torznab indexer's own caps, because a rule that names an
+    indexer nobody advertises can never match and would look like a broken feature.
+    """
+    s = config.load()
+    names: list[str] = []
+    notes: list[str] = []
+    if s.prowlarr_url and s.prowlarr_api_key:
+        try:
+            names += await Prowlarr(s.prowlarr_url, s.prowlarr_api_key).offering() or []
+        except ProwlarrError as e:
+            notes.append(f"Prowlarr: {e}")
+    if s.torznab_url and s.torznab_api_key:
+        try:
+            names.append((await Torznab(s.torznab_url, s.torznab_api_key, s.torznab_categories).status())["title"])
+        except TorznabError as e:
+            notes.append(f"Torznab: {e}")
+    # A source that names no indexer on its releases is routed by its own name instead. That is
+    # AudiobookBay always, and a Torznab feed whose items carry no indexer of their own. Prowlarr
+    # always names the indexer, so "Prowlarr" itself could never match and isn't offered.
+    names.append(get_source("audiobookbay").label)
+    if s.torznab_url and s.torznab_api_key:
+        names.append(get_source("torznab").label)
+    return {"indexers": sorted({n for n in names if n}, key=str.lower), "notes": notes}
+
+
+class RouteProbe(BaseModel):
+    indexer: str = ""
+    kind: str = "audiobook"
+    protocol: str = ""
+
+
+@app.post("/api/routing/test")
+async def test_route(body: RouteProbe):
+    """What would take a sample release, and with which arguments. Grabs nothing."""
+    s = config.load()
+    entry_for = {e.id: e for e in downloaders.entries(s)}
+    decision = routing.resolve(s, body.indexer, body.kind or "audiobook", body.protocol)
+    entry = entry_for.get(decision.client_id)
+    return {
+        "client": decision.client_id,
+        "client_label": entry.label if entry else "",
+        "delivery": entry.delivery if entry else "",
+        "rule": decision.rule,
+        "reason": decision.reason,
+        "problems": decision.problems,
+        "args": {
+            "category": decision.label or (entry.category if entry else ""),
+            "save_path": decision.save_path or (entry.save_path if entry else ""),
+        },
+    }
+
+
+@app.get("/api/routing/coverage")
+async def routing_coverage():
+    """Which indexers no rule covers, and rules naming a client that no longer exists."""
+    s = config.load()
+    advertised = (await indexers())["indexers"]
+    cov = routing.coverage(s, advertised)
+    return {**cov, "indexers": advertised, "rules": routing.routes(s)}
 
 
 @app.post("/api/settings/test-client/{name}")

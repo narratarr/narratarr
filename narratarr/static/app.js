@@ -288,7 +288,10 @@ async function refreshLibrary() {
 function updateRdPill() {
   const pill = $("#rd-pill");
   const st = state.settings || {};
-  const ready = [st.torrent_configured && CLIENTS[st.torrent_client], st.usenet_configured && CLIENTS[st.usenet_client]].filter(Boolean);
+  // Name the clients the list actually holds, not the flat setting it replaced.
+  const ready = (st.clients || []).filter((c) => c.configured).map((c) => c.label)
+    .concat([st.torrent_configured && !(st.clients || []).length && CLIENTS[st.torrent_client],
+             st.usenet_configured && !(st.clients || []).length && CLIENTS[st.usenet_client]]).filter(Boolean);
   pill.className = `rd-pill ${ready.length ? "ok" : "missing"}`;
   $("span", pill).textContent = ready.length ? `${ready.join(" · ")} ready` : "Connect a downloader";
 }
@@ -347,6 +350,7 @@ function cardHTML(item, lib, i = 0) {
         <div class="author">${esc(item.author || (item.indexer ? `via ${item.indexer}` : "Unknown author"))}</div>
         ${facts.length ? `<div class="facts">${facts.map((f) => `<span>${esc(f)}</span>`).join("")}</div>` : ""}
         ${ratingPillHTML(item)}
+        ${clientChip(item)}
       </div>
     </article>`;
 }
@@ -374,6 +378,14 @@ function ratingPillHTML(item) {
   // Always emit the slot so every card reserves the same space and the row
   // sits at the same height whether or not a rating exists.
   return `<div class="rating-slot">${inner}</div>`;
+}
+
+function clientChip(item) {
+  // Which client takes this result if you grab it. Re-resolved at grab time, because a rule can
+  // change between seeing a row and clicking it.
+  const c = item.client;
+  if (!c || !c.label) return "";
+  return `<div class="client-chip" title="This release would go to ${esc(c.label)}${c.rule === null ? " (no rule matched, so the default)" : ""}">${esc(c.label)}</div>`;
 }
 
 const shortLength = (len) => (len || "").replace(/ hours?/, "h").replace(/ and /, " ").replace(/ minutes?/, "m");
@@ -1364,6 +1376,241 @@ function openImport(folder = "") {
 }
 
 // ---------------------------------------------------------------------------
+// Tidy library: move the books already there into the folder layout, after a preview
+
+const TIDY_ORIGIN = {
+  audible: "Audible details",
+  import: "Read from the files when imported",
+  download: "From the download",
+  tags: "From the files’ own tags",
+};
+const TIDY_STATES = [
+  ["move", "will move"],
+  ["look", "need a look"],
+  ["held", "held back"],
+  ["tidy", "already tidy"],
+];
+
+// The new path, with the folders that change picked out.
+function tidyPathHTML(to, from) {
+  const was = from.split("/");
+  return to.split("/").map((part, i) => (part === was[i] ? esc(part) : `<b>${esc(part)}</b>`)).join('<i class="sep">/</i>');
+}
+
+function openTidy({ onClose } = {}) {
+  const scrim = $("#modal");
+  const t = { plan: null, prefer: "library", filter: "move", picked: new Set(), timer: 0 };
+  scrim.hidden = false;
+  scrim.innerHTML = `
+    <div class="modal wide tidy" role="dialog" aria-modal="true" aria-labelledby="tidy-title">
+      <button class="btn icon tidy-x" type="button" data-act="cancel" aria-label="Close">${I.x}</button>
+      <h3 id="tidy-title">Tidy your library</h3>
+      <p>Moves the books already in your library into your folder layout. Nothing moves until you say so, and you can undo it afterwards.</p>
+      <div id="tidy-body"><div class="imp-empty"><span class="spinner"></span><p>Working out where everything goes…</p></div></div>
+      <div class="actions" id="tidy-actions"></div>
+    </div>`;
+  const body = $("#tidy-body", scrim);
+  const actions = $("#tidy-actions", scrim);
+
+  const close = () => {
+    clearTimeout(t.timer);
+    scrim.hidden = true;
+    scrim.innerHTML = "";
+    document.removeEventListener("keydown", onKey, true);
+    onClose?.();
+  };
+  const onKey = (e) => { if (e.key === "Escape") { e.stopPropagation(); close(); } };
+  document.addEventListener("keydown", onKey, true);
+
+  const movable = () => t.plan.books.filter((b) => b.state === "move");
+  const joinsOf = (id) => movable().filter((b) => b.joins === id);
+
+  function rowHTML(b) {
+    const can = b.state === "move";
+    const note = b.carries.length ? `<span class="tidy-tag">${I.book} Its ebook comes too</span>`
+      : b.joins && can ? `<span class="tidy-tag">${I.headphones} Joins its audiobook</span>` : "";
+    return `
+      <label class="tidy-row ${b.state}" ${can ? "" : 'data-still'}>
+        ${can ? `<input type="checkbox" data-pick="${b.id}" ${t.picked.has(b.id) ? "checked" : ""}>` : `<span class="tidy-mark">${b.state === "tidy" ? I.check : I.alert}</span>`}
+        <span class="tidy-main">
+          <span class="tidy-name"><b>${esc(b.title)}</b>${b.kind === "ebook" ? `<span class="kind-inline">${I.book}Ebook</span>` : ""}
+            <small>${esc(b.author || "Unknown author")}</small></span>
+          ${b.state === "tidy" ? `<span class="tidy-path now">${esc(b.to)}</span>` : `
+          <span class="tidy-path from">${esc(b.from)}</span>
+          <span class="tidy-path to"><span class="arrow" aria-hidden="true">→</span>${tidyPathHTML(b.to, b.from)}</span>`}
+          <span class="tidy-foot">
+            ${b.reason ? `<span class="tidy-why">${esc(b.reason)}</span>` : ""}
+            ${b.state === "look" ? `<button class="btn ghost sm" type="button" data-fix="${b.id}">${I.pencil} Fix details</button>` : ""}
+            ${note}
+            <span class="tidy-origin">${esc(TIDY_ORIGIN[b.origin] || "")}</span>
+          </span>
+        </span>
+      </label>`;
+  }
+
+  function render() {
+    const p = t.plan;
+    const shown = p.books.filter((b) => b.state === t.filter);
+    const empty = {
+      move: p.counts.tidy ? "Every book is already where your layout puts it." : "Nothing to move.",
+      look: "Every book has an author and a title.",
+      held: "Nothing is held back.",
+      tidy: "No books are in place yet.",
+    }[t.filter];
+    body.innerHTML = `
+      <div class="tidy-layout"><span>Layout</span><code>${esc(p.template)}</code></div>
+      <div class="tidy-stats" role="tablist" aria-label="Show">
+        ${TIDY_STATES.map(([k, label]) => `
+          <button type="button" role="tab" class="tidy-stat ${k} ${t.filter === k ? "on" : ""}" data-filter="${k}" aria-selected="${t.filter === k}">
+            <b>${p.counts[k]}</b><span>${label}</span></button>`).join("")}
+      </div>
+      <div class="imp-mode-row">
+        <div class="segmented" role="radiogroup" aria-label="Name folders from">
+          <button type="button" data-prefer="library" class="${t.prefer === "library" ? "on" : ""}">Narratarr’s details</button>
+          <button type="button" data-prefer="tags" class="${t.prefer === "tags" ? "on" : ""}">The files’ own tags</button>
+        </div>
+        <span class="hint">${t.prefer === "library"
+          ? "The title, author, series and narrator Narratarr shows, which come from Audible for matched books."
+          : "What the audio files’ tags say, where they say it. Handy when the files are tagged better than they were matched."}</span>
+      </div>
+      ${t.filter === "move" && shown.length ? `
+        <div class="imp-head"><b>${p.counts.move} book${p.counts.move === 1 ? "" : "s"} to move</b>
+          <label class="imp-all"><input type="checkbox" id="tidy-all" ${t.picked.size === p.counts.move ? "checked" : ""}> Select all</label></div>` : ""}
+      <div class="imp-list tidy-list">${shown.length ? shown.map(rowHTML).join("") : `<div class="imp-empty">${I.check}<p>${esc(empty)}</p></div>`}</div>
+      ${p.counts.move ? `
+      <div class="tidy-extras">
+        <label class="switch"><input type="checkbox" id="tidy-sidecars" checked><i></i><span><b>Add the cover, description and narrator files</b><small>Only where a folder doesn’t have them. Audiobookshelf reads these.</small></span></label>
+        <label class="switch"><input type="checkbox" id="tidy-tags"><i></i><span><b>Write these details into the audio files’ tags</b><small>Fills in and corrects the album, author, narrator and series, so every app agrees. This changes your audio files, and Undo won’t change the tags back.</small></span></label>
+      </div>` : ""}`;
+    sync();
+  }
+
+  function sync() {
+    const n = t.picked.size;
+    actions.innerHTML = `
+      <button class="btn ghost" type="button" data-act="cancel">Cancel</button>
+      <button class="btn primary" type="button" data-act="apply" ${n ? "" : "disabled"}>${n ? `Move ${n} book${n === 1 ? "" : "s"}` : "Move books"}</button>`;
+  }
+
+  async function load() {
+    try {
+      t.plan = await api("/api/tidy/preview", { method: "POST", body: { prefer: t.prefer } });
+    } catch (e) {
+      body.innerHTML = `<div class="state failed" style="margin-top:16px">${esc(e.message)}</div>`;
+      actions.innerHTML = `<button class="btn ghost" type="button" data-act="cancel">Close</button>`;
+      return;
+    }
+    t.picked = new Set(movable().map((b) => b.id));
+    if (!t.plan.counts.move) t.filter = t.plan.counts.look ? "look" : t.plan.counts.held ? "held" : "move";
+    render();
+  }
+
+  function progress(job) {
+    const pct = job.total ? Math.round((job.done / job.total) * 100) : 0;
+    body.innerHTML = `
+      <div class="tidy-run">
+        <div class="tidy-meter"><i style="width:${pct}%"></i></div>
+        <b>Moving ${Math.min(job.done + 1, job.total)} of ${job.total}</b>
+        <small>${esc(job.current || "Getting ready…")}</small>
+      </div>`;
+    actions.innerHTML = "";
+  }
+
+  function result(job) {
+    const failed = job.failed || [];
+    const abs = state.settings?.audiobookshelf_token && state.settings?.audiobookshelf_url && job.moved ? " Audiobookshelf is rescanning, and keeps everyone’s place in each book." : "";
+    body.innerHTML = `
+      <div class="tidy-done ${job.moved ? "ok" : ""}">
+        <span class="ic">${job.moved ? I.check : I.alert}</span>
+        <div><b>${job.moved ? `Moved ${job.moved} book${job.moved === 1 ? "" : "s"}` : "Nothing moved"}</b>
+          <p>${job.moved ? `Every book is in its new folder, and Narratarr plays and reads them from there.${abs}` : "Have a look at why below."}</p></div>
+      </div>
+      ${failed.length ? `<div class="tidy-fails"><b>${failed.length} stayed where ${failed.length === 1 ? "it was" : "they were"}</b>
+        ${failed.map((f) => `<div><span>${esc(f.title)}</span><small>${esc(f.error)}</small></div>`).join("")}</div>` : ""}
+      ${(job.notes || []).length ? `<div class="tidy-fails notes">${job.notes.map((n) => `<div><small>${esc(n)}</small></div>`).join("")}</div>` : ""}`;
+    actions.innerHTML = `
+      ${job.undo ? `<button class="btn ghost" type="button" data-act="undo">${I.retry} Undo</button>` : ""}
+      <button class="btn primary" type="button" data-act="cancel">Done</button>`;
+  }
+
+  async function poll() {
+    let job;
+    try { job = await api("/api/tidy/status"); } catch { t.timer = setTimeout(poll, 1500); return; }
+    if (job.running) { progress(job); t.timer = setTimeout(poll, 600); return; }
+    result(job);
+    refreshLibrary();
+  }
+
+  scrim.onchange = (e) => {
+    if (e.target.id === "tidy-all") {
+      t.picked = e.target.checked ? new Set(movable().map((b) => b.id)) : new Set();
+      $$("[data-pick]", body).forEach((c) => { c.checked = e.target.checked; });
+    } else if (e.target.dataset.pick) {
+      const id = Number(e.target.dataset.pick);
+      const on = e.target.checked;
+      // The two formats of a book share a folder: an ebook joining its audiobook goes with it.
+      const linked = [id, ...joinsOf(id).map((b) => b.id)];
+      const partner = movable().find((b) => b.id === id)?.joins;
+      if (on && partner && movable().some((b) => b.id === partner)) linked.push(partner);
+      for (const x of linked) {
+        on ? t.picked.add(x) : t.picked.delete(x);
+        const box = $(`[data-pick="${x}"]`, body);
+        if (box) box.checked = on;
+      }
+      const all = $("#tidy-all", body);
+      if (all) all.checked = t.picked.size === t.plan.counts.move;
+    }
+    sync();
+  };
+  scrim.onclick = async (e) => {
+    if (e.target === scrim || e.target.closest('[data-act="cancel"]')) return close();
+    const f = e.target.closest("[data-filter]");
+    if (f) { t.filter = f.dataset.filter; return render(); }
+    const pref = e.target.closest("[data-prefer]");
+    if (pref && pref.dataset.prefer !== t.prefer) {
+      t.prefer = pref.dataset.prefer;
+      body.innerHTML = `<div class="imp-empty"><span class="spinner"></span><p>${t.prefer === "tags" ? "Reading the tags in every book…" : "Working out where everything goes…"}</p></div>`;
+      return load();
+    }
+    const fix = e.target.closest("[data-fix]");
+    if (fix) { e.preventDefault(); close(); return openDrawer({ bookId: Number(fix.dataset.fix) }); }
+    if (e.target.closest('[data-act="apply"]')) {
+      const btn = e.target.closest('[data-act="apply"]');
+      spinBtn(btn, true);
+      try {
+        const job = await api("/api/tidy/apply", { method: "POST", body: {
+          prefer: t.prefer, books: [...t.picked],
+          sidecars: !!$("#tidy-sidecars", body)?.checked, tags: !!$("#tidy-tags", body)?.checked,
+        } });
+        progress(job);
+        poll();
+      } catch (err) {
+        toast(err.message, { kind: "err" });
+        spinBtn(btn, false);
+      }
+      return;
+    }
+    if (e.target.closest('[data-act="undo"]')) {
+      const btn = e.target.closest('[data-act="undo"]');
+      spinBtn(btn, true);
+      try {
+        const r = await api("/api/tidy/undo", { method: "POST" });
+        toast(r.back ? `Put ${r.back} folder${r.back === 1 ? "" : "s"} back where ${r.back === 1 ? "it was" : "they were"}` : "Nothing to put back",
+          { kind: r.failed.length ? "err" : "ok" });
+        refreshLibrary();
+        close();
+      } catch (err) {
+        toast(err.message, { kind: "err" });
+        spinBtn(btn, false);
+      }
+    }
+  };
+
+  // Already under way (opened again mid-move): show its progress instead of a new plan.
+  api("/api/tidy/status").then((job) => (job.running ? (progress(job), poll()) : load())).catch(load);
+}
+
+// ---------------------------------------------------------------------------
 // Authors & series you follow
 
 function portraitHTML(f, cls = "") {
@@ -1869,7 +2116,10 @@ function settingsStatus(key, users, notifiers) {
     return on.length ? [`${on.join(" · ")} connected`, "ok"] : ["No indexer connected", ""];
   }
   if (key === "downloads") {
-    const ready = [st.torrent_configured && CLIENTS[st.torrent_client], st.usenet_configured && CLIENTS[st.usenet_client]].filter(Boolean);
+    // Name the clients the list actually holds, not the flat setting it replaced.
+  const ready = (st.clients || []).filter((c) => c.configured).map((c) => c.label)
+    .concat([st.torrent_configured && !(st.clients || []).length && CLIENTS[st.torrent_client],
+             st.usenet_configured && !(st.clients || []).length && CLIENTS[st.usenet_client]]).filter(Boolean);
     return ready.length ? [ready.join(" · "), "ok"] : ["Set up a download client", "warn"];
   }
   if (key === "abs") return st.audiobookshelf_url && st.audiobookshelf_token ? ["Connected", "ok"] : ["Not connected", ""];
@@ -1886,30 +2136,6 @@ function settingsStatus(key, users, notifiers) {
 }
 
 // Signing in to a cloud service with a short code: AllDebrid's PIN, TorBox's device code.
-function codeCardHTML(p, name, where, url) {
-  return `<div class="pin-card" id="${p}-pin-card">
-    <div class="pin-start" id="${p}-pin-start">
-      <div><b id="${p}-pin-title"></b><p class="desc" id="${p}-pin-desc"></p></div>
-      <div class="pin-actions">
-        <button class="btn" type="button" data-${p}-test>Test</button>
-        <button class="btn" type="button" id="${p}-pin">Connect ${name}</button>
-      </div>
-    </div>
-    <div class="pin-wait" id="${p}-pin-wait" hidden>
-      <span class="pin-code" id="${p}-pin-code" aria-label="Your code"></span>
-      <div class="pin-steps">
-        <b>Enter this code on ${name}</b>
-        <p class="desc">Open the page below wherever you’re signed in to ${name}, even on your phone. This page carries on by itself once you have.</p>
-        <div class="pin-actions">
-          <a class="btn" id="${p}-pin-link" href="${url}" target="_blank" rel="noopener noreferrer">Open ${where}</a>
-          <button class="btn ghost" type="button" id="${p}-pin-cancel">Cancel</button>
-        </div>
-        <small class="pin-status"><span class="spinner" aria-hidden="true"></span><span id="${p}-pin-left">Waiting for the code…</span></small>
-      </div>
-    </div>
-  </div>`;
-}
-
 function Settings(root, page) {
   const s = state.settings || {};
   const tile = (client, label, where) => {
@@ -1962,6 +2188,17 @@ function Settings(root, page) {
             </div>
           </div>
         </div>
+      </section>
+
+      <section class="panel tidy-panel" data-page="general">
+        <div class="ph ph-row">
+          <div><h3>Tidy your library</h3><p class="desc">Move the books already in your library into this layout, using their details from Audible or their own tags. You see every change first, and can undo it.</p></div>
+          <div class="tidy-btns">
+            <button class="btn ghost" type="button" id="tidy-undo" hidden>${I.retry} Undo last tidy</button>
+            <button class="btn primary" type="button" id="tidy-open">Preview changes</button>
+          </div>
+        </div>
+        <div class="body" id="tidy-gate" hidden><span class="hint">${I.alert} Save your library folder and layout first, so the preview uses them.</span></div>
       </section>
 
       <section class="panel" data-page="general">
@@ -2116,182 +2353,21 @@ function Settings(root, page) {
       </section>
 
       <section class="panel" data-page="downloads">
-        <div class="ph"><h3>Torrents</h3><p class="desc">Real-Debrid, AllDebrid, TorBox and Premiumize fetch them for you, so nothing is shared from your computer. qBittorrent, Transmission and Deluge download on your own machine and keep seeding, which shows your IP address to other peers; many people run them behind a VPN.</p></div>
+        <div class="ph"><h3>Download clients</h3><p class="desc">What fetches your books. Real-Debrid, AllDebrid, TorBox and Premiumize fetch torrents for you, so nothing is shared from your computer. qBittorrent, Transmission and Deluge download on your own machine and keep seeding, which shows your IP address to other peers; many people run them behind a VPN. SABnzbd and NZBGet take the Usenet results Prowlarr finds.</p></div>
         <div class="body">
-          <div class="tile-groups" data-choice="torrent_client" role="radiogroup" aria-label="Download torrents with">
-            <div class="tile-group"><span class="tile-label" aria-hidden="true">In the cloud</span>
-              <div class="choice-tiles">${tile("realdebrid", "Real-Debrid", "Premium account")}${tile("alldebrid", "AllDebrid", "Premium account")}${tile("torbox", "TorBox", "TorBox account")}${tile("premiumize", "Premiumize", "Premium account")}</div></div>
-            <div class="tile-group"><span class="tile-label" aria-hidden="true">On this machine</span>
-              <div class="choice-tiles">${tile("qbittorrent", "qBittorrent", "Seeds from here")}${tile("transmission", "Transmission", "Seeds from here")}${tile("deluge", "Deluge", "Seeds from here")}</div></div>
-          </div>
-          <input type="hidden" name="torrent_client" value="${esc(s.torrent_client)}" />
-          <div class="client-fields" data-for="torrent_client:realdebrid">
-            <div class="field">
-              <label for="rd_api_key">Real-Debrid API key</label>
-              <div class="input-row">
-                <input class="input mono" id="rd_api_key" name="rd_api_key" type="password" placeholder="Paste your private API token" value="${esc(s.rd_api_key)}" />
-                <button class="btn" type="button" id="test-rd">Test</button>
-              </div>
-              <span class="hint">Find it at <a href="https://real-debrid.com/apitoken" target="_blank" rel="noopener" style="color:var(--accent)">real-debrid.com/apitoken</a>.</span>
-            </div>
-            <div id="rd-result"></div>
-            <label class="switch"><input type="checkbox" name="delete_from_rd_after" ${s.delete_from_rd_after ? "checked" : ""}><i></i>Remove torrents from Real-Debrid after downloading</label>
-          </div>
-          <div class="client-fields" data-for="torrent_client:alldebrid">
-            ${codeCardHTML("ad", "AllDebrid", "alldebrid.com/pin", "https://alldebrid.com/pin/")}
-            <div id="ad-result"></div>
-            <details class="set-more">
-              <summary>Use an API key instead</summary>
-              <div class="field">
-                <label for="ad_api_key">AllDebrid API key</label>
-                <div class="input-row">
-                  <input class="input mono" id="ad_api_key" name="ad_api_key" type="password" placeholder="Paste an API key" value="${esc(s.ad_api_key)}" />
-                  <button class="btn" type="button" data-ad-test>Test</button>
-                </div>
-                <span class="hint">Create one at <a href="https://alldebrid.com/apikeys" target="_blank" rel="noopener" style="color:var(--accent)">alldebrid.com/apikeys</a>.</span>
-              </div>
-            </details>
-            <label class="switch"><input type="checkbox" name="delete_from_ad_after" ${s.delete_from_ad_after ? "checked" : ""}><i></i>Remove torrents from AllDebrid after downloading</label>
-          </div>
-          <div class="client-fields" data-for="torrent_client:torbox">
-            ${codeCardHTML("tb", "TorBox", "TorBox’s sign-in page", "https://torbox.app/")}
-            <div id="tb-result"></div>
-            <details class="set-more">
-              <summary>Use an API key instead</summary>
-              <div class="field">
-                <label for="tb_api_key">TorBox API key</label>
-                <div class="input-row">
-                  <input class="input mono" id="tb_api_key" name="tb_api_key" type="password" placeholder="Paste an API key" value="${esc(s.tb_api_key)}" />
-                  <button class="btn" type="button" data-tb-test>Test</button>
-                </div>
-                <span class="hint">Find it in TorBox under <a href="https://torbox.app/settings" target="_blank" rel="noopener" style="color:var(--accent)">Settings → API key</a>.</span>
-              </div>
-            </details>
-            <label class="switch"><input type="checkbox" name="delete_from_tb_after" ${s.delete_from_tb_after ? "checked" : ""}><i></i>Remove torrents from TorBox after downloading</label>
-          </div>
-          <div class="client-fields" data-for="torrent_client:premiumize">
-            <div class="field">
-              <label for="pm_api_key">Premiumize API key</label>
-              <div class="input-row">
-                <input class="input mono" id="pm_api_key" name="pm_api_key" type="password" placeholder="Paste your API key" value="${esc(s.pm_api_key)}" />
-                <button class="btn" type="button" id="test-pm">Test</button>
-              </div>
-              <span class="hint">Find it at <a href="https://www.premiumize.me/account" target="_blank" rel="noopener" style="color:var(--accent)">premiumize.me/account</a>.</span>
-            </div>
-            <div id="pm-result"></div>
-            <label class="switch"><input type="checkbox" name="delete_from_pm_after" ${s.delete_from_pm_after ? "checked" : ""}><i></i>Remove torrents and their files from Premiumize after downloading</label>
-          </div>
-          <div class="client-fields" data-for="torrent_client:qbittorrent">
-            <div class="field">
-              <label for="qbittorrent_url">qBittorrent Web UI address</label>
-              <div class="input-row">
-                <input class="input mono" id="qbittorrent_url" name="qbittorrent_url" placeholder="http://localhost:8080" value="${esc(s.qbittorrent_url)}" />
-                <button class="btn" type="button" data-test-client="qbittorrent">Test</button>
-              </div>
-              <div data-result="qbittorrent"></div>
-            </div>
-            <div class="set-grid three">
-              <div class="field"><label for="qbittorrent_username">Username</label><input class="input mono" id="qbittorrent_username" name="qbittorrent_username" value="${esc(s.qbittorrent_username)}" autocomplete="off" /></div>
-              <div class="field"><label for="qbittorrent_password">Password</label><input class="input mono" id="qbittorrent_password" name="qbittorrent_password" type="password" value="${esc(s.qbittorrent_password)}" /></div>
-              <div class="field"><label for="qbittorrent_category">Category</label><input class="input mono" id="qbittorrent_category" name="qbittorrent_category" value="${esc(s.qbittorrent_category)}" /></div>
-            </div>
-            <div class="field">
-              <label for="qbittorrent_folder">Download folder</label>
-              <input class="input mono" id="qbittorrent_folder" name="qbittorrent_folder" placeholder="qBittorrent’s default" value="${esc(s.qbittorrent_folder)}" />
-              <span class="hint">Optional. Where qBittorrent saves Narratarr’s books, as qBittorrent sees it, e.g. <code>/data/torrents/books</code>. Keeps them apart from your other downloads.</span>
-            </div>
-          </div>
-          <div class="client-fields" data-for="torrent_client:transmission">
-            <div class="field">
-              <label for="transmission_url">Transmission address</label>
-              <div class="input-row">
-                <input class="input mono" id="transmission_url" name="transmission_url" placeholder="http://localhost:9091" value="${esc(s.transmission_url)}" />
-                <button class="btn" type="button" data-test-client="transmission">Test</button>
-              </div>
-              <div data-result="transmission"></div>
-            </div>
-            <div class="set-grid">
-              <div class="field"><label for="transmission_username">Username</label><input class="input mono" id="transmission_username" name="transmission_username" value="${esc(s.transmission_username)}" autocomplete="off" placeholder="If you set one" /></div>
-              <div class="field"><label for="transmission_password">Password</label><input class="input mono" id="transmission_password" name="transmission_password" type="password" value="${esc(s.transmission_password)}" /></div>
-            </div>
-            <div class="field">
-              <label for="transmission_label">Label</label>
-              <input class="input mono" id="transmission_label" name="transmission_label" value="${esc(s.transmission_label)}" />
-              <span class="hint">Optional. Added to every torrent Narratarr sends, so you can filter them in Transmission 3.0 or later.</span>
-            </div>
-            <div class="field">
-              <label for="transmission_folder">Download folder</label>
-              <input class="input mono" id="transmission_folder" name="transmission_folder" placeholder="Transmission’s default" value="${esc(s.transmission_folder)}" />
-              <span class="hint">Optional. Where Transmission saves Narratarr’s books, as Transmission sees it, e.g. <code>/data/torrents/books</code>. Keeps them apart from your other downloads.</span>
-            </div>
-          </div>
-          <div class="client-fields" data-for="torrent_client:deluge">
-            <div class="field">
-              <label for="deluge_url">Deluge Web UI address</label>
-              <div class="input-row">
-                <input class="input mono" id="deluge_url" name="deluge_url" placeholder="http://localhost:8112" value="${esc(s.deluge_url)}" />
-                <button class="btn" type="button" data-test-client="deluge">Test</button>
-              </div>
-              <div data-result="deluge"></div>
-            </div>
-            <div class="field">
-              <label for="deluge_password">Password</label>
-              <input class="input mono" id="deluge_password" name="deluge_password" type="password" value="${esc(s.deluge_password)}" />
-              <span class="hint">Deluge’s web password (it has no username). Set it under Preferences → Interface → Password.</span>
-            </div>
-            <div class="field">
-              <label for="deluge_folder">Download folder</label>
-              <input class="input mono" id="deluge_folder" name="deluge_folder" placeholder="Deluge’s default" value="${esc(s.deluge_folder)}" />
-              <span class="hint">Optional. Where Deluge saves Narratarr’s books, as Deluge sees it, e.g. <code>/data/torrents/books</code>. Keeps them apart from your other downloads.</span>
-            </div>
-          </div>
+          <div id="client-list" class="client-list"></div>
+          <div class="tile-groups client-picker" id="client-picker" hidden></div>
+          <div><button class="btn" type="button" id="add-client">${I.plus}Add a client</button></div>
         </div>
       </section>
 
       <section class="panel" data-page="downloads">
-        <div class="ph ph-row">
-          <div><h3>Usenet</h3><p class="desc">For the Usenet results Prowlarr finds.</p></div>
-          <div class="segmented" data-choice="usenet_client" role="radiogroup" aria-label="Download Usenet releases with">
-            <button type="button" role="radio" data-v="sabnzbd">SABnzbd</button>
-            <button type="button" role="radio" data-v="nzbget">NZBGet</button>
-          </div>
-        </div>
+        <div class="ph"><h3>Routing</h3><p class="desc">Send releases from some indexers, or of one kind of book, to a particular client. Rules are checked top to bottom and the first match decides. With no rules, everything goes to the default client.</p></div>
         <div class="body">
-          <input type="hidden" name="usenet_client" value="${esc(s.usenet_client)}" />
-          <div class="client-fields" data-for="usenet_client:sabnzbd">
-            <div class="set-grid">
-              <div class="field"><label for="sabnzbd_url">SABnzbd address</label><input class="input mono" id="sabnzbd_url" name="sabnzbd_url" placeholder="http://localhost:8080" value="${esc(s.sabnzbd_url)}" /></div>
-              <div class="field">
-                <label for="sabnzbd_api_key">API key</label>
-                <div class="input-row">
-                  <input class="input mono" id="sabnzbd_api_key" name="sabnzbd_api_key" type="password" placeholder="Config → General → API Key" value="${esc(s.sabnzbd_api_key)}" />
-                  <button class="btn" type="button" data-test-client="sabnzbd">Test</button>
-                </div>
-              </div>
-            </div>
-            <div data-result="sabnzbd"></div>
-            <div class="field">
-              <label for="sabnzbd_category">Category</label>
-              <input class="input mono" id="sabnzbd_category" name="sabnzbd_category" placeholder="audiobooks" value="${esc(s.sabnzbd_category)}" style="max-width:240px" />
-              <span class="hint">Optional. Must already exist in SABnzbd. Leave it empty to use its default.</span>
-            </div>
-          </div>
-          <div class="client-fields" data-for="usenet_client:nzbget">
-            <div class="field">
-              <label for="nzbget_url">NZBGet address</label>
-              <div class="input-row">
-                <input class="input mono" id="nzbget_url" name="nzbget_url" placeholder="http://localhost:6789" value="${esc(s.nzbget_url)}" />
-                <button class="btn" type="button" data-test-client="nzbget">Test</button>
-              </div>
-              <div data-result="nzbget"></div>
-            </div>
-            <div class="set-grid three">
-              <div class="field"><label for="nzbget_username">Username</label><input class="input mono" id="nzbget_username" name="nzbget_username" value="${esc(s.nzbget_username)}" placeholder="nzbget" autocomplete="off" /></div>
-              <div class="field"><label for="nzbget_password">Password</label><input class="input mono" id="nzbget_password" name="nzbget_password" type="password" value="${esc(s.nzbget_password)}" /></div>
-              <div class="field"><label for="nzbget_category">Category</label><input class="input mono" id="nzbget_category" name="nzbget_category" placeholder="Audiobooks" value="${esc(s.nzbget_category)}" /></div>
-            </div>
-            <span class="hint">The username and password are NZBGet’s ControlUsername and ControlPassword (Settings → Security).</span>
-          </div>
+          <div id="route-list"></div>
+          <div id="route-coverage" class="hint"></div>
+          <div><button class="btn" type="button" id="add-route">${I.plus}Add a rule</button>
+            <span class="hint" style="margin-left:10px">A rule with no indexer picked applies to every indexer.</span></div>
         </div>
       </section>
 
@@ -2576,6 +2652,411 @@ function Settings(root, page) {
     $$(`[data-for^="${group}:"]`, root).forEach((el) => { el.hidden = el.dataset.for !== `${group}:${v}`; });
     dirty();
   };
+  // ---- download clients, as a list ---------------------------------------------------------
+  // Rendered rather than hand-written markup: nine types with different fields each, and the
+  // routing table reads this same list. The payload goes back as JSON in hidden inputs, which is
+  // what the settings form already posts.
+  const clientBox = $("#client-list", root);
+  const routeBox = $("#route-list", root);
+  const coverageBox = $("#route-coverage", root);
+  const TYPE_LABEL = { sabnzbd: "SABnzbd", nzbget: "NZBGet", qbittorrent: "qBittorrent", transmission: "Transmission",
+    deluge: "Deluge", realdebrid: "Real-Debrid", alldebrid: "AllDebrid", torbox: "TorBox", premiumize: "Premiumize" };
+  const GROUPS = [
+    ["In the cloud", [["realdebrid", "Premium account"], ["alldebrid", "Premium account"], ["torbox", "TorBox account"], ["premiumize", "Premium account"]]],
+    ["On this machine", [["qbittorrent", "Seeds from here"], ["transmission", "Seeds from here"], ["deluge", "Seeds from here"]]],
+    ["Usenet", [["sabnzbd", "Usenet"], ["nzbget", "Usenet"]]],
+  ];
+  const WHERE = Object.fromEntries(GROUPS.flatMap(([, list]) => list));
+  const link = (href, text) => `<a href="${href}" target="_blank" rel="noopener" style="color:var(--accent)">${text}</a>`;
+  // What each type needs, in the order a person fills it in: [field, label, placeholder, hint].
+  const FIELDS = {
+    sabnzbd: [["url", "SABnzbd address", "http://localhost:8080"], ["api_key", "API key", "Config → General → API Key"],
+      ["category", "Category", "audiobooks", "Optional. Must already exist in SABnzbd. Leave it empty to use its default."]],
+    nzbget: [["url", "NZBGet address", "http://localhost:6789"], ["username", "Username", "nzbget"], ["password", "Password"],
+      ["category", "Category", "Audiobooks", "The username and password are NZBGet’s ControlUsername and ControlPassword (Settings → Security)."]],
+    qbittorrent: [["url", "qBittorrent Web UI address", "http://localhost:8080"], ["username", "Username"], ["password", "Password"],
+      ["category", "Category", "audiobooks"],
+      ["save_path", "Download folder", "qBittorrent’s default", "Optional. Where qBittorrent saves Narratarr’s books, as qBittorrent sees it, e.g. <code>/data/torrents/books</code>."]],
+    transmission: [["url", "Transmission address", "http://localhost:9091"], ["username", "Username", "If you set one"], ["password", "Password"],
+      ["category", "Label", "", "Optional. Added to every torrent Narratarr sends, so you can filter them in Transmission 3.0 or later."],
+      ["save_path", "Download folder", "Transmission’s default", "Optional. Where Transmission saves Narratarr’s books, as Transmission sees it."]],
+    deluge: [["url", "Deluge Web UI address", "http://localhost:8112"],
+      ["password", "Password", "", "Deluge’s web password (it has no username). Set it under Preferences → Interface → Password."],
+      ["save_path", "Download folder", "Deluge’s default", "Optional. Where Deluge saves Narratarr’s books, as Deluge sees it."]],
+    realdebrid: [["api_key", "Real-Debrid API key", "Paste your private API token", `Find it at ${link("https://real-debrid.com/apitoken", "real-debrid.com/apitoken")}.`]],
+    alldebrid: [["api_key", "AllDebrid API key", "Paste an API key", `Create one at ${link("https://alldebrid.com/apikeys", "alldebrid.com/apikeys")}.`]],
+    torbox: [["api_key", "TorBox API key", "Paste an API key", `Find it in TorBox under ${link("https://torbox.app/settings", "Settings → API key")}.`]],
+    premiumize: [["api_key", "Premiumize API key", "Paste your API key", `Find it at ${link("https://www.premiumize.me/account", "premiumize.me/account")}.`]],
+  };
+  const DELETE_AFTER = {
+    realdebrid: ["delete_from_rd_after", "Remove torrents from Real-Debrid after downloading"],
+    alldebrid: ["delete_from_ad_after", "Remove torrents from AllDebrid after downloading"],
+    torbox: ["delete_from_tb_after", "Remove torrents from TorBox after downloading"],
+    premiumize: ["delete_from_pm_after", "Remove torrents and their files from Premiumize after downloading"],
+  };
+  // AllDebrid and TorBox can connect with a short code entered on their site instead of a pasted key.
+  const PIN = {
+    alldebrid: { site: "alldebrid.com", where: "alldebrid.com/pin", start: "/api/settings/alldebrid/pin", check: "/api/settings/alldebrid/pin/check" },
+    torbox: { site: "TorBox", where: "TorBox’s sign-in page", start: "/api/settings/torbox/code", check: "/api/settings/torbox/code/check" },
+  };
+  const deleteAfter = Object.fromEntries(Object.values(DELETE_AFTER).map(([name]) => [name, Boolean(s[name])]));
+  let clients = [];
+  let routes = [];
+  let advertised = [];
+  let defaultClient = s.default_client || "";
+  let defaults = { torrent: "", usenet: "" };  // where a release no rule matches goes, per protocol
+  const DELIVERY = { sabnzbd: "usenet", nzbget: "usenet" };
+  const deliveryOf = (c) => DELIVERY[c.type] || "torrent";
+
+  const hidden = (name, value) => {
+    // Inside the form, not the panel: save() posts FormData(form) and would never see it otherwise.
+    let input = form.querySelector(`input[type=hidden][name=${name}]`);
+    if (!input) { input = document.createElement("input"); input.type = "hidden"; input.name = name; form.appendChild(input); }
+    input.value = value;
+  };
+  const sync = () => {
+    hidden("clients", JSON.stringify(clients));
+    hidden("client_routes", JSON.stringify({ version: 1, rules: routes }));
+    hidden("default_client", defaultClient);
+    dirty();
+  };
+  const clientName = (c) => esc(TYPE_LABEL[c.type] || c.type) + (c.id === c.type ? "" : ` · ${esc(c.id)}`);
+  const hasKey = (c) => Boolean(c.api_key);
+
+  const fieldHTML = (c, [k, label, placeholder = "", hint = ""]) => `
+    <div class="field">
+      <label>${label}</label>
+      <input class="input mono" data-f="${k}" type="${k === "password" || k === "api_key" ? "password" : "text"}"
+             value="${esc(c[k] || "")}" placeholder="${esc(placeholder)}" autocomplete="off" />
+      ${hint ? `<span class="hint">${hint}</span>` : ""}
+    </div>`;
+
+  const pinHTML = (c) => {
+    const on = hasKey(c);
+    const name = TYPE_LABEL[c.type];
+    return `<div class="pin-card">
+      <div class="pin-start" data-pin-start>
+        <div><b>${on ? `${name} is connected` : "Connect with a code"}</b>
+          <p class="desc">${on ? "Test checks the account. To use a different one, connect again."
+            : `Narratarr shows a short code, you enter it on ${PIN[c.type].site}, and you’re connected. There’s no key to copy, and your password never comes here.`}</p></div>
+        <div class="pin-actions"><button class="btn ${on ? "" : "primary"}" type="button" data-act="pin">${on ? "Connect again" : `Connect ${name}`}</button></div>
+      </div>
+      <div class="pin-wait" data-pin-wait hidden>
+        <span class="pin-code" data-pin-code aria-label="Your code"></span>
+        <div class="pin-steps">
+          <b>Enter this code on ${name}</b>
+          <p class="desc">Open the page below wherever you’re signed in to ${name}, even on your phone. This page carries on by itself once you have.</p>
+          <div class="pin-actions">
+            <a class="btn" data-pin-link href="#" target="_blank" rel="noopener noreferrer">Open ${PIN[c.type].where}</a>
+            <button class="btn ghost" type="button" data-act="pin-cancel">Cancel</button>
+          </div>
+          <small class="pin-status"><span class="spinner" aria-hidden="true"></span><span data-pin-left>Waiting for the code…</span></small>
+        </div>
+      </div>
+    </div>`;
+  };
+
+  const drawClients = () => {
+    const firstOfType = new Set();
+    clientBox.innerHTML = clients.length ? clients.map((c, i) => {
+      const fields = FIELDS[c.type] || [];
+      const own = fields.filter(([k]) => ["url", "username", "password", "api_key"].includes(k));
+      const extra = fields.filter(([k]) => ["category", "save_path"].includes(k));
+      const del = DELETE_AFTER[c.type] && !firstOfType.has(c.type) ? DELETE_AFTER[c.type] : null;
+      firstOfType.add(c.type);
+      return `
+      <div class="client-card" data-i="${i}">
+        <div class="client-head">
+          <span class="client-name"><b>${clientName(c)}</b>
+            <small>${esc(WHERE[c.type] || "")}</small></span>
+          <span class="client-tools">
+            ${defaults[deliveryOf(c)] === c.id
+              ? `<span class="client-default" title="Releases no routing rule matches go here">${I.check}Default for ${deliveryOf(c) === "usenet" ? "Usenet" : "torrents"}</span>`
+              : clients.filter((x) => deliveryOf(x) === deliveryOf(c)).length > 1 ? `<button class="btn sm ghost" type="button" data-act="default">Make default</button>` : ""}
+            <button class="btn sm" type="button" data-act="test">Test</button>
+            <button class="btn sm ghost icon danger" type="button" data-act="remove" aria-label="Remove ${clientName(c)}">${I.trash}</button>
+          </span>
+        </div>
+        ${PIN[c.type] ? pinHTML(c) : ""}
+        ${PIN[c.type] ? `<details class="set-more"${hasKey(c) ? "" : ""}><summary>Use an API key instead</summary>
+            <div class="set-grid">${own.map((f) => fieldHTML(c, f)).join("")}</div></details>`
+          : `<div class="set-grid ${own.length > 2 ? "three" : ""}">${own.map((f) => fieldHTML(c, f)).join("")}</div>`}
+        ${extra.length ? `<div class="set-grid">${extra.map((f) => fieldHTML(c, f)).join("")}</div>` : ""}
+        ${del ? `<label class="switch"><input type="checkbox" name="${del[0]}" ${deleteAfter[del[0]] ? "checked" : ""}><i></i>${del[1]}</label>` : ""}
+        <div data-out></div>
+      </div>`;
+    }).join("") : `<p class="muted client-empty">No download client yet. Add the one you already use.</p>`;
+  };
+  // Until the server says otherwise, a protocol's default is its first client.
+  const fillDefaults = () => {
+    for (const proto of ["torrent", "usenet"]) {
+      const mine = clients.filter((c) => deliveryOf(c) === proto);
+      if (!mine.some((c) => c.id === defaults[proto])) defaults[proto] = mine[0]?.id || "";
+    }
+  };
+
+  const drawRoutes = () => {
+    routeBox.innerHTML = routes.map((r, i) => {
+      const named = r.match.indexers || [];
+      // Indexers a rule names that this install no longer advertises still show, so they can be removed.
+      const offer = [...new Set([...advertised, ...named])];
+      return `
+      <div class="route-card" data-i="${i}">
+        <div class="route-head">
+          <b><span class="route-num">${i + 1}</span>${i === 0 ? "Checked first" : `Then rule ${i + 1}`}</b>
+          <span class="client-tools">
+            <button class="btn sm ghost icon" type="button" data-act="up" ${i === 0 ? "disabled" : ""} aria-label="Move rule ${i + 1} up">↑</button>
+            <button class="btn sm ghost icon" type="button" data-act="down" ${i === routes.length - 1 ? "disabled" : ""} aria-label="Move rule ${i + 1} down">↓</button>
+            <button class="btn sm" type="button" data-act="test">Test</button>
+            <button class="btn sm ghost icon danger" type="button" data-act="remove" aria-label="Remove rule ${i + 1}">${I.trash}</button>
+          </span>
+        </div>
+        <div class="field">
+          <label>From</label>
+          <div class="lang-chips" role="group" aria-label="Indexers rule ${i + 1} matches">
+            ${offer.map((n) => `<button type="button" class="fpill ${named.includes(n) ? "on" : ""}" data-ix="${esc(n)}" aria-pressed="${named.includes(n)}">${esc(n)}</button>`).join("")}
+          </div>
+          <span class="hint">${named.length ? "Only releases from these." : "None picked: releases from any indexer."}</span>
+        </div>
+        <div class="set-grid">
+          <div class="field"><label>Kind of book</label><select class="select" data-f="categories">
+            ${[["", "Any"], ["audiobook", "Audiobooks"], ["ebook", "Ebooks"]].map(([v, l]) =>
+              `<option value="${v}" ${((r.match.categories || [])[0] || "") === v ? "selected" : ""}>${l}</option>`).join("")}
+          </select></div>
+          <div class="field"><label>Send to</label><select class="select" data-f="client">
+            ${clients.map((c) => `<option value="${esc(c.id)}" ${r.client === c.id ? "selected" : ""}>${clientName(c)}</option>`).join("")}
+          </select></div>
+        </div>
+        <details class="set-more"${r.label || r.save_path ? " open" : ""}><summary>Category and folder for this rule</summary>
+          <div class="set-grid">
+            <div class="field"><label>Category or label</label><input class="input mono" data-f="label" value="${esc(r.label || "")}" placeholder="the client’s own" /></div>
+            <div class="field"><label>Download folder</label><input class="input mono" data-f="save_path" value="${esc(r.save_path || "")}" placeholder="the client’s own" /></div>
+          </div>
+        </details>
+        <div data-out></div>
+      </div>`;
+    }).join("") || `<p class="muted client-empty">No rules yet: every release goes to the default client, exactly as before.</p>`;
+  };
+
+  clientBox.oninput = clientBox.onchange = (e) => {
+    const card = e.target.closest(".client-card");
+    if (!card) return;
+    const i = Number(card.dataset.i);
+    if (e.target.type === "checkbox" && e.target.name in deleteAfter) { deleteAfter[e.target.name] = e.target.checked; dirty(); return; }
+    const k = e.target.dataset.f;
+    if (k) { clients[i][k] = e.target.value; sync(); }
+  };
+
+  let pinTimer = 0;
+  const pinStop = (card) => {
+    clearTimeout(pinTimer);
+    if (!card) return;
+    $("[data-pin-wait]", card).hidden = true;
+    $("[data-pin-start]", card).hidden = false;
+  };
+  const pinConnect = async (btn, card, c) => {
+    const out = $("[data-out]", card);
+    const wait = $("[data-pin-wait]", card);
+    const name = TYPE_LABEL[c.type];
+    out.innerHTML = "";
+    spinBtn(btn, true);
+    let got;
+    try {
+      // Connecting saves the new key on the server, and the list is read back afterwards, so anything
+      // typed and not yet saved is saved first rather than lost.
+      if (saved && JSON.stringify(collect()) !== JSON.stringify(saved)) await save(true);
+      got = await api(PIN[c.type].start, { method: "POST" });
+    } catch (err) {
+      out.innerHTML = badLine(err.message);
+      spinBtn(btn, false);
+      return;
+    }
+    spinBtn(btn, false);
+    const code = got.pin || got.code;
+    $("[data-pin-code]", card).textContent = code;
+    $("[data-pin-link]", card).href = got.user_url;
+    $("[data-pin-start]", card).hidden = true;
+    wait.hidden = false;
+    const ends = Date.now() + got.expires_in * 1000;
+    const every = Math.max(3, got.interval || 3) * 1000;
+    const tick = async () => {
+      if (!wait.isConnected || wait.hidden) return; // cancelled, or left Settings
+      const left = Math.ceil((ends - Date.now()) / 60000);
+      if (left <= 0) {
+        pinStop(card);
+        out.innerHTML = badLine(`That code has expired. Choose Connect ${name} to get a new one.`);
+        return;
+      }
+      $("[data-pin-left]", card).textContent = `Waiting for the code · expires in ${left} min`;
+      try {
+        const r = await api(PIN[c.type].check, { method: "POST", body: got.pin ? { pin: code } : { code } });
+        if (!wait.isConnected || wait.hidden) return;
+        if (r.connected) {
+          pinStop(card);
+          state.settings = r.settings;
+          await loadRouting();
+          saved = snapshot();
+          dirty();
+          updateRdPill();
+          statuses();
+          const fresh = $$(".client-card", clientBox).find((el) => clients[Number(el.dataset.i)]?.type === c.type);
+          if (fresh) $("[data-out]", fresh).innerHTML = r.warning ? badLine(r.warning) : okLine(`${esc(name)} is connected`);
+          return;
+        }
+      } catch (err) {
+        pinStop(card);
+        out.innerHTML = badLine(err.message);
+        return;
+      }
+      pinTimer = setTimeout(tick, every);
+    };
+    pinTimer = setTimeout(tick, every);
+  };
+
+  clientBox.onclick = async (e) => {
+    const btn = e.target.closest("[data-act]");
+    if (!btn) return;
+    const card = btn.closest(".client-card");
+    const i = Number(card.dataset.i);
+    const out = $("[data-out]", card);
+    const act = btn.dataset.act;
+    if (act === "remove") { pinStop(); clients.splice(i, 1); fillDefaults(); drawClients(); drawRoutes(); sync(); return; }
+    if (act === "default") { defaultClient = clients[i].id; defaults[deliveryOf(clients[i])] = defaultClient; drawClients(); sync(); return; }
+    if (act === "pin") return pinConnect(btn, card, clients[i]);
+    if (act === "pin-cancel") return pinStop(card);
+    if (act === "test") {
+      spinBtn(btn, true);
+      try {
+        const got = await api("/api/settings/test-download-client", { method: "POST", body: { entry: clients[i] } });
+        out.innerHTML = okLine(got.summary ? esc(got.summary) : `Connected to ${esc(got.label)} ${esc(got.version || "")}`);
+      } catch (err) { out.innerHTML = badLine(err.message); }
+      spinBtn(btn, false);
+    }
+  };
+
+  // Adding a client: pick its kind from tiles, the way Downloads always looked.
+  const picker = $("#client-picker", root);
+  picker.innerHTML = GROUPS.map(([group, list]) => `
+    <div class="tile-group"><span class="tile-label" aria-hidden="true">${group}</span>
+      <div class="choice-tiles">${list.map(([t, where]) => `<button type="button" data-add="${t}"><b>${TYPE_LABEL[t]}</b><small>${where}</small></button>`).join("")}</div>
+    </div>`).join("");
+  $("#add-client", root).onclick = () => { picker.hidden = !picker.hidden; };
+  picker.onclick = (e) => {
+    const b = e.target.closest("[data-add]");
+    if (!b) return;
+    const type = b.dataset.add;
+    let id = type;
+    for (let n = 2; clients.some((c) => c.id === id); n++) id = `${type}-${n}`;
+    clients.push({ id, type, url: "", username: "", password: "", api_key: "", category: "", save_path: "" });
+    if (!defaultClient) defaultClient = id;
+    fillDefaults();
+    picker.hidden = true;
+    drawClients(); drawRoutes(); sync();
+    clientBox.lastElementChild?.querySelector("input:not([type=checkbox])")?.focus();
+  };
+
+  const readRoute = (row) => {
+    const i = Number(row.dataset.i);
+    const get = (k) => $(`[data-f=${k}]`, row);
+    const category = get("categories").value;
+    routes[i] = {
+      match: { indexers: $$(".fpill.on", row).map((b) => b.dataset.ix), categories: category ? [category] : [] },
+      client: get("client").value,
+      label: get("label").value,
+      save_path: get("save_path").value,
+    };
+    return i;
+  };
+
+  routeBox.onchange = routeBox.oninput = (e) => {
+    const row = e.target.closest(".route-card");
+    if (!row) return;
+    readRoute(row);
+    sync();
+  };
+
+  routeBox.onclick = async (e) => {
+    const pill = e.target.closest("[data-ix]");
+    if (pill) {
+      pill.classList.toggle("on");
+      pill.setAttribute("aria-pressed", pill.classList.contains("on"));
+      const row = pill.closest(".route-card");
+      readRoute(row);
+      $(".field .hint", row).textContent = routes[Number(row.dataset.i)].match.indexers.length
+        ? "Only releases from these." : "None picked: releases from any indexer.";
+      sync();
+      return;
+    }
+    const btn = e.target.closest("[data-act]");
+    if (!btn) return;
+    const row = btn.closest(".route-card");
+    const i = Number(row.dataset.i);
+    const act = btn.dataset.act;
+    if (act === "remove") { routes.splice(i, 1); drawRoutes(); sync(); return; }
+    if (act === "up" && i > 0) { [routes[i - 1], routes[i]] = [routes[i], routes[i - 1]]; drawRoutes(); sync(); return; }
+    if (act === "down" && i < routes.length - 1) { [routes[i + 1], routes[i]] = [routes[i], routes[i + 1]]; drawRoutes(); sync(); return; }
+    if (act === "test") {
+      const out = $("[data-out]", row);
+      readRoute(row);
+      sync();
+      spinBtn(btn, true);
+      try {
+        // The saved rules are what gets tested, so save first, as every other Test does.
+        await save(true);
+        const r = routes[i];
+        const got = await api("/api/routing/test", {
+          method: "POST",
+          body: { indexer: (r.match.indexers || [])[0] || "", kind: (r.match.categories || [])[0] || "audiobook",
+                  protocol: deliveryOf(clients.find((c) => c.id === r.client) || {}) },
+        });
+        const where = got.rule === null ? "No rule matched, so the default" : `Rule ${got.rule + 1} matched`;
+        out.innerHTML = (got.client
+          ? okLine(`${where}: <b>${esc(got.client_label || got.client)}</b> · category <code>${esc(got.args.category || "the client’s own")}</code> · folder <code>${esc(got.args.save_path || "the client’s own")}</code>`)
+          : badLine(got.reason)) + (got.problems || []).map((p) => badLine(p)).join("");
+      } catch (err) { out.innerHTML = badLine(err.message); }
+      spinBtn(btn, false);
+    }
+  };
+
+  $("#add-route", root).onclick = () => {
+    if (!clients.length) { toast("Add a download client first.", { kind: "err" }); return; }
+    routes.push({ match: { indexers: [], categories: ["audiobook"] }, client: clients[0].id, label: "", save_path: "" });
+    drawRoutes(); sync();
+  };
+
+  const adoptClients = (list) => {
+    clients = (list || []).map((x) => ({ id: x.id, type: x.type, url: x.url || "", username: x.username || "",
+      password: x.password || "", api_key: x.api_key || "", category: x.category || "", save_path: x.save_path || "" }));
+  };
+  async function loadRouting() {
+    try {
+      const [c, cov] = await Promise.all([api("/api/download-clients"), api("/api/routing/coverage")]);
+      adoptClients(c.clients);
+      defaultClient = c.default_client || "";
+      defaults = { torrent: "", usenet: "", ...(c.defaults || {}) };
+      advertised = cov.indexers || [];
+      routes = (cov.rules || []).map((r) => ({ match: { indexers: r.match.indexers || [], categories: r.match.categories || [] },
+        client: r.client, label: r.label || "", save_path: r.save_path || "" }));
+      const uncovered = cov.uncovered || [];
+      coverageBox.innerHTML = [
+        !routes.length ? "" : uncovered.length ? `No rule names <b>${uncovered.map(esc).join(", ")}</b>, so those go to the default client.` : "Every indexer you have is named in a rule.",
+        (cov.unknown_clients || []).length ? `<span class="bad-text">${cov.unknown_clients.map(esc).join("; ")}</span>` : "",
+      ].filter(Boolean).join("<br>");
+    } catch (err) {
+      coverageBox.innerHTML = `<span class="bad-text">${esc(err.message)}</span>`;
+    }
+    drawClients(); drawRoutes();
+    // What was just read from the server is the saved state, not a change.
+    const before = { ...collect() };
+    sync();
+    if (saved) {
+      const now = collect();
+      for (const k of Object.keys(now)) if (JSON.stringify(now[k]) !== JSON.stringify(before[k]) || !(k in saved)) saved[k] = now[k];
+    }
+    dirty();
+  }
+  loadRouting();
+
   $$("[data-choice]", root).forEach((seg) => {
     choose(seg.dataset.choice, form[seg.dataset.choice].value);
     seg.onclick = (e) => { const b = e.target.closest("[data-v]"); if (b) choose(seg.dataset.choice, b.dataset.v); };
@@ -2665,10 +3146,11 @@ function Settings(root, page) {
 
   const collect = () => {
     const data = Object.fromEntries(new FormData(form));
-    data.delete_from_rd_after = form.delete_from_rd_after.checked;
-    data.delete_from_ad_after = form.delete_from_ad_after.checked;
-    data.delete_from_tb_after = form.delete_from_tb_after.checked;
-    data.delete_from_pm_after = form.delete_from_pm_after.checked;
+    // These four lived in the per-client blocks that Clients replaced. Only send one when its input
+    // is on the page, or a save would silently overwrite a stored preference with false.
+    for (const name of ["delete_from_rd_after", "delete_from_ad_after", "delete_from_tb_after", "delete_from_pm_after"]) {
+      if (form[name]) data[name] = form[name].checked;
+    }
     data.smart_search = form.smart_search.checked;
     data.auto_search = form.auto_search.checked;
     data.check_updates = form.check_updates.checked;
@@ -2683,15 +3165,14 @@ function Settings(root, page) {
 
   async function save(quiet) {
     state.settings = await api("/api/settings", { method: "PUT", body: collect() });
-    form.rd_api_key.value = state.settings.rd_api_key;
-    form.ad_api_key.value = state.settings.ad_api_key;
-    form.tb_api_key.value = state.settings.tb_api_key;
-    form.pm_api_key.value = state.settings.pm_api_key;
-    form.audiobookshelf_token.value = state.settings.audiobookshelf_token;
-    form.brave_api_key.value = state.settings.brave_api_key;
-    for (const key of ["prowlarr_api_key", "torznab_api_key", "sabnzbd_api_key", "nzbget_password", "qbittorrent_password", "transmission_password", "deluge_password"]) {
-      form[key].value = state.settings[key];
+    for (const key of ["audiobookshelf_token", "brave_api_key", "prowlarr_api_key", "torznab_api_key"]) {
+      if (form[key]) form[key].value = state.settings[key];
     }
+    // The list comes back with its secrets masked, so a typed password doesn't stay in the page.
+    adoptClients(state.settings.clients);
+    defaultClient = state.settings.default_client || "";
+    try { defaults = { torrent: "", usenet: "", ...((await api("/api/download-clients")).defaults || {}) }; } catch { fillDefaults(); }
+    drawClients(); drawRoutes(); sync();
     state.sources = await api("/api/sources"); // the Prowlarr tab appears once it's set up
     updateRdPill();
     if (absConnected() === $("#abs-connected", root).hidden) absShow(); // a pasted API key just connected it
@@ -2712,7 +3193,32 @@ function Settings(root, page) {
       .filter((k) => JSON.stringify(now[k]) !== JSON.stringify(saved[k])).length;
     $("#save-bar", root).hidden = !n;
     $("#save-count", root).textContent = `${n} unsaved change${n === 1 ? "" : "s"}`;
+    // Tidy uses the saved layout, so it waits until the one on screen is saved.
+    const unsaved = ["library_dir", "folder_template"].some((k) => JSON.stringify(now[k]) !== JSON.stringify(saved[k]));
+    $("#tidy-gate", root).hidden = !unsaved;
+    $("#tidy-open", root).disabled = unsaved;
   }
+  const tidyUndoState = () => api("/api/tidy/status").then((job) => {
+    const btn = $("#tidy-undo", root);
+    if (btn) btn.hidden = !job.undo;
+  }).catch(() => {});
+  $("#tidy-open", root).onclick = () => openTidy({ onClose: tidyUndoState });
+  $("#tidy-undo", root).onclick = async (e) => {
+    const ok = await modal({ title: "Undo the last tidy?", body: "Every folder it moved goes back where it was. Any covers, descriptions and tags it added stay.", confirm: "Undo" });
+    if (!ok) return;
+    spinBtn(e.currentTarget, true);
+    try {
+      const r = await api("/api/tidy/undo", { method: "POST" });
+      toast(r.failed.length ? `Put ${r.back} back. ${r.failed.length} couldn’t move: ${r.failed[0].error}` : `Put ${r.back} folder${r.back === 1 ? "" : "s"} back`,
+        { kind: r.failed.length ? "err" : "ok" });
+      refreshLibrary();
+    } catch (err) {
+      toast(err.message, { kind: "err" });
+    }
+    spinBtn(e.currentTarget, false);
+    tidyUndoState();
+  };
+  tidyUndoState();
   form.addEventListener("input", dirty);
   form.addEventListener("change", dirty);
   $("#discard", root).onclick = () => { state.view = Settings(root, page); };
@@ -2770,38 +3276,6 @@ function Settings(root, page) {
     return `Connected to Prowlarr ${esc(r.version)} · <b>${r.indexers}</b> indexer${r.indexers === 1 ? "" : "s"} enabled${ebooks}`;
   });
   tester("torznab", (r) => `Connected to ${esc(r.title)} · book search ${r.book_search ? "<b>available</b>" : "not offered"} · <b>${r.categories}</b> categories`);
-  $$("[data-test-client]", root).forEach((btn) => {
-    btn.onclick = async () => {
-      const name = btn.dataset.testClient;
-      const out = $(`[data-result="${name}"]`, root);
-      spinBtn(btn, true);
-      try {
-        await save(true);
-        const r = await api(`/api/settings/test-client/${name}`, { method: "POST" });
-        out.innerHTML = okLine(`Connected to ${esc(r.label)} ${esc(r.version)}`);
-      } catch (err) {
-        out.innerHTML = `<div class="rd-result bad">${esc(err.message)}</div>`;
-      }
-      spinBtn(btn, false);
-    };
-  });
-
-  $("#test-rd", root).onclick = async (e) => {
-    const btn = e.currentTarget;
-    const out = $("#rd-result", root);
-    spinBtn(btn, true);
-    try {
-      await save(true);
-      const u = await api("/api/settings/test-rd", { method: "POST" });
-      const exp = u.expiration ? new Date(u.expiration).toLocaleDateString(undefined, { dateStyle: "medium" }) : "";
-      out.innerHTML = `<div class="rd-result">${I.check.replace("<svg", '<svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"')}
-        <span>Connected as <b>${esc(u.username)}</b> · ${esc(u.type)}${exp ? ` until ${esc(exp)}` : ""}</span></div>`;
-    } catch (err) {
-      out.innerHTML = `<div class="rd-result bad">${esc(err.message)}</div>`;
-    }
-    spinBtn(btn, false);
-  };
-
   // Notifications: each destination saves on its own, like people on the Users page, not with the save bar.
   // The editor's fields have no names, so the Settings form (and its save bar) never sees them.
   const notifyList = $("#notify-list", root);
@@ -3110,135 +3584,7 @@ function Settings(root, page) {
     loadLog();
   }, 8000);
 
-  // AllDebrid and TorBox: connect with a short code the user enters on their site, or with a pasted key.
-  const codeConnect = ({ p, name, client, site, start, check, line }) => {
-    const out = () => $(`#${p}-result`, root);
-    const card = () => {
-      const on = Boolean(state.settings[`${p}_configured`]);
-      $(`#${p}-pin-title`, root).textContent = on ? `${name} is connected` : "Connect with a code";
-      $(`#${p}-pin-desc`, root).textContent = on
-        ? "Test checks the account. To use a different one, connect again."
-        : `Narratarr shows a short code, you enter it on ${site}, and you’re connected. There’s no key to copy, and your password never comes here.`;
-      $(`#${p}-pin`, root).textContent = on ? "Connect again" : `Connect ${name}`;
-      $(`#${p}-pin`, root).classList.toggle("primary", !on);
-      $(`#${p}-pin-start [data-${p}-test]`, root).hidden = !on;
-      if (on) $(`[data-v="${client}"] small`, root).innerHTML = `<i class="dot ok"></i>Ready`;
-    };
-    card();
-    $$(`[data-${p}-test]`, root).forEach((btn) => {
-      btn.onclick = async () => {
-        spinBtn(btn, true);
-        try {
-          await save(true);
-          card();
-          out().innerHTML = line(await api(`/api/settings/test-${p}`, { method: "POST" }));
-        } catch (err) {
-          out().innerHTML = badLine(err.message);
-        }
-        spinBtn(btn, false);
-      };
-    });
-    let timer = 0;
-    const stop = () => {
-      clearTimeout(timer);
-      $(`#${p}-pin-wait`, root).hidden = true;
-      $(`#${p}-pin-start`, root).hidden = false;
-    };
-    $(`#${p}-pin-cancel`, root).onclick = stop;
-    $(`#${p}-pin`, root).onclick = async (e) => {
-      const btn = e.currentTarget;
-      const wait = $(`#${p}-pin-wait`, root);
-      out().innerHTML = "";
-      spinBtn(btn, true);
-      let got;
-      try {
-        got = await api(start, { method: "POST" });
-      } catch (err) {
-        out().innerHTML = badLine(err.message);
-        spinBtn(btn, false);
-        return;
-      }
-      spinBtn(btn, false);
-      const code = got.pin || got.code;
-      $(`#${p}-pin-code`, root).textContent = code;
-      $(`#${p}-pin-link`, root).href = got.user_url;
-      $(`#${p}-pin-start`, root).hidden = true;
-      wait.hidden = false;
-      const ends = Date.now() + got.expires_in * 1000;
-      const every = Math.max(3, got.interval || 3) * 1000;
-      const tick = async () => {
-        if (!wait.isConnected || wait.hidden) return; // cancelled, or left Settings
-        const left = Math.ceil((ends - Date.now()) / 60000);
-        if (left <= 0) {
-          stop();
-          out().innerHTML = badLine(`That code has expired. Choose Connect ${name} to get a new one.`);
-          return;
-        }
-        $(`#${p}-pin-left`, root).textContent = `Waiting for the code · expires in ${left} min`;
-        try {
-          const r = await api(check, { method: "POST", body: got.pin ? { pin: code } : { code } });
-          if (!wait.isConnected || wait.hidden) return;
-          if (r.connected) {
-            // The server saved the key and chose this service; keep anything else typed here as it was.
-            const key = `${p}_api_key`;
-            const { torrent_client, torrent_configured } = r.settings;
-            Object.assign(state.settings, { [key]: r.settings[key], [`${p}_configured`]: true, torrent_client, torrent_configured });
-            form[key].value = r.settings[key];
-            if (saved) Object.assign(saved, { [key]: r.settings[key], torrent_client });
-            choose("torrent_client", torrent_client);
-            stop();
-            card();
-            updateRdPill();
-            statuses();
-            out().innerHTML = line(r);
-            return;
-          }
-        } catch (err) {
-          stop();
-          out().innerHTML = badLine(err.message);
-          return;
-        }
-        timer = setTimeout(tick, every);
-      };
-      timer = setTimeout(tick, every);
-    };
-  };
   const badLine = (text) => `<div class="rd-result bad">${esc(text)}</div>`;
-  codeConnect({
-    p: "ad", name: "AllDebrid", client: "alldebrid", site: "alldebrid.com",
-    start: "/api/settings/alldebrid/pin", check: "/api/settings/alldebrid/pin/check",
-    line: (u) => {
-      if (u.warning) return badLine(u.warning);
-      if (!u.premium && !u.trial) return badLine(`Connected as ${u.username}, but the account isn’t premium. AllDebrid needs premium for torrents.`);
-      const until = u.premium_until ? new Date(u.premium_until * 1000).toLocaleDateString(undefined, { dateStyle: "medium" }) : "";
-      return okLine(`Connected as <b>${esc(u.username)}</b> · ${u.trial ? "free trial" : "premium"}${until ? ` until ${esc(until)}` : ""}`);
-    },
-  });
-  codeConnect({
-    p: "tb", name: "TorBox", client: "torbox", site: "TorBox",
-    start: "/api/settings/torbox/code", check: "/api/settings/torbox/code/check",
-    line: (u) => {
-      if (u.warning) return badLine(u.warning);
-      const until = u.premium_until ? new Date(u.premium_until).toLocaleDateString(undefined, { dateStyle: "medium" }) : "";
-      return okLine(`Connected${u.email ? ` as <b>${esc(u.email)}</b>` : ""}${u.plan ? ` · ${esc(u.plan)} plan` : ""}${until ? ` until ${esc(until)}` : ""}`);
-    },
-  });
-  $("#test-pm", root).onclick = async (e) => {
-    const btn = e.currentTarget;
-    const out = $("#pm-result", root);
-    spinBtn(btn, true);
-    try {
-      await save(true);
-      const u = await api("/api/settings/test-pm", { method: "POST" });
-      const until = u.premium_until ? new Date(u.premium_until * 1000).toLocaleDateString(undefined, { dateStyle: "medium" }) : "";
-      out.innerHTML = u.premium ? okLine(`Connected · premium${until ? ` until ${esc(until)}` : ""}`)
-        : badLine("Connected, but the account isn’t premium. Premiumize needs premium for torrents.");
-      if (u.premium) $('[data-v="premiumize"] small', root).innerHTML = `<i class="dot ok"></i>Ready`;
-    } catch (err) {
-      out.innerHTML = badLine(err.message);
-    }
-    spinBtn(btn, false);
-  };
 
   // Audiobookshelf: find the server, sign in once (which creates an API key), pick a library.
   let absServer = null; // what Find last found: {url, version, ready, password_login, insecure}

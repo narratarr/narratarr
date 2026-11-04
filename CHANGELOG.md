@@ -2,6 +2,13 @@
 
 All notable changes to Narratarr. The app shows this under **Settings → Updates**.
 
+## 0.8.8 — 2026-11-02
+
+- **Tidy library.** Settings → General → Tidy your library moves the books already in your library into your folder layout (Audiobookshelf style, Author / Series / Title, or your own), named from Narratarr's details or the files' own tags. **Preview changes** lists every book's folder now and where it would go, with the parts that change picked out. You choose which books move, and **Undo** puts the last batch back.
+- Every move is a rename on the same disk, so it's instant and Audiobookshelf keeps everyone's place in each book. A book's ebook moves with it or joins its new folder, and folders left empty are cleared away.
+- Nothing risky happens quietly. Books whose new folder is taken, that would share a folder, that hold another book, that are downloading, or that would have to be copied to another disk are held back with the reason. Books with no author or title are marked **needs a look**, with a button to fix their details.
+- Optionally, while tidying, add the cover, description and narrator files Audiobookshelf reads, and write the details into the audio files' tags (MP3, M4B, FLAC, Ogg, Opus) so every app agrees.
+
 ## 0.8.7 — 2026-11-01
 
 - **Narratarr has a Discord**: <https://discord.gg/kB5EgmfBrA>, for help, ideas and news about new versions. It's linked from the sidebar, your account (on phones too), Settings → Updates and What's new.
