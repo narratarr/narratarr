@@ -2,6 +2,13 @@
 
 All notable changes to Narratarr. The app shows this under **Settings → Updates**.
 
+## 0.9.0 — 2026-11-04
+
+- **Download routing.** Settings → Downloads now holds a list of download clients rather than one per kind, so you can have, say, Real-Debrid and qBittorrent side by side. **Routing** rules send a release to a particular client by the indexer that found it and whether it's an audiobook or an ebook, with its own category and folder if you like. Rules are checked top to bottom and the first match decides; anything else goes to the default client, and each client says whether it's the default for torrents or for Usenet. **Test** on a rule shows where a sample release would go. Discover shows on each result which client would take it. Your existing setup carries over as it is: with no rules, every download goes where it went before. Contributed by curator8888.
+- A rule never sends a Usenet release to a torrent client: it's skipped for that release, and the log says why. With no Usenet client set up, a Usenet grab fails with a message saying so. A saved password stays with the machine it was entered for if a client's address changes, and only admins can see or change clients and rules. How it all works: [docs/download-routing.md](docs/download-routing.md).
+- **Ratings on book cards.** Discover shows a star score on each book, from Audible's own average, and a new **Rating** sort puts the best-rated first. A score only appears when the book matches exactly; otherwise the card says **No Rating**, or **No Rating Available** when the book exists but nobody has rated it yet. Ratings are fetched in the background and kept, so they never slow a search: a new book's score shows up next time. On by default, and switched off under Settings → Search & sources → Rating metadata, which also sets the Audible storefronts it asks. Switched off, it makes no requests at all. Contributed by curator8888.
+- Card details (format, size, length) stay on one line instead of wrapping.
+
 ## 0.8.8 — 2026-11-02
 
 - **Tidy library.** Settings → General → Tidy your library moves the books already in your library into your folder layout (Audiobookshelf style, Author / Series / Title, or your own), named from Narratarr's details or the files' own tags. **Preview changes** lists every book's folder now and where it would go, with the parts that change picked out. You choose which books move, and **Undo** puts the last batch back.
