@@ -2,7 +2,7 @@
 
 All notable changes to Narratarr. The app shows this under **Settings → Updates**.
 
-## Unreleased
+## 0.9.3 — 2026-11-05
 
 - **Ask before downloading what automatic search finds.** Turn on **Ask before downloading what it finds** under Settings → Search & sources, and a release found for a Wanted book waits under **Library → Awaiting approval** instead of downloading, with that release picked. Check its language, format and size, then **Approve** it, **Pick another**, or **Keep looking**: Narratarr goes back to searching and never picks that release again. A new **Release found** notification says what was found and who wanted the book. Off by default. Suggested by aarsenca.
 - **Books already in Audiobookshelf count as yours.** Author pages and the Audible catalog mark books that are in your Audiobookshelf library with **In Audiobookshelf**, count them as in your library, and **Add all missing** leaves them out, even when Narratarr didn't download them. Suggested on the Discord.
