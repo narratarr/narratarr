@@ -28,7 +28,7 @@ log = logging.getLogger("narratarr.ratings")
 # design, so the same floor would blank its whole dataset and the provider would look broken while
 # behaving exactly as designed. Audnex publishes no count at all, so nothing applies to it.
 MIN_COUNT_BY_SOURCE = {"goodreads": MIN_COUNT, "bookmarks": 3}
-MIN_COUNT_DEFAULT = 3
+MIN_COUNT_DEFAULT = MIN_COUNT
 
 PRIOR_SCORE = 3.9       # the average a new book is treated as having, so few votes pull toward it
 PRIOR_WEIGHT = 1000     # how many real votes the prior is worth
@@ -150,8 +150,10 @@ def provider(settings=None):
     from .. import config
 
     s = settings if settings is not None else config.load()
-    name = str(getattr(s, "ratings_provider", "") or "")
-    if not name or not getattr(s, "ratings_enabled", True):
+    name = str(getattr(s, "ratings_provider", "audnex") or "audnex")
+    if not getattr(s, "ratings_enabled", True):
+        return None
+    if not name:
         return None
     if name == "bookmarks":
         from .bookmarks import BookmarksProvider

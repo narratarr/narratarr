@@ -84,6 +84,7 @@ class Settings:
     # On by default, and on for an existing settings file that predates the key: `load()` starts
     # from the dataclass defaults and only overwrites keys it finds, so an absent key means True.
     ratings_enabled: bool = True
+    ratings_provider: str = "audnex"
     # Audible storefronts Audnex serves, in the order they are tried. `br` is not here: the API
     # rejects it as an unsupported code, and a code that can only fail should not be offered.
     audnex_regions: list[str] = field(default_factory=lambda: ["uk"])
