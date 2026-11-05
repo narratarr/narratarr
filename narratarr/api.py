@@ -286,8 +286,10 @@ async def _discover_finish(data: dict, src, kind: str, sort: str) -> dict:
     # promise: the grab re-resolves, because a rule can change between showing a row and clicking it.
     settings = config.load()
     client_by_id = {e.id: e for e in downloaders.entries(settings)}
+    shelf = wanted.owned_index(await audiobookshelf.owned(settings)) if src.name in CATALOGS else (set(), {})
     for item in data["items"]:
         b, e = owned.get(item["url"]), owned.get(wanted.url_for(item["url"], "ebook"))
+        item["abs"] = bool(shelf[0] or shelf[1]) and not (b or e) and wanted.in_owned(item, shelf)
         item["source"] = src.name
         # Indexers rarely say what language a release is in; its name often does ("[German]", "Hörbuch").
         item["language"] = languages.name(item.get("language")) or (
@@ -565,6 +567,9 @@ class BookEdit(BaseModel):
     title: str | None = None
     author: str | None = None
     narrators: list[str] | None = None
+    series: str | None = None  # empty: not in a series
+    series_number: str | None = None
+    year: str | None = None
 
 
 def _tidy(text: str, limit: int) -> str:
@@ -574,7 +579,7 @@ def _tidy(text: str, limit: int) -> str:
 @app.patch("/api/library/{book_id}")
 async def edit_book(book_id: int, body: BookEdit):
     """Correct what Narratarr shows for a book. Its files and folder stay as they are."""
-    _get_or_404(book_id)
+    book = _get_or_404(book_id)
     changes: dict = {}
     if body.title is not None:
         changes["title"] = _tidy(body.title, 300)
@@ -584,9 +589,41 @@ async def edit_book(book_id: int, body: BookEdit):
         changes["author"] = _tidy(body.author, 300)
     if body.narrators is not None:
         changes["narrators"] = [n for n in (_tidy(x, 120) for x in body.narrators[:8]) if n]
+    if body.series is not None or body.series_number is not None:
+        old = (book.get("series") or [{}])[0] if book.get("series") else {}
+        name = _tidy(body.series if body.series is not None else old.get("title", ""), 200)
+        number = _tidy(body.series_number if body.series_number is not None else old.get("sequence", ""), 12)
+        if number and not re.fullmatch(r"\d+(\.\d+)?", number):
+            raise HTTPException(400, "The book's number in its series should be a number, like 3 or 2.5.")
+        # The series keeps Audible's ID while its name is unchanged, so following it still works.
+        changes["series"] = [{"asin": old.get("asin", "") if name == old.get("title") else "", "title": name,
+                              "sequence": number}] if name else []
+    if body.year is not None:
+        year = body.year.strip()
+        if year and not re.fullmatch(r"\d{4}", year):
+            raise HTTPException(400, "The year should be four digits, like 1965.")
+        released = book.get("released") or ""
+        changes["released"] = (released if released[:4] == year else year) if year else ""
     if changes:
         db.update(book_id, **changes)
     return db.get(book_id)
+
+
+@app.get("/api/library/{book_id}/audible-match")
+async def audible_match(book_id: int):
+    """What Audible has for this book, to fill the Edit details form with. Saves nothing."""
+    book = _get_or_404(book_id)
+    try:
+        b = await wanted.audible_match(book)
+    except audible.AudibleError as e:
+        raise HTTPException(502, str(e))
+    if not b:
+        raise HTTPException(404, "Audible doesn't have a book with exactly this title and author. "
+                                 "Check them, or fill in the details yourself.")
+    series = (b.get("series") or [{}])[0] if b.get("series") else {}
+    return {"asin": b["asin"], "title": b["title"], "author": b["author"], "narrators": b["narrators"],
+            "series": audible.series_name(series.get("title", "")), "series_number": series.get("sequence", ""),
+            "year": (b.get("released") or "")[:4]}
 
 
 @app.delete("/api/library/{book_id}")
@@ -984,6 +1021,26 @@ async def tidy_preview(body: TidyOptions):
     return await asyncio.to_thread(tidy.preview, config.load(), body.prefer, _busy())
 
 
+class FillDetails(BaseModel):
+    batch: int = 12
+
+
+@app.post("/api/tidy/fill-details")
+async def tidy_fill_details(body: FillDetails):
+    """Ask Audible for the series, narrators and year that library books are missing, a few at a time.
+    Call again until `remaining` is 0. Each book is asked once; only empty details are filled."""
+    todo = [b for b in db.list_books() if b["status"] == "completed" and wanted.missing_details(b)
+            and not b.get("details_checked")]
+    batch, filled = todo[:max(1, min(body.batch, 25))], 0
+    for b in batch:
+        try:
+            if await wanted.fill_from_audible(b):
+                filled += 1
+        except audible.AudibleError as e:
+            raise HTTPException(502, str(e))
+    return {"checked": len(batch), "filled": filled, "remaining": len(todo) - len(batch)}
+
+
 @app.get("/api/tidy/status")
 async def tidy_status():
     return await asyncio.to_thread(tidy.JOB.as_dict)
@@ -1095,16 +1152,19 @@ async def follow_detail(follow_id: int):
     try:
         if f["kind"] == "author":
             info = await audible.author(f["asin"])
-            found = await audible.author_books(f["asin"], f["name"])
+            found = await audible.tidy_series(await audible.author_books(f["asin"], f["name"]))
         else:
             info = {"description": ""}
             _, found = await audible.series_books(f["asin"])
     except audible.AudibleError as e:
         raise HTTPException(502, str(e))
     books = db.list_books()
+    # Books already in Audiobookshelf count as yours, even though Narratarr didn't fetch them.
+    shelf = wanted.owned_index(await audiobookshelf.owned(config.load()))
     for b in found:
         lib = wanted.in_library(b["asin"], b["title"], b["author"], books)
         b["library"] = {"id": lib["id"], "status": lib["status"]} if lib else None
+        b["abs"] = not lib and wanted.in_owned(b, shelf)
     return {**f, "known": len(f["known"]), "description": info.get("description", ""), "books": found,
             **wanted.follow_counts(f, books)}
 
@@ -1114,7 +1174,7 @@ async def want_all(follow_id: int, request: Request):
     _follows_allowed(request)
     f = _follow_or_404(follow_id)
     detail = await follow_detail(follow_id)
-    added = sum(1 for b in detail["books"] if not b["library"] and wanted.add_wanted(b))
+    added = sum(1 for b in detail["books"] if not b["library"] and not b.get("abs") and wanted.add_wanted(b))
     if added:
         _background(_auto_search_now())
     return {"added": added, "name": f["name"]}

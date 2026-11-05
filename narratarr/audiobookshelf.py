@@ -390,12 +390,44 @@ class Audiobookshelf:
                 results = data.get("results") or []
             except (ValueError, AttributeError):
                 raise AudiobookshelfError("That address answered, but not like Audiobookshelf does.")
-            found += [{"path": i.get("path") or "", "rel": i.get("relPath") or "", "missing": bool(i.get("isMissing"))}
-                      for i in results if isinstance(i, dict)]
+            found += [{"path": i.get("path") or "", "rel": i.get("relPath") or "", "missing": bool(i.get("isMissing")),
+                       **_book_of(i)} for i in results if isinstance(i, dict)]
             page += 1
             if not results or len(found) >= int(data.get("total") or 0):
                 break
         return found
+
+
+def _book_of(item: dict) -> dict:
+    """The title, author and ASIN Audiobookshelf has for a library item."""
+    meta = ((item.get("media") or {}).get("metadata") or {}) if isinstance(item.get("media"), dict) else {}
+    return {"title": str(meta.get("title") or ""), "author": str(meta.get("authorName") or ""),
+            "asin": str(meta.get("asin") or "")}
+
+
+OWNED_SECONDS = 600
+_owned: dict = {"key": None, "at": 0.0, "books": []}
+
+
+async def owned(settings) -> list[dict]:
+    """The books in the connected Audiobookshelf library, as {title, author, asin}. Kept for ten minutes,
+    so pages that check it stay quick. Nothing, rather than an error, when it can't be reached."""
+    import time
+
+    url, token, library = settings.audiobookshelf_url, settings.audiobookshelf_token, settings.audiobookshelf_library_id
+    if not (url and token and library):
+        return []
+    key = (url, library)
+    if _owned["key"] == key and time.time() - _owned["at"] < OWNED_SECONDS:
+        return _owned["books"]
+    try:
+        async with Audiobookshelf(url, token) as server:
+            books = [i for i in await server.items(library) if not i["missing"] and i["title"]]
+    except AudiobookshelfError as e:
+        log.info("Couldn't read the Audiobookshelf library: %s", e)
+        return _owned["books"] if _owned["key"] == key else []
+    _owned.update(key=key, at=time.time(), books=books)
+    return books
 
 
 def _parts(path: str) -> tuple[str, ...]:

@@ -261,6 +261,53 @@ async def author_books(asin: str, name: str, client=None, pages: int = 4) -> lis
     return _keep(found, r)
 
 
+_EDITION_NOTE = re.compile(r"\s*[(\[]\s*(un)?abridged(\s+edition)?\s*[)\]]\s*$", re.I)
+
+
+def series_name(title: str) -> str:
+    """'Emperor (abridged)' is the same series as 'Emperor'."""
+    return _EDITION_NOTE.sub("", title or "").strip() or (title or "")
+
+
+async def series_members(asin: str, client=None) -> dict[str, str]:
+    """The books a series lists as its own, {asin: number in the series}."""
+    data = await _get(f"{api_base()}/products/{asin}", {"response_groups": "relationships"}, client) or {}
+    return {
+        rel["asin"]: str(rel.get("sequence") or "")
+        for rel in (data.get("product") or {}).get("relationships") or []
+        if rel.get("relationship_to_product") == "child" and rel.get("asin")
+    }
+
+
+async def tidy_series(books: list[dict], client=None, most: int = 12) -> list[dict]:
+    """An author's books, grouped the way a reader expects.
+
+    Audible keeps an abridged edition in a series of its own ("Emperor (abridged)"), and a book's own
+    record sometimes leaves out the series it belongs to even though the series lists it. So: series
+    names lose their edition note, a book with no series is placed in the series that lists it, and an
+    abridged edition is dropped when the unabridged one is there too."""
+    titles = {s["asin"]: series_name(s["title"]) for b in books for s in b["series"] if s.get("asin")}
+    asins = list(titles)[:most]
+    found = await asyncio.gather(*(series_members(a, client) for a in asins), return_exceptions=True)
+    for sasin, members in zip(asins, found):
+        if isinstance(members, BaseException):
+            continue
+        for b in books:
+            if not b["series"] and b["asin"] in members:
+                b["series"] = [{"asin": sasin, "title": titles[sasin], "sequence": members[b["asin"]]}]
+    for b in books:
+        b["series"] = [{**s, "title": series_name(s["title"])} for s in b["series"]]
+
+    def key(b: dict) -> tuple:
+        s = b["series"][0] if b["series"] else None
+        if s and s.get("sequence"):
+            return ("series", s["title"].lower(), s["sequence"])
+        return ("title", re.sub(r"\W+", " ", edition_free(b["title"]).lower()).strip())
+
+    whole = {key(b) for b in books if not b.get("abridged")}
+    return [b for b in books if not (b.get("abridged") and key(b) in whole)]
+
+
 async def series_books(asin: str, client=None) -> tuple[str, list[dict]]:
     """A series' name and its books, in reading order."""
     params = {"response_groups": "relationships,product_desc,product_attrs"}

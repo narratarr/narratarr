@@ -237,6 +237,45 @@ async def auto_search() -> int:
     return grabbed
 
 
+# ---- filling in a library book's details from Audible -------------------------
+
+
+async def audible_match(book: dict) -> dict | None:
+    """Audible's record of this book: by its ASIN when it has one, else the search result whose title
+    and author both match. Nothing at all rather than a near miss: a wrong series is worse than none."""
+    if book.get("asin"):
+        return await audible.book(book["asin"], r=audible.region_from_url(book.get("source_url") or "") or None)
+    title, author = main_title(book.get("title") or ""), first_author(book.get("author") or "")
+    if not title or not author:
+        return None
+    found, _ = await audible.search_books(f"{title} {author}")
+    return next((b for b in found if _titles_match(b["title"], b["author"], book["title"], book["author"])), None)
+
+
+def missing_details(book: dict) -> bool:
+    return not (book.get("series") and book.get("narrators") and book.get("released"))
+
+
+async def fill_from_audible(book: dict) -> list[str]:
+    """Fill only what the book is missing (series, narrators, year, ASIN) from Audible. Returns what changed."""
+    db.update(book["id"], details_checked=time.time())
+    match = await audible_match(book)
+    if not match:
+        return []
+    changes: dict = {}
+    if not book.get("series") and match.get("series"):
+        changes["series"] = [{**s, "title": audible.series_name(s["title"])} for s in match["series"][:1]]
+    if not book.get("narrators") and match.get("narrators"):
+        changes["narrators"] = match["narrators"][:4]
+    if not book.get("released") and match.get("released"):
+        changes["released"] = match["released"]
+    if not book.get("asin") and match.get("asin"):
+        changes["asin"] = match["asin"]
+    if changes:
+        db.update(book["id"], **changes)
+    return list(changes)
+
+
 # ---- library helpers ----------------------------------------------------------
 
 
@@ -257,6 +296,23 @@ def in_library(asin: str, title: str, author: str, books: list[dict] | None = No
                                    or _titles_match(title, author, b["title"], b["author"])):
             return b
     return None
+
+
+def owned_index(owned: list[dict]) -> tuple[set, dict]:
+    """Books from somewhere else (Audiobookshelf), indexed so matching an author's whole list is quick."""
+    by_asin = {o["asin"] for o in owned if o.get("asin")}
+    by_author: dict[str, list[dict]] = {}
+    for o in owned:
+        by_author.setdefault(normalize(first_author(o["author"])), []).append(o)
+    return by_asin, by_author
+
+
+def in_owned(b: dict, index: tuple[set, dict]) -> bool:
+    by_asin, by_author = index
+    if b.get("asin") and b["asin"] in by_asin:
+        return True
+    return any(_titles_match(b["title"], b["author"], o["title"], o["author"])
+               for o in by_author.get(normalize(first_author(b.get("author") or "")), []))
 
 
 # The same book in its other format shares a folder with it, so this is stricter than in_library:

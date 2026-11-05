@@ -502,6 +502,9 @@ img { display: block; }
 .meta-edit h4 { margin: 0; font: 500 18px var(--serif); }
 .meta-edit .hint, .meta-edit .cta { margin: 0; }
 .meta-edit > p.hint { font-size: 12.5px; line-height: 1.5; color: var(--text-3); }
+.meta-edit .me-row { display: grid; grid-template-columns: minmax(0, 1fr) 76px 86px; gap: 10px; }
+.meta-edit .cta { flex-wrap: wrap; }
+@media (max-width: 420px) { .meta-edit .me-row { grid-template-columns: 1fr 1fr; } .meta-edit .me-row > :first-child { grid-column: 1 / -1; } }
 .pin-card { padding: 16px 18px; border-radius: 16px; background: var(--surface-2); }
 .pin-start { display: flex; align-items: center; justify-content: space-between; gap: 14px 16px; flex-wrap: wrap; }
 .pin-start > div:first-child { flex: 1 1 260px; display: grid; gap: 4px; }

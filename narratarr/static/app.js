@@ -344,9 +344,9 @@ function cardHTML(item, lib, i = 0) {
     <article class="card" tabindex="0" data-url="${esc(item.url)}" ${lib ? `data-id="${lib.id}"` : ""} style="--glow:hsl(${h} 80% 55%);animation-delay:${Math.min(i, 12) * 35}ms">
       <div class="cover-wrap">
         ${coverHTML(item)}
-        ${stBadge(lib)}
+        ${!lib && item.abs ? `<span class="st-badge ok">${I.check}In Audiobookshelf</span>` : stBadge(lib)}
         ${active ? `<div class="bar"><i style="width:${lib.progress || 0}%"></i></div>` : ""}
-        ${quickButton(item, lib)}
+        ${!lib && item.abs ? "" : quickButton(item, lib)}
       </div>
       <div class="meta">
         <div class="title">${esc(item.title)}</div>
@@ -1796,10 +1796,11 @@ function AuthorDetail(root, id) {
     if (!data) return;
     const books = data.books.map((b) => ({ ...b, source: "audible", posted: b.released }));
     const have = books.filter((b) => libFor(b));
-    const missing = books.length - have.length;
+    const onShelf = books.filter((b) => !libFor(b) && b.abs).length;  // already in Audiobookshelf
+    const missing = books.length - have.length - onShelf;
     const mine = [...new Map(have.map((b) => [libFor(b).id, libFor(b)])).values()];  // one per library book
     $("#a-stats", root).innerHTML = [
-      ["ok", mine.filter((b) => b.status === "completed").length, "In your library"],
+      ["ok", mine.filter((b) => b.status === "completed").length + onShelf, "In your library"],
       ["info", mine.filter((b) => b.status !== "completed").length, "Wanted or downloading"],
       ["", missing, "Not added yet"],
     ].map(([tone, n, l]) => `<div class="hstat ${tone}"><b>${n}</b><span>${l}</span></div>`).join("");
@@ -1818,13 +1819,13 @@ function AuthorDetail(root, id) {
     const ordered = [...groups.entries()].sort(([a], [b]) => (a === "") - (b === ""));
     $("#a-books", root).innerHTML = books.length ? ordered.map(([name, list]) => {
       if (name) list.sort((a, b) => seq(a) - seq(b));
-      const owned = list.filter((b) => libFor(b)?.status === "completed").length;
-      const notYet = list.filter((b) => !libFor(b)).length;
+      const owned = list.filter((b) => libFor(b)?.status === "completed" || (!libFor(b) && b.abs)).length;
+      const notYet = list.filter((b) => !libFor(b) && !b.abs).length;
       return `
       <section class="book-group">
         <div class="section-head"><h2>${esc(name || (groups.size > 1 ? "Standalones and others" : "Books"))}</h2>
           <span class="muted">${owned} of ${list.length} in your library${notYet ? ` · ${notYet} not added yet` : ""}</span></div>
-        <div class="grid">${list.map((b, i) => cardHTML(b, libFor(b), i).replace('class="card"', `class="card${libFor(b) ? "" : " missing"}"`)).join("")}</div>
+        <div class="grid">${list.map((b, i) => cardHTML(b, libFor(b), i).replace('class="card"', `class="card${libFor(b) || b.abs ? "" : " missing"}"`)).join("")}</div>
       </section>`;
     }).join("") : `<div class="empty"><h3>No books yet</h3><p>Audible doesn't list any books here yet.</p></div>`;
     root._books = books;
@@ -2238,9 +2239,11 @@ function Settings(root, page) {
           <div><h3>Tidy your library</h3><p class="desc">Move the books already in your library into this layout, using their details from Audible or their own tags. You see every change first, and can undo it.</p></div>
           <div class="tidy-btns">
             <button class="btn ghost" type="button" id="tidy-undo" hidden>${I.retry} Undo last tidy</button>
+            <button class="btn" type="button" id="tidy-fill">${I.search} Fill in missing details</button>
             <button class="btn primary" type="button" id="tidy-open">Preview changes</button>
           </div>
         </div>
+        <div class="body"><span class="hint" id="tidy-fill-note">Books whose tags don’t say their series, narrator or year come out as singles. <b>Fill in missing details</b> asks Audible for them, book by book, and only takes a book whose title and author match exactly. Nothing is moved or overwritten. Fix any single book with Edit details.</span></div>
         <div class="body" id="tidy-gate" hidden><span class="hint">${I.alert} Save your library folder and layout first, so the preview uses them.</span></div>
       </section>
 
@@ -3270,6 +3273,26 @@ function Settings(root, page) {
     if (btn) btn.hidden = !job.undo;
   }).catch(() => {});
   $("#tidy-open", root).onclick = () => openTidy({ onClose: tidyUndoState });
+  $("#tidy-fill", root).onclick = async (e) => {
+    const btn = e.currentTarget, note = $("#tidy-fill-note", root);
+    spinBtn(btn, true);
+    let checked = 0, filled = 0;
+    try {
+      for (;;) {
+        const r = await api("/api/tidy/fill-details", { method: "POST", body: { batch: 12 } });
+        checked += r.checked; filled += r.filled;
+        note.textContent = r.remaining ? `Asked Audible about ${checked} books, filled in ${filled}. ${r.remaining} to go…` : "";
+        if (!r.remaining || !root.isConnected) break;
+      }
+      note.innerHTML = checked
+        ? `Asked Audible about ${checked} book${checked === 1 ? "" : "s"} and filled in details for ${filled}. Press <b>Preview changes</b> to see the new folder names.`
+        : "Every book already has its series, narrator and year, or Audible has been asked about it before.";
+      await refreshLibrary();
+    } catch (err) {
+      toast(err.message, { kind: "err" });
+    }
+    spinBtn(btn, false);
+  };
   $("#tidy-undo", root).onclick = async (e) => {
     const ok = await modal({ title: "Undo the last tidy?", body: "Every folder it moved goes back where it was. Any covers, descriptions and tags it added stay.", confirm: "Undo" });
     if (!ok) return;
@@ -4149,19 +4172,43 @@ function editDetails(lib) {
   const head = $("#meta-head", drawer);
   if (!lib || !head || $("#meta-edit", head)) return;
   const shown = head.innerHTML;
+  const ser = (lib.series || [])[0] || {};
   head.innerHTML = `<form class="meta-edit" id="meta-edit" autocomplete="off">
       <h4>Edit details</h4>
       <div class="field"><label for="me-title">Title</label><input class="input" id="me-title" name="title" value="${esc(lib.title)}" required /></div>
       <div class="field"><label for="me-author">Author</label><input class="input" id="me-author" name="author" value="${esc(lib.author || "")}" /></div>
       <div class="field"><label for="me-narrators">Narrated by</label><input class="input" id="me-narrators" name="narrators" value="${esc((lib.narrators || []).join(", "))}" />
         <span class="hint">Separate several names with commas.</span></div>
-      <p class="hint">This changes what Narratarr shows, and how it matches authors you follow. Your files and folders stay as they are.</p>
-      <div class="cta"><button class="btn primary" type="submit">Save</button><button class="btn ghost" type="button" data-cancel>Cancel</button></div>
+      <div class="me-row">
+        <div class="field"><label for="me-series">Series</label><input class="input" id="me-series" name="series" value="${esc(ser.title || "")}" placeholder="Not in a series" /></div>
+        <div class="field me-num"><label for="me-number">Book</label><input class="input" id="me-number" name="series_number" inputmode="decimal" value="${esc(ser.sequence || "")}" placeholder="1" /></div>
+        <div class="field me-num"><label for="me-year">Year</label><input class="input" id="me-year" name="year" inputmode="numeric" maxlength="4" value="${esc((lib.released || "").slice(0, 4))}" placeholder="1965" /></div>
+      </div>
+      <p class="hint">This changes what Narratarr shows, how it matches authors you follow, and the folder name Tidy library gives the book. Your files and folders stay as they are until you tidy.</p>
+      <div class="cta"><button class="btn primary" type="submit">Save</button><button class="btn" type="button" data-audible>${I.search} Fill in from Audible</button><button class="btn ghost" type="button" data-cancel>Cancel</button></div>
     </form>`;
   const form = $("#meta-edit", head);
   const f = form.elements;
   f.title.focus();
   $("[data-cancel]", form).onclick = () => { head.innerHTML = shown; };
+  // Audible's record of the book fills the empty fields, for you to check before saving.
+  $("[data-audible]", form).onclick = async (e) => {
+    const btn = e.currentTarget;
+    spinBtn(btn, true);
+    try {
+      const a = await api(`/api/library/${lib.id}/audible-match`);
+      const filled = [];
+      const put = (name, value) => { if (value && !f[name].value.trim()) { f[name].value = value; filled.push(name); } };
+      put("narrators", (a.narrators || []).join(", "));
+      put("series", a.series);
+      put("series_number", a.series_number);
+      put("year", a.year);
+      toast(filled.length ? "Filled in from Audible. Check them, then save." : "Audible has nothing these fields are missing.", { kind: "ok" });
+    } catch (err) {
+      toast(err.message, { kind: "err" });
+    }
+    spinBtn(btn, false);
+  };
   form.onsubmit = async (e) => {
     e.preventDefault();
     const btn = $('[type="submit"]', form);
@@ -4171,6 +4218,9 @@ function editDetails(lib) {
         title: f.title.value,
         author: f.author.value,
         narrators: f.narrators.value.split(/[,;]/).map((n) => n.trim()).filter(Boolean),
+        series: f.series.value,
+        series_number: f.series_number.value,
+        year: f.year.value,
       };
       const saved = await api(`/api/library/${lib.id}`, { method: "PATCH", body });
       await refreshLibrary();

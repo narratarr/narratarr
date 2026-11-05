@@ -72,7 +72,8 @@ MIGRATIONS = {
     "requested_by": "INTEGER",  # the user who added it, when known
     "kind": "TEXT NOT NULL DEFAULT 'audiobook'",
     "found_by_search": "INTEGER NOT NULL DEFAULT 0",  # the release awaiting approval was picked by a search, not a person
-    "skipped_releases": "TEXT NOT NULL DEFAULT '[]'",  # releases an admin turned down for this book; never picked again  # or "ebook"; a book wanted in both formats is two rows
+    "skipped_releases": "TEXT NOT NULL DEFAULT '[]'",
+    "details_checked": "REAL",  # when Audible was last asked for this book's missing details  # releases an admin turned down for this book; never picked again  # or "ebook"; a book wanted in both formats is two rows
 }
 
 KINDS = ("audiobook", "ebook")
