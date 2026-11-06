@@ -372,6 +372,13 @@ async def library():
     for b in books:
         b["companion_id"] = pairs[b["id"]]["id"] if b["id"] in pairs else None  # the same book in its other format
         b["requested_by_name"] = names.get(b.get("requested_by"), "")
+    # The same rating the card would show on Discover. Read from the cache only, so a slow provider
+    # never holds up the library; anything missing is filled in the background and appears next time.
+    _provider = ratings.provider()
+    if _provider is not None:
+        ratings.ensure_filler()
+    for b in books:
+        ratings.enrich(b, provider_obj=_provider)
     return books
 
 
@@ -861,6 +868,18 @@ async def save_progress(book_id: int, body: Progress, request: Request):
 # ---- wanted: releases ---------------------------------------------------------
 
 
+def _is_failed_release(item: dict, book: dict) -> bool:
+    if book.get("status") != "failed":
+        return False
+    url = book.get("release_url") or ""
+    ih = (book.get("info_hash") or "").strip().lower()
+    if url and item.get("url") == url:
+        return True
+    if ih and (item.get("info_hash") or "").strip().lower() == ih:
+        return True
+    return False
+
+
 @app.get("/api/library/{book_id}/releases")
 async def releases(book_id: int):
     book = _get_or_404(book_id)
@@ -869,6 +888,13 @@ async def releases(book_id: int):
     except ProwlarrError as e:
         raise HTTPException(502, str(e))
     db.update(book_id, last_searched=time.time())
+    for item in found:
+        if _is_failed_release(item, book):
+            item["failed"] = True
+            item["failed_reason"] = book.get("error") or ""
+        else:
+            item["failed"] = False
+            item["failed_reason"] = ""
     return {"items": found[:60], "auto_match": wanted.AUTO_MATCH}
 
 

@@ -23,6 +23,13 @@ from .store import Store
 
 log = logging.getLogger("narratarr.ratings")
 
+# The vote floor has to match what each source's number counts. Goodreads publishes reader votes in
+# the millions, so twelve of them is noise. Bookmarks publishes critic reviews, single digits by
+# design, so the same floor would blank its whole dataset and the provider would look broken while
+# behaving exactly as designed. Audnex publishes no count at all, so nothing applies to it.
+MIN_COUNT_BY_SOURCE = {"goodreads": MIN_COUNT, "bookmarks": 3}
+MIN_COUNT_DEFAULT = MIN_COUNT
+
 PRIOR_SCORE = 3.9       # the average a new book is treated as having, so few votes pull toward it
 PRIOR_WEIGHT = 1000     # how many real votes the prior is worth
 UNKNOWN_COUNT_WEIGHT = 100  # what a rating with no count is worth: real, but weak evidence
@@ -106,7 +113,8 @@ def make_rating(score, count, url: str, source: str, label: str = "", tooltip: s
             count = int(count)
         except (TypeError, ValueError):
             count = None
-    if count is not None and count < MIN_COUNT:
+    floor = MIN_COUNT_BY_SOURCE.get(source, MIN_COUNT_DEFAULT)
+    if count is not None and count < floor:
         return None
     source_label = {"audnex": "Audible"}.get(source, source)
     if tooltip:
@@ -127,17 +135,30 @@ def make_rating(score, count, url: str, source: str, label: str = "", tooltip: s
     )
 
 
-def provider(settings=None):
-    """The provider, or None when ratings are switched off.
+def available() -> dict[str, str]:
+    """The provider keys Settings offers. Goodreads is absent on purpose: it was written, never
+    shipped, and its terms forbid collecting listings with extraction tools."""
+    return {"audnex": "Audible (Audnex)", "bookmarks": "Bookmarks", "": "Off"}
 
-    One provider ships, so there is nothing to choose between: the setting is on or off. Off means
-    no object, no queue and no request, which is the point of the switch rather than a blank card.
+
+def provider(settings=None):
+    """The provider this instance is set to, or None when ratings are off.
+
+    Off means no object, no queue and no request, which is the point of the switch rather than a
+    blank card.
     """
     from .. import config
 
     s = settings if settings is not None else config.load()
+    name = str(getattr(s, "ratings_provider", "audnex") or "audnex")
     if not getattr(s, "ratings_enabled", True):
         return None
+    if not name:
+        return None
+    if name == "bookmarks":
+        from .bookmarks import BookmarksProvider
+
+        return BookmarksProvider(get_store(s))
     from .audnex import AudnexProvider
 
     return AudnexProvider(get_store(s))

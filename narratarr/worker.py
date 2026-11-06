@@ -330,6 +330,57 @@ class Worker:
         self.running[book_id] = task
         task.add_done_callback(lambda _: (self.running.pop(book_id, None), self.stops.pop(book_id, None), self.poke()))
 
+    async def _retry_with_next(self, book_id: int, orig_error: str) -> bool:
+        book = db.get(book_id)
+        if not book or book.get("source") == "local":
+            return False
+        # Only retry releases that came from an indexer (have a release URL or info hash to exclude)
+        if not (book.get("release_url") or book.get("info_hash")):
+            return False
+        # Avoid infinite loops: if we already retried once (error contains retried marker), don't loop again
+        if "retried with" in (book.get("error") or ""):
+            return False
+        try:
+            found = await wanted.find_releases(book)
+        except Exception as e:
+            log.info("Auto-retry: couldn't search for alternatives for book %s: %s", book_id, e)
+            return False
+        # Annotate failed so best() can skip it (same logic as api.py)
+        for item in found:
+            if item.get("url") == (book.get("release_url") or "") or (
+                book.get("info_hash") and (item.get("info_hash") or "").strip().lower() == book.get("info_hash").strip().lower()
+            ):
+                item["failed"] = True
+                item["failed_reason"] = orig_error
+        pick = wanted.best(found, exclude={"release_url": book.get("release_url"), "info_hash": book.get("info_hash")})
+        if not pick:
+            log.info("Auto-retry: no alternative releases for book %s", book_id)
+            return False
+        log.info("Auto-retrying book %s with next best release %s (previous failed: %s)", book_id, pick.get("release") or pick.get("title"), orig_error)
+        try:
+            await wanted.grab(book_id, pick["url"], pick["source"], "queued")
+        except Exception as e:
+            log.warning("Auto-retry grab failed for book %s: %s", book_id, e)
+            return False
+        # Try the new release once; if it also fails we record both errors, if it succeeds we're done
+        try:
+            await self.process(book_id)
+        except (RealDebridError, AllDebridError, TorBoxError, PremiumizeError, ClientError, ProwlarrError, httpx.HTTPError, ValueError, OSError, zipfile.BadZipFile) as e2:
+            second = readable_error(e2)
+            log.warning("Book %s retry failed: %s", book_id, second)
+            db.update(book_id, status="failed", error=f"{orig_error} (retried with {pick.get('release') or pick.get('title') or pick.get('url')} but failed: {second})", speed=0, detail="")
+            if (failed := db.get(book_id)):
+                notify.emit("failed", failed, error=failed["error"])
+            return True
+        except Exception as e2:
+            log.exception("Book %s retry crashed", book_id)
+            db.update(book_id, status="failed", error=f"{orig_error} (retried but crashed: Unexpected error: {e2})", speed=0, detail="")
+            if (failed := db.get(book_id)):
+                notify.emit("failed", failed, error=failed["error"])
+            return True
+        else:
+            return True
+
     async def _run(self, book_id: int) -> None:
         book = db.get(book_id)
         # Imports aren't downloads, and a download picking up again after a restart already said so.
@@ -343,11 +394,17 @@ class Worker:
         except (
             RealDebridError, AllDebridError, TorBoxError, PremiumizeError, ClientError, ProwlarrError, httpx.HTTPError, ValueError, OSError, zipfile.BadZipFile
         ) as e:
-            log.warning("Book %s failed: %s", book_id, readable_error(e))
-            db.update(book_id, status="failed", error=readable_error(e), speed=0, detail="")
+            err = readable_error(e)
+            log.warning("Book %s failed: %s", book_id, err)
+            if await self._retry_with_next(book_id, err):
+                return
+            db.update(book_id, status="failed", error=err, speed=0, detail="")
         except Exception as e:
+            err = f"Unexpected error: {e}"
             log.exception("Book %s crashed", book_id)
-            db.update(book_id, status="failed", error=f"Unexpected error: {e}", speed=0, detail="")
+            if await self._retry_with_next(book_id, err):
+                return
+            db.update(book_id, status="failed", error=err, speed=0, detail="")
         else:
             return
         if announce and (failed := db.get(book_id)):

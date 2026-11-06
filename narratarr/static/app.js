@@ -907,6 +907,7 @@ function libCardHTML(b, i) {
         <div class="title">${esc(b.title)}</div>
         <div class="author">${esc(b.author || "Unknown author")}</div>
         <div class="facts ${b.status === "failed" ? "bad" : ""}">${facts.filter(Boolean).map((f) => `<span>${esc(f)}</span>`).join("")}</div>
+        ${ratingPillHTML(b)}
       </div>
     </article>`;
 }
@@ -2483,8 +2484,13 @@ function Settings(root, page) {
         <div class="ph"><h3>Rating metadata</h3><p class="desc">The star pill on every Discover card. Ratings are read from a local cache, never fetched while a page loads: a book with no rating yet is filled in the background and appears on your next search.</p></div>
         <div class="body">
           <div class="field">
-            <label class="switch"><input type="checkbox" name="ratings_enabled" ${s.ratings_enabled ? "checked" : ""}><i></i>Show ratings on book cards</label>
-            <span class="hint">A star score from Audible’s own average, for any book they sell. Ratings are read from a local cache, never fetched while a page loads, so a new book fills in the background and shows next time. Switching this off removes the pill from every card and makes no network requests at all.</span>
+            <label for="ratings_provider"><b>Where ratings come from</b></label>
+            <select class="select" id="ratings_provider" name="ratings_provider">
+              <option value="audnex" ${s.ratings_provider === "audnex" ? "selected" : ""}>Audible (Audnex)</option>
+              <option value="bookmarks" ${s.ratings_provider === "bookmarks" ? "selected" : ""}>Bookmarks${s.bookmarks_available ? "" : " — no dataset found"}</option>
+              <option value="" ${!s.ratings_provider ? "selected" : ""}>Off</option>
+            </select>
+            <span class="hint">Audible gives a star average for any book it sells, with a storefront list below because a book only answers in the country that sells it. Bookmarks uses a local critic consensus file instead, on its own 0-4 scale, and needs no network at all. Off removes the pill from every card and makes no requests.</span>
           </div>
           <div class="set-row">
             <label><b>Audible storefronts</b><small>A book is only sold in some countries, and the ratings service only answers from a country that sells it. Narratarr asks your list in order, then the country the book itself came from, so the single United Kingdom entry is enough for most titles. The storefront that answered is remembered for that book. Add more only if the same cards keep showing <b>No Rating</b>: more regions means more coverage and more requests.</small></label>
@@ -4141,9 +4147,11 @@ function releasesHTML(res) {
       const quality = r.match >= res.auto_match ? "good" : r.match >= 75 ? "ok" : "weak";
       const facts = [label(r), r.protocol === "usenet" ? "Usenet" : r.protocol === "torrent" ? "Torrent" : "Direct",
         r.format, r.size, r.language, r.seeders != null ? `${r.seeders} seeder${r.seeders === 1 ? "" : "s"}` : "", r.posted].filter(Boolean);
-      return `<div class="rel ${r.language_ok === false ? "other-lang" : ""}" ${r.language_ok === false ? 'title="Not in your languages: automatic search skips it, but you can still grab it"' : ""}>
+      const failedBadge = r.failed ? `<span class="rel-failed" title="${esc(r.failed_reason || "This release failed previously")}">Failed</span>` : "";
+      const failedCls = r.failed ? " failed" : "";
+      return `<div class="rel${failedCls} ${r.language_ok === false ? "other-lang" : ""}" ${r.language_ok === false ? 'title="Not in your languages: automatic search skips it, but you can still grab it"' : ""}>
         <div class="rel-main"><b title="${esc(r.release || r.title)}">${esc(r.release || r.title)}</b>
-          <small>${facts.map(esc).join(" · ")}</small></div>
+          <small>${facts.map(esc).join(" · ")}</small>${failedBadge}</div>
         <span class="match ${quality}" title="How closely it matches the title and author">${r.match}%</span>
         <button class="btn sm" data-grab="${i}" ${r.usable ? "" : `disabled title="Set up a download client for ${r.protocol === "usenet" ? "Usenet" : "torrents"} first"`}>Grab</button>
       </div>`;
