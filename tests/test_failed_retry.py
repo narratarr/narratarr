@@ -1,169 +1,239 @@
-"""Failed downloads: annotation, filtering, and auto-retry."""
-import httpx
+"""Failed downloads (PR #15, curator8888): a release that fails is remembered and marked, and another
+release of the book is tried, the way Sonarr and Radarr do. Plus ratings on Library cards (PR #14)."""
+
 import pytest
-from narratarr import config, db, wanted, worker
-from narratarr.downloaders import ClientError
+from fastapi.testclient import TestClient
+
+from narratarr import api, config, db, ratings, wanted
+from narratarr.downloaders import ClientError, Job, bad_release, is_bad_release
 from narratarr.worker import Worker
 
-HASH1 = "a" * 40
-HASH2 = "b" * 40
+HASH1, HASH2, HASH3 = "a" * 40, "b" * 40, "c" * 40
 
-PROWLARR = "http://prowlarr:9696"
 
-def make_failed_book(**overrides):
-    base = {
-        "source": "prowlarr",
-        "source_url": "https://n.example/book",
-        "title": "Dune",
-        "author": "Frank Herbert",
-        "status": "failed",
-        "release_url": "https://n.example/1",
-        "info_hash": HASH1,
-        "error": "qBittorrent reports a problem",
-        "format": "M4B",
-    }
-    return db.insert({**base, **overrides})
+def rel(n: int, info_hash: str, match: int = 90) -> dict:
+    return {"url": f"https://n.example/{n}", "info_hash": info_hash, "usable": True, "language_ok": True,
+            "match": match, "seeders": 5, "release": f"Dune {n}", "title": "Dune", "source": "prowlarr",
+            "protocol": "torrent"}
 
-def fake_find_releases(monkeypatch, releases):
-    async def _find(book):
-        return releases
-    monkeypatch.setattr(wanted, "find_releases", _find)
 
-def test_best_skips_failed_and_excluded():
-    found = [
-        {"url": "https://n.example/1", "info_hash": HASH1, "usable": True, "language_ok": True, "match": 90, "seeders": 5},
-        {"url": "https://n.example/2", "info_hash": HASH2, "usable": True, "language_ok": True, "match": 88, "seeders": 3},
-    ]
-    assert wanted.best(found)["url"] == "https://n.example/1"
-    # failed flag
-    found[0]["failed"] = True
-    assert wanted.best(found)["url"] == "https://n.example/2"
-    found[0]["failed"] = False
-    # exclude via url
-    assert wanted.best(found, exclude={"release_url": "https://n.example/1"})["url"] == "https://n.example/2"
-    # exclude via info_hash case-insensitive
-    assert wanted.best(found, exclude={"info_hash": HASH1.upper()})["url"] == "https://n.example/2"
+@pytest.fixture
+def client():
+    with TestClient(api.app) as c:
+        c.app.state.worker.poke = lambda: None
+        yield c
 
-def test_api_annotates_failed_release(isolated_data, monkeypatch):
-    from fastapi.testclient import TestClient
-    from narratarr import api
-    from narratarr.sources.prowlarr import Prowlarr
 
-    # fake Prowlarr releases
-    releases = [
-        {"guid": "https://n.example/1", "title": "Dune M4B", "infoHash": HASH1, "protocol": "torrent", "indexer": "I", "downloadUrl": f"{PROWLARR}/dl/1", "size": 100},
-        {"guid": "https://n.example/2", "title": "Dune M4B alt", "infoHash": HASH2, "protocol": "torrent", "indexer": "I", "downloadUrl": f"{PROWLARR}/dl/2", "size": 100},
-    ]
-    # also need to mock find_releases directly to avoid real HTTP
-    fake_releases = [
-        {"url": "https://n.example/1", "info_hash": HASH1, "usable": True, "language_ok": True, "match": 90, "seeders": 5, "release": "Dune", "title": "Dune", "source": "prowlarr", "protocol": "torrent", "format": "M4B", "size": "1GB", "language": "English", "indexer": "I", "posted": ""},
-        {"url": "https://n.example/2", "info_hash": HASH2, "usable": True, "language_ok": True, "match": 88, "seeders": 3, "release": "Dune alt", "title": "Dune", "source": "prowlarr", "protocol": "torrent", "format": "M4B", "size": "1GB", "language": "English", "indexer": "I", "posted": ""},
-    ]
-    fake_find_releases(monkeypatch, fake_releases)
-    config.update({"prowlarr_url": PROWLARR, "prowlarr_api_key": "K", "qbittorrent_url": "http://qb:8080"})
+@pytest.fixture
+def indexer(monkeypatch):
+    """What a search finds, and every release grabbed (wanted.grab without asking the indexer for details)."""
+    found, grabbed = [], []
 
-    book = make_failed_book()
-    client = TestClient(api.app, client=("192.168.1.20", 50000))
-    client.__enter__()
-    # bypass auth
-    from narratarr import auth
-    monkeypatch.setattr(auth, "current_user", lambda r: {"id": 1, "username": "admin", "role": "admin"})
-    # need to re-enter after monkeypatch? Use direct call via api.releases
-    import asyncio
-    async def run():
-        from narratarr.api import releases
-        # mock _get_or_404 via db
-        res = await releases(book["id"])
-        assert res["items"][0]["failed"] is True
-        assert res["items"][0]["failed_reason"] == "qBittorrent reports a problem"
-        assert res["items"][1]["failed"] is False
-        # info_hash match also
-        # second release with same info_hash as failed should also be marked
-        fake_releases[1]["info_hash"] = HASH1
-        res2 = await releases(book["id"])
-        assert res2["items"][1]["failed"] is True
-    asyncio.run(run())
-    client.__exit__(None, None, None)
+    async def find(book):
+        return [dict(r) for r in found]
 
-@pytest.mark.asyncio
-async def test_worker_retries_with_next_best(isolated_data, monkeypatch):
-    """Worker retries failed download with next best release, single retry."""
-    from narratarr.downloaders import ClientError
-
-    # Two releases
-    r1 = {"url": "https://n.example/1", "info_hash": HASH1, "usable": True, "language_ok": True, "match": 90, "seeders": 5, "release": "Dune 1", "title": "Dune", "source": "prowlarr", "protocol": "torrent", "format": "M4B"}
-    r2 = {"url": "https://n.example/2", "info_hash": HASH2, "usable": True, "language_ok": True, "match": 88, "seeders": 3, "release": "Dune 2", "title": "Dune", "source": "prowlarr", "protocol": "torrent", "format": "M4B"}
-
-    # Book initially grabbed r1, now queued
-    book = db.insert({"source": "prowlarr", "source_url": "https://n.example/book", "title": "Dune", "author": "Frank Herbert", "status": "queued", "release_url": r1["url"], "info_hash": HASH1, "download_url": f"{PROWLARR}/dl/1", "protocol": "torrent", "indexer": "I"})
-
-    # Mock find_releases to return both, with r1 marked failed after we annotate
-    async def fake_find(book_dict):
-        # return copies
-        return [dict(r1), dict(r2)]
-    monkeypatch.setattr(wanted, "find_releases", fake_find)
-
-    # Mock wanted.grab to update db
-    orig_grab = wanted.grab
-    async def fake_grab(book_id, url, source, status="queued"):
-        # simulate grab by updating release_url/info_hash
-        db.update(book_id, release_url=url, info_hash=HASH2 if url==r2["url"] else HASH1, status=status)
+    async def grab(book_id, url, source, status="queued"):
+        grabbed.append(url)
+        r = next(r for r in found if r["url"] == url)
+        db.update(book_id, release_url=url, info_hash=r["info_hash"], source=source, status=status, error="",
+                  client_job_id="", found_by_search=0)
         return db.get(book_id)
-    monkeypatch.setattr(wanted, "grab", fake_grab)
 
-    # Make Worker.process fail first time with ClientError (simulating dead torrent), succeed second time
-    calls = []
-    orig_process = Worker.process
-    async def fake_process(self, book_id):
-        calls.append(book_id)
-        if len(calls) == 1:
-            raise ClientError("qBittorrent reports a problem with this torrent (error).")
-        # second call succeeds (simulate completing)
-        db.update(book_id, status="completed", path="/tmp/done")
-    monkeypatch.setattr(Worker, "process", fake_process)
+    monkeypatch.setattr(wanted, "find_releases", find)
+    monkeypatch.setattr(wanted, "grab", grab)
+    return found, grabbed
 
+
+def downloading(**over) -> dict:
+    return db.insert({"source": "prowlarr", "source_url": "https://www.audible.com/pd/B0DUNE", "title": "Dune",
+                      "author": "Frank Herbert", "status": "queued", "release_url": "https://n.example/1",
+                      "info_hash": HASH1, "protocol": "torrent", "client_job_id": "job-1", **over})
+
+
+def failing_with(monkeypatch, error: Exception):
+    async def process(self, book_id):
+        raise error
+    monkeypatch.setattr(Worker, "process", process)
+
+
+# ---- picking around failures ---------------------------------------------------------------
+
+
+def test_automatic_picking_skips_failed_releases_and_the_same_torrent_elsewhere():
+    book = {"failed_releases": [{"url": "https://n.example/1", "info_hash": HASH1, "error": "dead"}],
+            "skipped_releases": ["https://n.example/2"]}
+    found = [rel(1, HASH1), rel(2, HASH2), rel(4, HASH1.upper()), rel(3, HASH3, match=88)]
+    assert wanted.best(found, *wanted.avoid(book))["url"] == "https://n.example/3"
+    assert wanted.failed_release(book, rel(4, HASH1)) == "dead"  # another indexer, same torrent
+    assert wanted.failed_release(book, rel(3, HASH3)) is None
+
+
+# ---- the worker ------------------------------------------------------------------------------
+
+
+async def test_a_dead_release_is_remembered_and_the_next_best_one_taken(monkeypatch, indexer):
+    found, grabbed = indexer
+    found += [rel(1, HASH1), rel(2, HASH2)]
+    book = downloading()
+    failing_with(monkeypatch, bad_release(ClientError("qBittorrent reports a problem with this torrent.")))
+    await Worker()._run(book["id"])
+
+    got = db.get(book["id"])
+    assert grabbed == ["https://n.example/2"]
+    assert got["status"] == "queued" and got["release_url"] == "https://n.example/2" and got["failed_retries"] == 1
+    assert got["failed_releases"][0]["url"] == "https://n.example/1"
+    assert "qBittorrent reports a problem" in got["failed_releases"][0]["error"]
+    assert "picked another" in got["search_note"]
+
+
+async def test_with_approval_on_the_next_release_waits_for_it(monkeypatch, indexer):
+    found, _ = indexer
+    found += [rel(1, HASH1), rel(2, HASH2)]
+    config.update({"found_needs_approval": True})
+    book = downloading()
+    failing_with(monkeypatch, bad_release(ClientError("SABnzbd: repair failed")))
+    await Worker()._run(book["id"])
+    got = db.get(book["id"])
+    assert got["status"] == "requested" and got["found_by_search"] == 1 and got["release_url"] == "https://n.example/2"
+
+
+async def test_a_setup_problem_is_not_retried(monkeypatch, indexer):
+    """The Discord case: the client saved the book where Narratarr can't see it. Another release
+    would land in the same place, so nothing is searched and nothing is marked as a bad release."""
+    found, grabbed = indexer
+    found += [rel(1, HASH1), rel(2, HASH2)]
+    book = downloading()
+    failing_with(monkeypatch, ValueError("qBittorrent saved this book to /downloads/Dune, but Narratarr can't see that folder."))
+    await Worker()._run(book["id"])
+    got = db.get(book["id"])
+    assert got["status"] == "failed" and grabbed == [] and got["failed_releases"] == []
+
+
+async def test_nothing_else_good_leaves_it_failed_and_says_so(monkeypatch, indexer):
+    found, grabbed = indexer
+    found += [rel(1, HASH1), rel(5, HASH2, match=40)]
+    book = downloading()
+    failing_with(monkeypatch, bad_release(ValueError("The torrent finished, but there are no audio files in it.")))
+    await Worker()._run(book["id"])
+    got = db.get(book["id"])
+    assert got["status"] == "failed" and grabbed == []
+    assert "no audio files" in got["error"] and "none was a sure match" in got["error"]
+    assert [f["url"] for f in got["failed_releases"]] == ["https://n.example/1"]
+
+
+async def test_retries_stop_after_two_and_when_switched_off(monkeypatch, indexer):
+    found, grabbed = indexer
+    found += [rel(1, HASH1), rel(2, HASH2)]
+    failing_with(monkeypatch, bad_release(ClientError("dead")))
+    tired = downloading(failed_retries=wanted.MAX_FAILED_RETRIES)
+    await Worker()._run(tired["id"])
+    assert db.get(tired["id"])["status"] == "failed" and grabbed == []
+    assert db.get(tired["id"])["failed_releases"]  # still remembered, still marked
+
+    config.update({"retry_failed_downloads": False})
+    off = downloading(source_url="https://www.audible.com/pd/B0OTHER")
+    await Worker()._run(off["id"])
+    assert db.get(off["id"])["status"] == "failed" and grabbed == []
+
+
+async def test_a_direct_source_has_no_other_release(monkeypatch, indexer):
+    found, grabbed = indexer
+    found += [rel(2, HASH2)]
+    book = downloading(source="librivox", release_url="https://librivox.org/dune/", info_hash="")
+    failing_with(monkeypatch, bad_release(ValueError("no audio")))
+    await Worker()._run(book["id"])
+    assert db.get(book["id"])["status"] == "failed" and grabbed == []
+
+
+async def test_a_client_saying_failed_is_a_bad_release_but_a_vanished_job_is_not():
+    class Client:
+        label = "qBittorrent"
+
+        def __init__(self, job):
+            self._job = job
+
+        async def job(self, job_id):
+            return self._job
+
+    book = downloading()
     w = Worker()
-    await w._run(book["id"])
+    with pytest.raises(ClientError) as failed:
+        await w._wait_for_client(Client(Job(state="failed", error="Missing articles")), book["id"], "j", config.load())
+    assert is_bad_release(failed.value)
+    with pytest.raises(ClientError) as gone:  # someone removed it in the client: their call, not a bad torrent
+        await w._wait_for_client(Client(None), book["id"], "j", config.load())
+    assert not is_bad_release(gone.value)
 
-    done = db.get(book["id"])
-    assert done["status"] == "completed", done
-    assert done["release_url"] == r2["url"], "should have retried with next best"
-    assert len(calls) == 2
 
-@pytest.mark.asyncio
-async def test_worker_no_retry_when_no_alternative(isolated_data, monkeypatch):
-    book = db.insert({"source": "prowlarr", "source_url": "https://n.example/book", "title": "Dune", "author": "Frank", "status": "queued", "release_url": "https://n.example/1", "info_hash": HASH1, "protocol": "torrent"})
-    async def fake_find(b):
-        return [{"url": "https://n.example/1", "info_hash": HASH1, "usable": True, "language_ok": True, "match": 90, "seeders": 5, "release": "Dune"}]
-    monkeypatch.setattr(wanted, "find_releases", fake_find)
-    async def fake_process(self, book_id):
-        raise ValueError("no seeds")
-    monkeypatch.setattr(Worker, "process", fake_process)
-    w = Worker()
-    await w._run(book["id"])
-    assert db.get(book["id"])["status"] == "failed"
-    assert "no seeds" in db.get(book["id"])["error"]
+# ---- Find releases ---------------------------------------------------------------------------
 
-@pytest.mark.asyncio
-async def test_worker_retry_avoids_loop(isolated_data, monkeypatch):
-    """Second failure should not retry again."""
-    r1 = {"url": "https://n.example/1", "info_hash": HASH1, "usable": True, "language_ok": True, "match": 90, "seeders": 5, "release": "R1", "title": "Dune", "source": "prowlarr", "protocol": "torrent"}
-    r2 = {"url": "https://n.example/2", "info_hash": HASH2, "usable": True, "language_ok": True, "match": 88, "seeders": 3, "release": "R2", "title": "Dune", "source": "prowlarr", "protocol": "torrent"}
-    book = db.insert({"source": "prowlarr", "source_url": "https://n.example/book", "title": "Dune", "author": "Frank", "status": "queued", "release_url": r1["url"], "info_hash": HASH1, "protocol": "torrent"})
-    async def fake_find(b):
-        return [dict(r1), dict(r2)]
-    monkeypatch.setattr(wanted, "find_releases", fake_find)
-    async def fake_grab(book_id, url, source, status="queued"):
-        db.update(book_id, release_url=url, info_hash=HASH2 if url==r2["url"] else HASH1, status=status)
-        return db.get(book_id)
-    monkeypatch.setattr(wanted, "grab", fake_grab)
-    async def fake_process(self, book_id):
-        raise ClientError("failed")
-    monkeypatch.setattr(Worker, "process", fake_process)
-    w = Worker()
-    await w._run(book["id"])
-    failed = db.get(book["id"])
-    assert failed["status"] == "failed"
-    # should contain both errors
-    assert "retried with" in failed["error"]
-    # Should have retried only once, not infinitely
+
+def test_find_releases_marks_what_failed_and_what_was_turned_down(client, indexer):
+    found, _ = indexer
+    found += [rel(1, HASH1), rel(2, HASH2), rel(3, HASH3)]
+    book = downloading(status="failed", skipped_releases=["https://n.example/3"],
+                       failed_releases=[{"url": "https://n.example/1", "info_hash": HASH1, "error": "Dead torrent"}])
+    items = client.get(f"/api/library/{book['id']}/releases").json()["items"]
+    assert [(i["failed"], i["turned_down"]) for i in items] == [("Dead torrent", False), ("", False), ("", True)]
+
+
+# ---- switches save as switches ---------------------------------------------------------------
+
+
+def test_a_switch_can_be_turned_off_and_old_on_text_reads_as_on(client):
+    assert client.put("/api/settings", json={"found_needs_approval": True}).json()["found_needs_approval"] is True
+    assert client.put("/api/settings", json={"found_needs_approval": False}).json()["found_needs_approval"] is False
+    # What older pages sent for a ticked box, and what got saved:
+    assert client.put("/api/settings", json={"retry_failed_downloads": "on"}).json()["retry_failed_downloads"] is True
+    assert config.as_bool("off") is False and config.as_bool("") is False and config.as_bool(1) is True
+
+
+def test_a_settings_file_with_on_text_loads_as_true(isolated_data, monkeypatch):
+    import json
+    config.SETTINGS_FILE.write_text(json.dumps({"ratings_enabled": "on", "found_needs_approval": "false"}))
+    monkeypatch.setattr(config, "_settings", None)
+    s = config.load()
+    assert s.ratings_enabled is True and s.found_needs_approval is False
+
+
+# ---- ratings on Library cards (PR #14) -------------------------------------------------------
+
+
+class Shelf:
+    """A ratings provider whose cache holds one rated book."""
+    enabled = True
+
+    def cached(self, title, author, asin=""):
+        return ratings.make_rating(4.6, None, "https://www.audible.com/pd/B0DUNE", "audnex") if asin == "B0DUNE" else None
+
+    def state(self, title, author, asin=""):
+        return "none"
+
+
+def test_library_ratings_come_from_the_cache_and_only_asin_books_are_queued(client, monkeypatch):
+    queued = []
+    monkeypatch.setattr(ratings, "provider", lambda settings=None: Shelf())
+    monkeypatch.setattr(ratings, "ensure_filler", lambda: None)
+    monkeypatch.setattr(ratings, "_enqueue", lambda t, a, asin="": queued.append(asin))
+    rated = db.insert({"source": "local", "source_url": "file:///b/dune", "title": "Dune", "author": "Frank Herbert",
+                       "status": "completed", "asin": "B0DUNE"})
+    db.insert({"source": "local", "source_url": "file:///b/x", "title": "Unknown", "author": "Someone", "status": "completed"})
+    db.insert({"source": "local", "source_url": "file:///b/y", "title": "Hyperion", "author": "Dan Simmons",
+               "status": "completed", "asin": "B0HYPER"})
+    out = client.get("/api/library/ratings").json()
+    assert out["off"] is False and list(out["ratings"]) == [str(rated["id"])]
+    assert out["ratings"][str(rated["id"])]["score"] == 4.6
+    assert queued == ["B0HYPER"]  # the unrated book with an ASIN; never a search for the one without
+
+
+def test_library_ratings_switched_off(client):
+    config.update({"ratings_enabled": False})
+    assert client.get("/api/library/ratings").json() == {"off": True, "ratings": {}}
+
+
+def test_asking_twice_queues_once():
+    ratings.reset_for_tests()
+    before = ratings._queue.qsize()
+    ratings._enqueue("Dune", "Frank Herbert", "B0DUNE")
+    ratings._enqueue("Dune", "Frank Herbert", "B0DUNE")
+    assert ratings._queue.qsize() == before + 1

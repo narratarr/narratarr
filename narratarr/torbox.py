@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 import httpx
 
 from .alldebrid import file_names
+from .downloaders import bad_release
 
 API = "https://api.torbox.app"
 APP_NAME = "Narratarr"  # shown to the user on TorBox's sign-in page
@@ -153,7 +154,7 @@ class TorBox:
         if t.get("download_present") or (t.get("download_finished") and state in ("completed", "cached", "uploading")):
             return {"done": True, "progress": 100.0, "speed": 0, "detail": "TorBox has it"}
         if any(state.startswith(f) for f in FAILED_STATES):
-            raise TorBoxError(f"TorBox couldn't fetch this torrent ({t.get('download_state')}).")
+            raise bad_release(TorBoxError(f"TorBox couldn't fetch this torrent ({t.get('download_state')})."))
         detail = WORKING.get(state, "TorBox is downloading")
         if state == "downloading" or state not in WORKING:
             detail += f" · {int(t.get('seeds') or 0)} seeders"

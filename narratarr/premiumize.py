@@ -10,6 +10,7 @@ import time
 import httpx
 
 from .alldebrid import file_names
+from .downloaders import bad_release
 
 API = "https://www.premiumize.me/api"
 MAX_DEPTH = 8  # folders inside a transfer's folder
@@ -116,7 +117,8 @@ class Premiumize:
             return {"done": True, "progress": 100.0, "speed": 0, "detail": "Premiumize has it"}
         if status in ("error", "deleted", "banned", "timeout"):
             why = str(t.get("message") or "").strip()
-            raise PremiumizeError(f"Premiumize couldn't fetch this torrent{f': {why}' if why else '.'}")
+            e = PremiumizeError(f"Premiumize couldn't fetch this torrent{f': {why}' if why else '.'}")
+            raise e if status == "deleted" else bad_release(e)  # deleted is someone's choice, not a bad torrent
         try:
             progress = max(0.0, min(100.0, float(t.get("progress") or 0) * 100))
         except (TypeError, ValueError):

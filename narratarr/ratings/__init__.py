@@ -23,13 +23,6 @@ from .store import Store
 
 log = logging.getLogger("narratarr.ratings")
 
-# The vote floor has to match what each source's number counts. Goodreads publishes reader votes in
-# the millions, so twelve of them is noise. Bookmarks publishes critic reviews, single digits by
-# design, so the same floor would blank its whole dataset and the provider would look broken while
-# behaving exactly as designed. Audnex publishes no count at all, so nothing applies to it.
-MIN_COUNT_BY_SOURCE = {"goodreads": MIN_COUNT, "bookmarks": 3}
-MIN_COUNT_DEFAULT = MIN_COUNT
-
 PRIOR_SCORE = 3.9       # the average a new book is treated as having, so few votes pull toward it
 PRIOR_WEIGHT = 1000     # how many real votes the prior is worth
 UNKNOWN_COUNT_WEIGHT = 100  # what a rating with no count is worth: real, but weak evidence
@@ -113,8 +106,7 @@ def make_rating(score, count, url: str, source: str, label: str = "", tooltip: s
             count = int(count)
         except (TypeError, ValueError):
             count = None
-    floor = MIN_COUNT_BY_SOURCE.get(source, MIN_COUNT_DEFAULT)
-    if count is not None and count < floor:
+    if count is not None and count < MIN_COUNT:
         return None
     source_label = {"audnex": "Audible"}.get(source, source)
     if tooltip:
@@ -135,30 +127,17 @@ def make_rating(score, count, url: str, source: str, label: str = "", tooltip: s
     )
 
 
-def available() -> dict[str, str]:
-    """The provider keys Settings offers. Goodreads is absent on purpose: it was written, never
-    shipped, and its terms forbid collecting listings with extraction tools."""
-    return {"audnex": "Audible (Audnex)", "bookmarks": "Bookmarks", "": "Off"}
-
-
 def provider(settings=None):
-    """The provider this instance is set to, or None when ratings are off.
+    """The provider, or None when ratings are switched off.
 
-    Off means no object, no queue and no request, which is the point of the switch rather than a
-    blank card.
+    One provider ships, so there is nothing to choose between: the setting is on or off. Off means
+    no object, no queue and no request, which is the point of the switch rather than a blank card.
     """
     from .. import config
 
     s = settings if settings is not None else config.load()
-    name = str(getattr(s, "ratings_provider", "audnex") or "audnex")
     if not getattr(s, "ratings_enabled", True):
         return None
-    if not name:
-        return None
-    if name == "bookmarks":
-        from .bookmarks import BookmarksProvider
-
-        return BookmarksProvider(get_store(s))
     from .audnex import AudnexProvider
 
     return AudnexProvider(get_store(s))
@@ -181,16 +160,19 @@ def reset_for_tests() -> None:
     global _store
     _store = None
     _filler.clear()
+    _queued.clear()
 
 
 # ---- the page path ------------------------------------------------------------------------
 
 _queue: asyncio.Queue = asyncio.Queue()
+_queued: set[tuple[str, str, str]] = set()  # what's in the queue, so asking twice doesn't fetch twice
 _filler: set[asyncio.Task] = set()
 
 
-def enrich(item: dict, provider_obj=None, settings=None) -> dict:
-    """Attach `rating` to a Discover item from the cache alone, and queue a miss for later.
+def enrich(item: dict, provider_obj=None, settings=None, fill: bool = True) -> dict:
+    """Attach `rating` to a Discover item from the cache alone, and queue a miss for later (unless
+    `fill` is off).
 
     Always sets the key — the UI reserves a slot per card and reads `item.rating` without a guard.
     """
@@ -217,7 +199,7 @@ def enrich(item: dict, provider_obj=None, settings=None) -> dict:
         item["rating_state"] = p.state(title, item.get("author") or "", item.get("asin") or "")
     except Exception as e:  # a ratings problem must never fail a search
         log.warning("ratings state failed for %r: %s", item.get("title"), e)
-    if p.enabled:
+    if p.enabled and fill:
         _enqueue(title, item.get("author") or "", item.get("asin") or "")
     return item
 
@@ -238,9 +220,11 @@ def sort_items(items: list[dict]) -> list[dict]:
 
 
 def _enqueue(title: str, author: str, asin: str = "") -> None:
-    if not title or _queue.qsize() > 500:
+    key = (title, author, asin)
+    if not title or key in _queued or _queue.qsize() > 500:
         return
-    _queue.put_nowait((title, author, asin))
+    _queued.add(key)
+    _queue.put_nowait(key)
 
 
 async def _drain() -> None:
@@ -254,6 +238,7 @@ async def _drain() -> None:
         except Exception as e:
             log.warning("ratings fetch failed for %r: %s", title, e)
         finally:
+            _queued.discard((title, author, asin))
             _queue.task_done()
 
 
@@ -273,3 +258,4 @@ def stop_filler() -> None:
     for task in list(_filler):
         task.cancel()
     _filler.clear()
+    _queued.clear()

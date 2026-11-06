@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 
 import httpx
+from .downloaders import bad_release
 
 API = "https://api.alldebrid.com"
 SITE = "https://alldebrid.com"
@@ -183,7 +184,7 @@ class AllDebrid:
             return {"done": True, "progress": 100.0, "speed": 0, "detail": "AllDebrid has it"}
         if code > READY:
             why = FAILED.get(code) or str(m.get("status") or "it failed")
-            raise AllDebridError(f"AllDebrid couldn't fetch this torrent: {why}.")
+            raise bad_release(AllDebridError(f"AllDebrid couldn't fetch this torrent: {why}."))
         size, got = int(m.get("size") or 0), int(m.get("downloaded") or 0)
         detail = WORKING.get(code, "AllDebrid is working on it")
         if code == 1:

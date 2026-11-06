@@ -372,14 +372,31 @@ async def library():
     for b in books:
         b["companion_id"] = pairs[b["id"]]["id"] if b["id"] in pairs else None  # the same book in its other format
         b["requested_by_name"] = names.get(b.get("requested_by"), "")
-    # The same rating the card would show on Discover. Read from the cache only, so a slow provider
-    # never holds up the library; anything missing is filled in the background and appears next time.
-    _provider = ratings.provider()
-    if _provider is not None:
-        ratings.ensure_filler()
-    for b in books:
-        ratings.enrich(b, provider_obj=_provider)
     return books
+
+
+@app.get("/api/library/ratings")
+async def library_ratings():
+    """The rating pill for each library book that has one, from the cache only (PR #14, curator8888).
+
+    Its own request rather than part of /api/library, which the page asks for every two seconds: the
+    Library asks for this once per visit. Only books with an ASIN are queued for the background
+    filler, so a large library of imported books never turns into a search per book."""
+    p = ratings.provider()
+    if p is None:
+        return {"off": True, "ratings": {}}
+    ratings.ensure_filler()
+
+    def collect() -> dict:
+        out = {}
+        for b in db.list_books():
+            item = ratings.enrich({"title": b["title"], "author": b["author"], "asin": b.get("asin") or "",
+                                   "source": b["source"]}, provider_obj=p, fill=bool(b.get("asin")))
+            if item["rating"]:
+                out[b["id"]] = item["rating"]
+        return out
+
+    return {"off": False, "ratings": await asyncio.to_thread(collect)}
 
 
 @app.get("/api/stats")
@@ -868,18 +885,6 @@ async def save_progress(book_id: int, body: Progress, request: Request):
 # ---- wanted: releases ---------------------------------------------------------
 
 
-def _is_failed_release(item: dict, book: dict) -> bool:
-    if book.get("status") != "failed":
-        return False
-    url = book.get("release_url") or ""
-    ih = (book.get("info_hash") or "").strip().lower()
-    if url and item.get("url") == url:
-        return True
-    if ih and (item.get("info_hash") or "").strip().lower() == ih:
-        return True
-    return False
-
-
 @app.get("/api/library/{book_id}/releases")
 async def releases(book_id: int):
     book = _get_or_404(book_id)
@@ -888,13 +893,10 @@ async def releases(book_id: int):
     except ProwlarrError as e:
         raise HTTPException(502, str(e))
     db.update(book_id, last_searched=time.time())
-    for item in found:
-        if _is_failed_release(item, book):
-            item["failed"] = True
-            item["failed_reason"] = book.get("error") or ""
-        else:
-            item["failed"] = False
-            item["failed_reason"] = ""
+    turned_down = set(book.get("skipped_releases") or [])
+    for item in found:  # so nobody picks a release that already failed for this book without knowing
+        item["failed"] = wanted.failed_release(book, item) or ""
+        item["turned_down"] = item["url"] in turned_down
     return {"items": found[:60], "auto_match": wanted.AUTO_MATCH}
 
 

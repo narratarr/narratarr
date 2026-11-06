@@ -81,13 +81,15 @@ class Settings:
     auto_search_hours: int = 12
     # A release that searching finds on its own waits under Awaiting approval instead of downloading.
     found_needs_approval: bool = False
+    # When a download fails because of the release itself (a dead torrent, a failed repair, no audio in
+    # it), look for another release of the book and take that instead, like Sonarr and Radarr do.
+    retry_failed_downloads: bool = True
     audible_region: str = "us"
     audible_extra_regions: list[str] = field(default_factory=list)  # more Audible stores people can search
     check_updates: bool = True  # one request a day to GitHub's releases API
     # On by default, and on for an existing settings file that predates the key: `load()` starts
     # from the dataclass defaults and only overwrites keys it finds, so an absent key means True.
     ratings_enabled: bool = True
-    ratings_provider: str = "audnex"
     # Audible storefronts Audnex serves, in the order they are tried. `br` is not here: the API
     # rejects it as an unsupported code, and a code that can only fail should not be offered.
     audnex_regions: list[str] = field(default_factory=lambda: ["uk"])
@@ -196,12 +198,19 @@ def load() -> Settings:
                 for old, new in RENAMED.items():
                     if old in raw and new not in raw:
                         raw[new] = raw[old]
-                known = {f.name for f in fields(Settings)}
+                known = {f.name: f for f in fields(Settings)}
                 for k, v in raw.items():
                     if k in known:
-                        setattr(_settings, k, v)
+                        setattr(_settings, k, as_bool(v) if isinstance(known[k].default, bool) else v)
             migrate_clients(_settings)
         return _settings
+
+
+def as_bool(v) -> bool:
+    """A switch's value. Older pages sent a ticked box as "on", which was saved as text; read it as on."""
+    if isinstance(v, str):
+        return v.strip().lower() in ("1", "true", "on", "yes")
+    return bool(v)
 
 
 def update(changes: dict) -> Settings:
@@ -218,6 +227,8 @@ def update(changes: dict) -> Settings:
                 continue
             if k in SECRETS and isinstance(v, str) and v.startswith("•"):
                 continue
+            if isinstance(known[k].default, bool):
+                v = as_bool(v)
             if k in SERVICE_SECRETS and isinstance(v, str):
                 v = v.strip().rstrip("/")
                 if v and not v.startswith(("http://", "https://")):

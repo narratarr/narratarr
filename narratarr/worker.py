@@ -33,7 +33,7 @@ from pathlib import Path
 import httpx
 
 from . import audiobookshelf, config, db, downloaders, ebooks, importer, layout, media, notify, routing, wanted
-from .downloaders import ClientError
+from .downloaders import ClientError, bad_release, is_bad_release
 from .alldebrid import AllDebridError
 from .premiumize import PremiumizeError
 from .torbox import TorBoxError
@@ -330,57 +330,6 @@ class Worker:
         self.running[book_id] = task
         task.add_done_callback(lambda _: (self.running.pop(book_id, None), self.stops.pop(book_id, None), self.poke()))
 
-    async def _retry_with_next(self, book_id: int, orig_error: str) -> bool:
-        book = db.get(book_id)
-        if not book or book.get("source") == "local":
-            return False
-        # Only retry releases that came from an indexer (have a release URL or info hash to exclude)
-        if not (book.get("release_url") or book.get("info_hash")):
-            return False
-        # Avoid infinite loops: if we already retried once (error contains retried marker), don't loop again
-        if "retried with" in (book.get("error") or ""):
-            return False
-        try:
-            found = await wanted.find_releases(book)
-        except Exception as e:
-            log.info("Auto-retry: couldn't search for alternatives for book %s: %s", book_id, e)
-            return False
-        # Annotate failed so best() can skip it (same logic as api.py)
-        for item in found:
-            if item.get("url") == (book.get("release_url") or "") or (
-                book.get("info_hash") and (item.get("info_hash") or "").strip().lower() == book.get("info_hash").strip().lower()
-            ):
-                item["failed"] = True
-                item["failed_reason"] = orig_error
-        pick = wanted.best(found, exclude={"release_url": book.get("release_url"), "info_hash": book.get("info_hash")})
-        if not pick:
-            log.info("Auto-retry: no alternative releases for book %s", book_id)
-            return False
-        log.info("Auto-retrying book %s with next best release %s (previous failed: %s)", book_id, pick.get("release") or pick.get("title"), orig_error)
-        try:
-            await wanted.grab(book_id, pick["url"], pick["source"], "queued")
-        except Exception as e:
-            log.warning("Auto-retry grab failed for book %s: %s", book_id, e)
-            return False
-        # Try the new release once; if it also fails we record both errors, if it succeeds we're done
-        try:
-            await self.process(book_id)
-        except (RealDebridError, AllDebridError, TorBoxError, PremiumizeError, ClientError, ProwlarrError, httpx.HTTPError, ValueError, OSError, zipfile.BadZipFile) as e2:
-            second = readable_error(e2)
-            log.warning("Book %s retry failed: %s", book_id, second)
-            db.update(book_id, status="failed", error=f"{orig_error} (retried with {pick.get('release') or pick.get('title') or pick.get('url')} but failed: {second})", speed=0, detail="")
-            if (failed := db.get(book_id)):
-                notify.emit("failed", failed, error=failed["error"])
-            return True
-        except Exception as e2:
-            log.exception("Book %s retry crashed", book_id)
-            db.update(book_id, status="failed", error=f"{orig_error} (retried but crashed: Unexpected error: {e2})", speed=0, detail="")
-            if (failed := db.get(book_id)):
-                notify.emit("failed", failed, error=failed["error"])
-            return True
-        else:
-            return True
-
     async def _run(self, book_id: int) -> None:
         book = db.get(book_id)
         # Imports aren't downloads, and a download picking up again after a restart already said so.
@@ -394,21 +343,52 @@ class Worker:
         except (
             RealDebridError, AllDebridError, TorBoxError, PremiumizeError, ClientError, ProwlarrError, httpx.HTTPError, ValueError, OSError, zipfile.BadZipFile
         ) as e:
-            err = readable_error(e)
-            log.warning("Book %s failed: %s", book_id, err)
-            if await self._retry_with_next(book_id, err):
-                return
-            db.update(book_id, status="failed", error=err, speed=0, detail="")
+            log.warning("Book %s failed: %s", book_id, readable_error(e))
+            db.update(book_id, status="failed", error=readable_error(e), speed=0, detail="")
+            if is_bad_release(e) and announce and await self._try_another_release(book_id):
+                return  # another release is on its way (or waiting for approval), and said so itself
         except Exception as e:
-            err = f"Unexpected error: {e}"
             log.exception("Book %s crashed", book_id)
-            if await self._retry_with_next(book_id, err):
-                return
-            db.update(book_id, status="failed", error=err, speed=0, detail="")
+            db.update(book_id, status="failed", error=f"Unexpected error: {e}", speed=0, detail="")
         else:
             return
         if announce and (failed := db.get(book_id)):
             notify.emit("failed", failed, error=failed["error"])
+
+    async def _try_another_release(self, book_id: int) -> bool:
+        """The release itself failed (a dead torrent, a failed repair, no audio in it). Remember it, so
+        nothing picks it again, then look for another release of the book once and take the best sure
+        match, the same way automatic search would. Only for that kind of failure: a setup problem (an
+        unreachable client, a folder Narratarr can't see) would only fail the same way again.
+
+        Returns True when another release was grabbed or is waiting for approval."""
+        book = db.get(book_id)
+        if not book or not book.get("release_url"):
+            return False
+        failed = [f for f in book.get("failed_releases") or [] if f.get("url") != book["release_url"]]
+        failed.append({"url": book["release_url"], "info_hash": (book.get("info_hash") or "").lower(),
+                       "error": book.get("error") or "", "at": time.time()})
+        db.update(book_id, failed_releases=failed[-50:])
+        settings = config.load()
+        if not settings.retry_failed_downloads or book.get("failed_retries", 0) >= wanted.MAX_FAILED_RETRIES:
+            return False
+        if get_source(book["source"]).delivery == "direct":
+            return False  # LibriVox and the like have one copy of a book: there's no other release
+        error = book.get("error") or ""
+        try:
+            pick = await wanted.search_and_grab(db.get(book_id), hold=settings.found_needs_approval)
+        except Exception as e:  # no indexer reachable right now: leave it failed, a person can retry
+            log.info("Book %s: couldn't look for another release: %s", book_id, e)
+            db.update(book_id, status="failed", error=error)
+            return False
+        if not pick:
+            db.update(book_id, status="failed", error=f"{error} Looked for another release, but none was a sure match.")
+            return False
+        db.update(book_id, failed_retries=book.get("failed_retries", 0) + 1,
+                  search_note=f"The last release failed ({error}), so Narratarr picked another.")
+        log.info("Book %s: the release failed, so it took another: %s", book_id, pick.get("release") or pick.get("title"))
+        self.poke()
+        return True
 
     # ---- pipeline ---------------------------------------------------------
 
@@ -650,9 +630,9 @@ class Worker:
             folder = await self._wait_for_client(client, book_id, job_id, settings)
             if wanted.kind_of(book) == "ebook":
                 if not ebooks.ebook_files(folder):
-                    raise ValueError("The torrent finished, but there's no ebook in it.")
+                    raise bad_release(ValueError("The torrent finished, but there's no ebook in it."))
             elif not (folder.is_file() and folder.suffix.lower() in media.AUDIO_TYPES) and not media.audio_files(folder):
-                raise ValueError("The torrent finished, but there are no audio files in it.")
+                raise bad_release(ValueError("The torrent finished, but there are no audio files in it."))
             tmp = self._fresh_tmp(book, settings)
             db.update(book_id, detail="Copying files from the torrent…")
             await self._in_thread(book_id, link_into, folder, tmp)
@@ -664,12 +644,12 @@ class Worker:
         started = time.monotonic()
         while True:
             if time.monotonic() - started > CLIENT_TIMEOUT_SECONDS:
-                raise ClientError(f"{client.label} hasn't finished this download in a week. It may have no seeds.")
+                raise bad_release(ClientError(f"{client.label} hasn't finished this download in a week. It may have no seeds."))
             job = await client.job(job_id)
             if job is None:
                 raise ClientError(f"{client.label} no longer has this download. It may have been removed there.")
             if job.state == "failed":
-                raise ClientError(job.error or f"{client.label} couldn't finish this download.")
+                raise bad_release(ClientError(job.error or f"{client.label} couldn't finish this download."))
             if job.state == "completed":
                 folder = mapped_path(job.path, settings)
                 if not job.path or not folder.exists():
@@ -715,7 +695,7 @@ class Worker:
                 return
             db.update(book_id, progress=state["progress"], speed=state["speed"], detail=state["detail"])
             if time.monotonic() - started > RD_TIMEOUT_SECONDS:
-                raise TimeoutError(f"Timed out waiting for {cloud.label}. The torrent may have no seeders.")
+                raise bad_release(TimeoutError(f"Timed out waiting for {cloud.label}. The torrent may have no seeders."))
             await asyncio.sleep(POLL_SECONDS)
 
     async def _download(self, book_id: int, files: list[dict], tmp: Path) -> None:
@@ -773,7 +753,7 @@ class Worker:
         """Keep the best ebook file from the download, filed next to its audiobook if the library has one."""
         pick = ebooks.best(await asyncio.to_thread(ebooks.ebook_files, tmp))
         if pick is None:
-            raise ValueError("The download finished, but there's no ebook in it.")
+            raise bad_release(ValueError("The download finished, but there's no ebook in it."))
         folder = unique_destination(book, settings)
         folder.mkdir(parents=True, exist_ok=True)
         target = folder / f"{safe_name(book['title'], 'Untitled')}{pick.suffix.lower()}"

@@ -127,10 +127,36 @@ async def find_releases(book: dict) -> list[dict]:
     return found
 
 
-def best(found: list[dict], skip: list[str] | tuple = ()) -> dict | None:
-    """The release to take on our own: usable, in a wanted language, a sure match, not turned down before."""
+MAX_FAILED_RETRIES = 2  # releases tried in place of failed ones, per book, before it's left to a person
+
+
+def info_hash_of(item: dict) -> str:
+    return str(item.get("info_hash") or item.get("infohash") or item.get("infoHash") or "").strip().lower()
+
+
+def avoid(book: dict) -> tuple[set[str], set[str]]:
+    """The release links and torrent hashes automatic picking stays away from for this book: what an
+    admin turned down, and what failed to download. The same torrent from another indexer fails the same way."""
+    failed = book.get("failed_releases") or []
+    urls = {*(book.get("skipped_releases") or []), *(f.get("url", "") for f in failed)}
+    hashes = {str(f.get("info_hash") or "").lower() for f in failed}
+    return urls - {""}, hashes - {""}
+
+
+def failed_release(book: dict, item: dict) -> str | None:
+    """Why this release failed for this book before, or None if it didn't."""
+    h = info_hash_of(item)
+    for f in book.get("failed_releases") or []:
+        if (f.get("url") and f["url"] == item.get("url")) or (h and str(f.get("info_hash") or "").lower() == h):
+            return f.get("error") or "It failed to download before."
+    return None
+
+
+def best(found: list[dict], skip: list[str] | set[str] | tuple = (), skip_hashes: set[str] | tuple = ()) -> dict | None:
+    """The release to take on our own: usable, in a wanted language, a sure match, not turned down or
+    failed before."""
     for item in found:
-        if item["url"] in skip:
+        if item["url"] in skip or (skip_hashes and info_hash_of(item) in skip_hashes):
             continue
         if item["usable"] and item.get("language_ok", True) and item["match"] >= AUTO_MATCH and item.get("seeders") != 0:
             return item
@@ -180,7 +206,7 @@ async def search_and_grab(book: dict, hold: bool = False) -> dict | None:
     except ProwlarrError as e:
         db.update(book["id"], search_note=str(e))
         raise
-    pick = best(found, book.get("skipped_releases") or [])
+    pick = best(found, *avoid(book))
     if not pick:
         close = [f for f in found if f["match"] >= AUTO_MATCH]
         note = (

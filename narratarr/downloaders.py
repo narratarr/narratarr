@@ -28,6 +28,17 @@ class ClientError(Exception):
     pass
 
 
+def bad_release(e: Exception) -> Exception:
+    """Mark an error as being about the release itself (a dead torrent, a failed repair, no audio in it)
+    rather than the setup, so another release of the same book is worth trying. Returns the error."""
+    e.release_failed = True
+    return e
+
+
+def is_bad_release(e: BaseException) -> bool:
+    return bool(getattr(e, "release_failed", False))
+
+
 USENET_CLIENTS = {"sabnzbd": "SABnzbd", "nzbget": "NZBGet"}
 DEBRID = ("realdebrid", "alldebrid", "torbox", "premiumize")  # cloud services: they fetch the torrent, we download the files
 TORRENT_CLIENTS = {

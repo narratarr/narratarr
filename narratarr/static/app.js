@@ -49,6 +49,7 @@ const state = {
   sources: [],
   library: [],
   libraryKey: "",
+  libRatings: { at: 0, ratings: {} },
   discover: { q: "", category: "", page: 0, total: 1, items: [], loading: false, error: "", token: 0, dym: "", lang: "", fmt: "", sort: "", note: "", source: lastSource(), kind: lastKind() },
   libFilter: "all",
   libFormat: "",
@@ -907,9 +908,30 @@ function libCardHTML(b, i) {
         <div class="title">${esc(b.title)}</div>
         <div class="author">${esc(b.author || "Unknown author")}</div>
         <div class="facts ${b.status === "failed" ? "bad" : ""}">${facts.filter(Boolean).map((f) => `<span>${esc(f)}</span>`).join("")}</div>
-        ${ratingPillHTML(b)}
+        ${libRatingHTML(b)}
       </div>
     </article>`;
+}
+
+// The same rating pill as Discover (PR #14, curator8888), for the books that have one. Unlike
+// Discover there's no "No Rating" placeholder: a shelf of imported books would be a wall of them.
+function libRatingHTML(b) {
+  const r = state.libRatings.ratings[b.id];
+  return r ? ratingPillHTML({ rating: r, rating_state: "rated" }) : "";
+}
+
+// Asked once per visit to the Library, never with the two-second refresh. Resolves true when the
+// pills changed, so the page knows to draw them.
+async function loadLibRatings() {
+  const was = state.libRatings;
+  if (Date.now() - was.at < 5 * 60 * 1000) return false;
+  try {
+    const res = await api("/api/library/ratings");
+    state.libRatings = { at: Date.now(), ratings: res.ratings || {} };
+  } catch {
+    return false;
+  }
+  return JSON.stringify(state.libRatings.ratings) !== JSON.stringify(was.ratings);
 }
 
 function continueListening() {
@@ -1108,7 +1130,7 @@ function Library(root) {
     render();
   };
   root.onclick = async (e) => {
-    if (e.target.closest("a.quick")) return; // an ebook download: let the link do it
+    if (e.target.closest("a.quick, a.rating-pill")) return; // an ebook download or a rating's page: let the link do it
     if (e.target.closest("#import-btn, [data-import]")) return openImport();
     const row = e.target.closest(".req-row");
     const act = e.target.closest("[data-act]");
@@ -1134,6 +1156,7 @@ function Library(root) {
 
   let listenSig = "";
   render();
+  loadLibRatings().then((changed) => { if (changed && root.isConnected) render(); });
   return {
     update(structural) {
       const sig = state.library.map((b) => `${b.id}:${b.finished}:${Math.round(b.listen_position / 60)}`).join("|");
@@ -2460,6 +2483,9 @@ function Settings(root, page) {
             <label class="switch"><input type="checkbox" name="found_needs_approval" ${s.found_needs_approval ? "checked" : ""}><i></i><span><b>Ask before downloading what it finds</b><small>A release found for a Wanted book waits under Library → Awaiting approval, so you can check its language, format and size first. Approve it, pick another, or keep looking. Add the Release found event to a notification to hear about each one.</small></span></label>
           </div>
           <div class="set-row">
+            <label class="switch"><input type="checkbox" name="retry_failed_downloads" ${s.retry_failed_downloads ? "checked" : ""}><i></i><span><b>Try another release when a download fails</b><small>When the release itself is bad (a dead torrent, a failed repair, no audio in it), Narratarr picks the next best match instead, up to twice per book. Releases that failed are marked in Find releases and never picked on their own again. A setup problem, like a folder Narratarr can’t see, isn’t retried.</small></span></label>
+          </div>
+          <div class="set-row">
             <label for="audible_region"><b>Audible store for book details</b><small>Covers, series and release dates come from here. Nothing is downloaded from Audible.</small></label>
             <select class="select" id="audible_region" name="audible_region">
               ${AUDIBLE_STORES
@@ -2484,13 +2510,8 @@ function Settings(root, page) {
         <div class="ph"><h3>Rating metadata</h3><p class="desc">The star pill on every Discover card. Ratings are read from a local cache, never fetched while a page loads: a book with no rating yet is filled in the background and appears on your next search.</p></div>
         <div class="body">
           <div class="field">
-            <label for="ratings_provider"><b>Where ratings come from</b></label>
-            <select class="select" id="ratings_provider" name="ratings_provider">
-              <option value="audnex" ${s.ratings_provider === "audnex" ? "selected" : ""}>Audible (Audnex)</option>
-              <option value="bookmarks" ${s.ratings_provider === "bookmarks" ? "selected" : ""}>Bookmarks${s.bookmarks_available ? "" : " — no dataset found"}</option>
-              <option value="" ${!s.ratings_provider ? "selected" : ""}>Off</option>
-            </select>
-            <span class="hint">Audible gives a star average for any book it sells, with a storefront list below because a book only answers in the country that sells it. Bookmarks uses a local critic consensus file instead, on its own 0-4 scale, and needs no network at all. Off removes the pill from every card and makes no requests.</span>
+            <label class="switch"><input type="checkbox" name="ratings_enabled" ${s.ratings_enabled ? "checked" : ""}><i></i>Show ratings on book cards</label>
+            <span class="hint">A star score from Audible’s own average, for any book they sell. Ratings are read from a local cache, never fetched while a page loads, so a new book fills in the background and shows next time. Switching this off removes the pill from every card and makes no network requests at all.</span>
           </div>
           <div class="set-row">
             <label><b>Audible storefronts</b><small>A book is only sold in some countries, and the ratings service only answers from a country that sells it. Narratarr asks your list in order, then the country the book itself came from, so the single United Kingdom entry is enough for most titles. The storefront that answered is remembered for that book. Add more only if the same cards keep showing <b>No Rating</b>: more regions means more coverage and more requests.</small></label>
@@ -3222,16 +3243,10 @@ function Settings(root, page) {
 
   const collect = () => {
     const data = Object.fromEntries(new FormData(form));
-    // These four lived in the per-client blocks that Clients replaced. Only send one when its input
-    // is on the page, or a save would silently overwrite a stored preference with false.
-    for (const name of ["delete_from_rd_after", "delete_from_ad_after", "delete_from_tb_after", "delete_from_pm_after"]) {
-      if (form[name]) data[name] = form[name].checked;
-    }
-    data.smart_search = form.smart_search.checked;
-    data.auto_search = form.auto_search.checked;
-    data.check_updates = form.check_updates.checked;
-    data.auth_local_bypass = form.auth_local_bypass.checked;
-    data.listener_approval = form.listener_approval.checked;
+    // A form leaves an unticked box out and sends a ticked one as "on", so a switch could be turned on
+    // but never off again. Every switch on the page says true or false instead. Only the ones on the
+    // page: a switch that isn't shown (a client's own, say) keeps what's stored.
+    for (const box of form.querySelectorAll('input[type="checkbox"][name]')) data[box.name] = box.checked;
     data.max_concurrent = Number(data.max_concurrent) || 1;
     data.auto_search_hours = Number(data.auto_search_hours) || 12;
     // A bare address ("abs.example.com") is something to Find, not a setting to save yet.
@@ -3241,6 +3256,7 @@ function Settings(root, page) {
 
   async function save(quiet) {
     state.settings = await api("/api/settings", { method: "PUT", body: collect() });
+    state.libRatings = { at: 0, ratings: {} }; // ratings may have been switched on or off
     for (const key of ["audiobookshelf_token", "brave_api_key", "prowlarr_api_key", "torznab_api_key"]) {
       if (form[key]) form[key].value = state.settings[key];
     }
@@ -4147,11 +4163,14 @@ function releasesHTML(res) {
       const quality = r.match >= res.auto_match ? "good" : r.match >= 75 ? "ok" : "weak";
       const facts = [label(r), r.protocol === "usenet" ? "Usenet" : r.protocol === "torrent" ? "Torrent" : "Direct",
         r.format, r.size, r.language, r.seeders != null ? `${r.seeders} seeder${r.seeders === 1 ? "" : "s"}` : "", r.posted].filter(Boolean);
-      const failedBadge = r.failed ? `<span class="rel-failed" title="${esc(r.failed_reason || "This release failed previously")}">Failed</span>` : "";
-      const failedCls = r.failed ? " failed" : "";
-      return `<div class="rel${failedCls} ${r.language_ok === false ? "other-lang" : ""}" ${r.language_ok === false ? 'title="Not in your languages: automatic search skips it, but you can still grab it"' : ""}>
+      // A release that failed for this book, or that an admin turned down: still there to grab on
+      // purpose, but marked, so nobody picks it again by accident. Automatic picking skips both.
+      const flag = r.failed ? `<span class="rel-flag bad" title="${esc(r.failed)}">${I.alert}Failed before</span>`
+        : r.turned_down ? `<span class="rel-flag" title="Turned down for this book. Automatic search won’t pick it again.">Turned down</span>` : "";
+      const dim = r.failed || r.turned_down ? "spent" : r.language_ok === false ? "other-lang" : "";
+      return `<div class="rel ${dim}" ${r.language_ok === false && !dim.includes("spent") ? 'title="Not in your languages: automatic search skips it, but you can still grab it"' : ""}>
         <div class="rel-main"><b title="${esc(r.release || r.title)}">${esc(r.release || r.title)}</b>
-          <small>${facts.map(esc).join(" · ")}</small>${failedBadge}</div>
+          <small>${flag}${facts.map(esc).join(" · ")}</small></div>
         <span class="match ${quality}" title="How closely it matches the title and author">${r.match}%</span>
         <button class="btn sm" data-grab="${i}" ${r.usable ? "" : `disabled title="Set up a download client for ${r.protocol === "usenet" ? "Usenet" : "torrents"} first"`}>Grab</button>
       </div>`;

@@ -6,6 +6,7 @@ Docs: https://api.real-debrid.com/
 from __future__ import annotations
 
 import httpx
+from .downloaders import bad_release
 
 API = "https://api.real-debrid.com/rest/1.0"
 
@@ -96,7 +97,7 @@ class RealDebrid:
         if status == "downloaded":
             return {"done": True, "progress": 100.0, "speed": 0, "detail": "Real-Debrid has it"}
         if status in DEAD:
-            raise RealDebridError(f"Real-Debrid couldn't fetch this torrent ({status}).")
+            raise bad_release(RealDebridError(f"Real-Debrid couldn't fetch this torrent ({status})."))
         if status == "waiting_files_selection":
             await self.select_all_files(torrent_id)
         detail = {
