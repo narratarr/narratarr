@@ -2,7 +2,7 @@
 
 All notable changes to Narratarr. The app shows this under **Settings → Updates**.
 
-## Unreleased
+## 0.9.4 — 2026-11-06
 
 - **A download that fails gets another release.** When the release itself is bad (your download client says the download failed, a debrid service says the torrent is dead, it finds no seeds in a week, or there's no audio in it), Narratarr picks the next best match, the way automatic search would, up to twice per book. With **Ask before downloading what it finds** on, the new release waits for approval instead. A setup problem, such as a downloads folder Narratarr can't see, isn't retried, since another release would only fail the same way. Switch it off under Settings → Search & sources. Asked for on the Discord by lv2code, contributed by curator8888.
 - **Failed releases are marked.** A release that failed for a book is never picked automatically again, including the same torrent from another indexer, and **Pick a release** marks it **Failed before**, with the reason on hover. Releases you turned down say **Turned down**. You can still grab either on purpose.
