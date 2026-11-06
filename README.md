@@ -317,7 +317,8 @@ Narratarr searches category `3030` (*Audio › Audiobook*) for audiobooks and `7
 
 Discover can show a star score on each book, taken from the average Audible publishes for the
 audiobook edition. It is **on by default** and switched off in **Settings → Search & sources →
-Rating metadata**; switched off, no requests are made at all and no pill is shown.
+Rating metadata**; switched off, no requests are made at all and no pill is shown. Library cards show
+the same pill for books that have a score.
 
 A score appears only when the book we found is the book we asked for: the title must match exactly
 after normalising, and the surname must match too. A near miss leaves the card reading **No Rating**,
@@ -341,6 +342,7 @@ Some books aren't out yet, or aren't on your indexers yet. Put them on your **Wa
 - **Ask before downloading:** turn on **Ask before downloading what it finds** (Settings → Search & sources) and a release that automatic search finds waits under **Library → Awaiting approval** instead of downloading. Check its language, format and size, then **Approve** it, **Pick another**, or **Keep looking**, which turns that release down for good. Add the **Release found** event to a notification to hear about each one.
 - **More Audible stores:** some books are only sold in another country, such as French titles on audible.fr. Under **More Audible stores to search**, pick the stores you want; everyone, listeners too, can then switch the Audible catalog to one of them for a search, and a search that finds nothing in your main store tries them in order. A book added from another store keeps its details from that store.
 - **Books you already have:** when Audiobookshelf is connected, author pages and the Audible catalog mark the books in your Audiobookshelf library as **In Audiobookshelf**, and **Add all missing** skips them.
+- **A download that fails gets another release:** when the release itself is bad (your download client says it failed, a debrid service says the torrent is dead, it finds no seeds in a week, or there's no audio in it), Narratarr picks the next best match the way automatic search would, up to twice per book, and holds it for approval if you've asked for that. A setup problem, such as a downloads folder Narratarr can't see, isn't retried, since another release would fail the same way. A release that failed is never picked on its own again, and **Pick a release** marks it **Failed before** (and ones you turned down **Turned down**). Switch it off under Settings → Search & sources.
 - **Pick a release yourself:** open a Wanted book and press **Pick a release** to see every match with a score, then **Grab** the one you want. The book keeps Audible's title, cover and description whichever release you pick.
 - **Audiobook, ebook or both:** when you add a book to Wanted, choose the format. You can also open any book in your library and press **Want it too** on the format you don't have yet. Ebooks are searched for in your indexers' ebook categories, and Narratarr keeps one file per book, preferring EPUB, then AZW3, MOBI and PDF. The ebook goes into the audiobook's folder (or the audiobook into the ebook's), which is how Audiobookshelf shows both as one book. A finished EPUB opens in Narratarr's own reader (pages you turn, Paper, Sepia and Night themes, text size and font, contents, and your place remembered), a PDF in your browser's viewer, and any ebook can be downloaded for Apple Books, Kindle, Kobo or another reading app.
 - **Follow authors and series:** on the **Authors** page, search for an author and press **Follow**, or press **Follow** on any book's author or series. Their new releases (and, if you like, everything already out) go straight to Wanted. Each author and series page shows their books, what's in your library, and an **Add all missing** button.
@@ -408,7 +410,16 @@ Settings has one-click presets for these, including an **Audiobookshelf style** 
 
 Audiobookshelf rescans once when tidying finishes, if it's connected.
 
-Books whose tags don't say their series, narrator or year are filed as singles. **Fill in missing details** (next to **Preview changes**) asks Audible for them, only for books whose title and author match exactly, and never overwrites what a book already has. For a single book, open it and use **Edit details**: set the series, its number and the year yourself, or press **Fill in from Audible**.
+Books whose tags don't say their series, narrator or year are filed as singles. **Fill in missing details** (next to **Preview changes**) asks Audible for them, only for books whose title and author match exactly, and never overwrites what a book already has. A name that leads with its series, such as `Playing for Keeps #1 - Consider Me`, is matched by its title alone as long as Audible has it in that series, and then loses the prefix, since the series fields hold it. For a single book, open it and use **Edit details**: set the series, its number and the year yourself, or press **Fill in from Audible**.
+
+**Tidying a library Narratarr didn't download.** Tidy works on the books in Narratarr's library, so bring the others in first without moving them:
+
+1. **Library → Import books**, choose your books folder, and pick **Leave where they are**. Each book is added where it is; nothing is copied or moved.
+2. **Settings → General → Tidy your library → Fill in missing details**, for the series, narrators and years your folder names and tags don't have. This only changes Narratarr's own records, never your files.
+3. **Preview changes**, pick the books, and **Move** them, with **Write these details into the audio files' tags** left off.
+
+Moving is renaming, so the files themselves don't change: a torrent client seeding from a hardlink of a file keeps seeding, because its link still points at the same, untouched file. Writing tags does change the files, which breaks seeding from hardlinks, so leave that switch off if you seed.
+
 ### Languages
 
 Under **Settings → Search & sources → Languages**, pick the languages your books should be in. Discover then hides books it can tell are in another language (one click shows them again), and automatic search won't grab a release in another language; you can still pick one yourself. Narratarr reads the language from the source when it says, and otherwise from the release name (`[German]`, `.GER.`, `Hörbuch`, `livre audio`…), ignoring words that are part of the book's own title. A book whose language it can't tell is never hidden. For the Audible catalog, also choose the Audible store in that language (Germany, France…), since each store lists its own language.

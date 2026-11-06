@@ -647,7 +647,7 @@ async def audible_match(book_id: int):
     series = (b.get("series") or [{}])[0] if b.get("series") else {}
     return {"asin": b["asin"], "title": b["title"], "author": b["author"], "narrators": b["narrators"],
             "series": audible.series_name(series.get("title", "")), "series_number": series.get("sequence", ""),
-            "year": (b.get("released") or "")[:4]}
+            "year": (b.get("released") or "")[:4], "series_first": b.get("series_first", "")}
 
 
 @app.delete("/api/library/{book_id}")
@@ -1057,8 +1057,7 @@ class FillDetails(BaseModel):
 async def tidy_fill_details(body: FillDetails):
     """Ask Audible for the series, narrators and year that library books are missing, a few at a time.
     Call again until `remaining` is 0. Each book is asked once; only empty details are filled."""
-    todo = [b for b in db.list_books() if b["status"] == "completed" and wanted.missing_details(b)
-            and not b.get("details_checked")]
+    todo = [b for b in db.list_books() if wanted.details_due(b)]
     batch, filled = todo[:max(1, min(body.batch, 25))], 0
     for b in batch:
         try:

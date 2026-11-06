@@ -86,14 +86,20 @@ def _split_terms(s: str) -> list[str]:
 
 def _reveal(soup: BeautifulSoup) -> BeautifulSoup:
     """Some posts arrive as base64 inside a hidden `.re-ab` element, which the site's own script decodes
-    and shows. Do the same, so those posts are parsed like any other. Nothing is run: it's only text."""
+    and shows. Do the same, so those posts are parsed like any other. Nothing is run: it's only text.
+
+    The element is usually the post itself (`<div class="post re-ab">` holding the post's inside), so
+    its contents are swapped and the element kept: replacing it would lose the `div.post` around them."""
     for el in soup.select(".re-ab"):
         raw = re.sub(r"[^A-Za-z0-9+/=]", "", el.get_text())
         try:
-            html = base64.b64decode(raw + "=" * (-len(raw) % 4)).decode("utf-8", "replace")
+            html = base64.b64decode(raw + "=" * (-len(raw) % 4), validate=True).decode("utf-8", "replace")
         except (ValueError, binascii.Error):
             continue  # not base64 after all: leave it as it is
-        el.replace_with(BeautifulSoup(html, "html.parser"))
+        if "<" not in html:
+            continue  # decoded, but not markup: leave it as it is
+        el.clear()
+        el.append(BeautifulSoup(html, "html.parser"))
     return soup
 
 

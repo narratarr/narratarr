@@ -2,6 +2,16 @@
 
 All notable changes to Narratarr. The app shows this under **Settings → Updates**.
 
+## Unreleased
+
+- **A download that fails gets another release.** When the release itself is bad (your download client says the download failed, a debrid service says the torrent is dead, it finds no seeds in a week, or there's no audio in it), Narratarr picks the next best match, the way automatic search would, up to twice per book. With **Ask before downloading what it finds** on, the new release waits for approval instead. A setup problem, such as a downloads folder Narratarr can't see, isn't retried, since another release would only fail the same way. Switch it off under Settings → Search & sources. Asked for on the Discord by lv2code, contributed by curator8888.
+- **Failed releases are marked.** A release that failed for a book is never picked automatically again, including the same torrent from another indexer, and **Pick a release** marks it **Failed before**, with the reason on hover. Releases you turned down say **Turned down**. You can still grab either on purpose.
+- **Ratings on Library cards.** Books in your library show the same rating pill as Discover when they have a score. Contributed by curator8888.
+- **Switches in Settings can be turned off again.** **Ask before downloading what it finds** and **Show ratings on book cards** could be switched on but not back off: the page left an unticked switch out when saving. Every switch now saves as on or off.
+- **AudiobookBay: the rest of the hidden posts.** Some posts hide their inside as base64 within the post itself, and Narratarr lost the post while decoding it, so books like *The Eating Woods* still didn't show up. They do now, in searches and in details. Reported on the Discord by portrudeboyny, who also pointed at the fix.
+- **Fill in missing details understands names that lead with their series.** A book named `Playing for Keeps #1 - Consider Me` is matched on Audible as *Consider Me*, as long as Audible has it in that series, and its name loses the prefix once the series fields hold it. Books checked before get one more look. Suggested on the Discord by arsenolupino.
+- **Tidy your library on a tablet.** On a short screen, such as a tablet held sideways, the list of books in Preview changes was squeezed to nothing. The window now scrolls as a whole there, as it does on a phone. Reported on the Discord by arsenolupino.
+
 ## 0.9.3 — 2026-11-05
 
 - **Ask before downloading what automatic search finds.** Turn on **Ask before downloading what it finds** under Settings → Search & sources, and a release found for a Wanted book waits under **Library → Awaiting approval** instead of downloading, with that release picked. Check its language, format and size, then **Approve** it, **Pick another**, or **Keep looking**: Narratarr goes back to searching and never picks that release again. A new **Release found** notification says what was found and who wanted the book. Off by default. Suggested by aarsenca.

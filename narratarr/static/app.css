@@ -974,7 +974,7 @@ body.has-player .save-float { bottom: 104px; }
 .match.weak { color: var(--text-3); background: var(--surface-2); }
 
 /* Import dialog */
-.modal.wide { width: min(760px, 100%); max-height: calc(100vh - 32px); display: flex; flex-direction: column; }
+.modal.wide { width: min(760px, 100%); max-height: calc(100vh - 32px); max-height: calc(100dvh - 32px); display: flex; flex-direction: column; }
 .modal.import .input-row { margin-top: 20px; }
 .modal.import .chips { margin-top: 12px; }
 .modal.import .chips:empty { display: none; }
@@ -1944,6 +1944,10 @@ button.link { border: 0; background: none; padding: 0; min-height: 32px; color: 
   .modal.tidy { padding: 24px 18px 20px; }
   .tidy-layout { flex-direction: column; align-items: flex-start; gap: 6px; }
   .tidy-layout code { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+}
+/* A phone, or a short screen such as a tablet on its side, has no room for the list between the
+   header and the switches, which squeezed it to nothing. There the whole window scrolls instead. */
+@media (max-width: 640px), (max-height: 860px) {
   .modal.tidy { overflow-y: auto; overscroll-behavior: contain; }
   .modal.tidy #tidy-body { flex: none; }
   .tidy-list { max-height: none; overflow: visible; }

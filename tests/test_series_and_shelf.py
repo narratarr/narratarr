@@ -222,3 +222,52 @@ async def test_owned_reads_titles_from_audiobookshelf_and_remembers_them(monkeyp
 
 async def test_owned_is_empty_without_a_connection():
     assert await audiobookshelf.owned(config.load()) == []
+
+
+# ---- names that lead with their series --------------------------------------------------------
+
+
+def test_series_first_names_are_split_only_on_an_explicit_marker():
+    assert wanted.series_first("Playing for Keeps #1 - Consider Me") == ("Playing for Keeps", "1", "Consider Me")
+    assert wanted.series_first("Mistborn, Book 2 - The Well of Ascension") == ("Mistborn", "2", "The Well of Ascension")
+    assert wanted.series_first("Discworld Vol. 3: Equal Rites") == ("Discworld", "3", "Equal Rites")
+    assert wanted.series_first("The Expanse #07.5 - Strange Dogs") == ("The Expanse", "7.5", "Strange Dogs")
+    for title in ("Catch-22 - A Novel", "1984", "Nero", "Book of Night", "Fahrenheit 451 - Special Edition"):
+        assert wanted.series_first(title) is None, title
+
+
+async def test_a_series_first_name_fills_in_and_loses_its_prefix(audible_search):
+    catalog, asked = audible_search
+    catalog.append({**book("B0KEEPS1", "Consider Me", [("S7", "Playing for Keeps", "1")], author="Becka Mack"),
+                    "narrators": ["Erin Mallon"], "released": "2022-10-01"})
+    b = library_book(source_url="file:///books/keeps", title="Playing for Keeps #1 - Consider Me", author="Becka Mack")
+    changed = await wanted.fill_from_audible(b)
+    got = db.get(b["id"])
+    assert set(changed) == {"series", "narrators", "released", "asin", "title"}
+    assert got["title"] == "Consider Me" and got["series"][0]["title"] == "Playing for Keeps"
+    assert asked[-1] == "Consider Me Becka Mack"
+
+
+async def test_a_series_first_name_needs_audible_to_agree_on_the_series(audible_search):
+    catalog, _ = audible_search
+    catalog.append(book("B0OTHER1", "Consider Me", [("S8", "Some Other Series", "1")], author="Becka Mack"))
+    b = library_book(source_url="file:///books/keeps", title="Playing for Keeps #1 - Consider Me", author="Becka Mack")
+    assert await wanted.fill_from_audible(b) == []
+    assert db.get(b["id"])["title"] == "Playing for Keeps #1 - Consider Me"
+
+
+def test_books_checked_before_get_one_more_look_if_their_name_leads_with_a_series():
+    old = wanted.SERIES_FIRST_SINCE - 10
+    keeps = library_book(source_url="file:///books/k", title="Playing for Keeps #1 - Consider Me", details_checked=old)
+    plain = library_book(source_url="file:///books/p", title="Nero", details_checked=old)
+    again = library_book(source_url="file:///books/a", title="Playing for Keeps #2 - Chasing Wishes",
+                         details_checked=wanted.SERIES_FIRST_SINCE + 10)
+    assert [wanted.details_due(db.get(x["id"])) for x in (keeps, plain, again)] == [True, False, False]
+
+
+def test_audible_match_offers_the_title_without_its_series(client, audible_search):
+    catalog, _ = audible_search
+    catalog.append(book("B0KEEPS1", "Consider Me", [("S7", "Playing for Keeps", "1")], author="Becka Mack"))
+    b = library_book(source_url="file:///books/keeps", title="Playing for Keeps #1 - Consider Me", author="Becka Mack")
+    m = client.get(f"/api/library/{b['id']}/audible-match").json()
+    assert (m["series_first"], m["series"], m["series_number"]) == ("Consider Me", "Playing for Keeps", "1")

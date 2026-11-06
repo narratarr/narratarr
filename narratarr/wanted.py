@@ -266,24 +266,71 @@ async def auto_search() -> int:
 # ---- filling in a library book's details from Audible -------------------------
 
 
+# "Playing for Keeps #1 - Consider Me", "Mistborn, Book 2 - The Well of Ascension", "Discworld Vol. 3: Equal
+# Rites": a folder name that leads with its series. Only an explicit marker (#, Book, Vol) counts, so a
+# title that merely has a number in it ("Catch-22 - A Novel") is never split.
+_SERIES_FIRST = re.compile(
+    r"^(?P<series>[^#]+?)\s*(?:#\s*|,?\s+(?:book|bk\.?|vol\.?|volume)\s*)(?P<number>\d+(?:\.\d+)?)\s*[-–—:]\s*(?P<title>\S.*)$",
+    re.I)
+
+
+def series_first(title: str) -> tuple[str, str, str] | None:
+    """(series, number, title) when a book's name starts with its series, else None."""
+    m = _SERIES_FIRST.match((title or "").strip())
+    if not m or not normalize(m["series"]) or not normalize(m["title"]):
+        return None
+    return m["series"].strip(" -–—,:"), m["number"].lstrip("0") or "0", m["title"].strip()
+
+
+def _in_series(match: dict, series: str) -> bool:
+    want = normalize(audible.series_name(series))
+    return any(normalize(audible.series_name(s.get("title") or "")) == want for s in match.get("series") or [])
+
+
 async def audible_match(book: dict) -> dict | None:
     """Audible's record of this book: by its ASIN when it has one, else the search result whose title
-    and author both match. Nothing at all rather than a near miss: a wrong series is worse than none."""
+    and author both match. Nothing at all rather than a near miss: a wrong series is worse than none.
+
+    A name that leads with its series ("Playing for Keeps #1 - Consider Me") is also tried as its
+    title alone, and then Audible's book has to be in that series too. The match says so in
+    `series_first`, the book's name without the series, which the series fields now hold."""
     if book.get("asin"):
         return await audible.book(book["asin"], r=audible.region_from_url(book.get("source_url") or "") or None)
     title, author = main_title(book.get("title") or ""), first_author(book.get("author") or "")
     if not title or not author:
         return None
     found, _ = await audible.search_books(f"{title} {author}")
-    return next((b for b in found if _titles_match(b["title"], b["author"], book["title"], book["author"])), None)
+    hit = next((b for b in found if _titles_match(b["title"], b["author"], book["title"], book["author"])), None)
+    if hit or not (split := series_first(book.get("title") or "")):
+        return hit
+    series, _number, alone = split
+    found, _ = await audible.search_books(f"{main_title(alone)} {author}")
+    hit = next((b for b in found if _titles_match(b["title"], b["author"], alone, book["author"])
+                and _in_series(b, series)), None)
+    return {**hit, "series_first": alone} if hit else None
 
 
 def missing_details(book: dict) -> bool:
     return not (book.get("series") and book.get("narrators") and book.get("released"))
 
 
+# When names that lead with their series started being understood (0.9.4). A book like that which was
+# checked before then gets one more look; after it, each book is still asked only once.
+SERIES_FIRST_SINCE = 1793992037
+
+
+def details_due(book: dict) -> bool:
+    """Whether Fill in missing details should ask Audible about this book."""
+    if book.get("status") != "completed" or not missing_details(book):
+        return False
+    checked = book.get("details_checked")
+    return not checked or (checked < SERIES_FIRST_SINCE and not book.get("series")
+                           and series_first(book.get("title") or "") is not None)
+
+
 async def fill_from_audible(book: dict) -> list[str]:
-    """Fill only what the book is missing (series, narrators, year, ASIN) from Audible. Returns what changed."""
+    """Fill only what the book is missing (series, narrators, year, ASIN) from Audible. Returns what changed.
+    The one thing it rewrites is a title that leads with its series, once the series fields hold it."""
     db.update(book["id"], details_checked=time.time())
     match = await audible_match(book)
     if not match:
@@ -297,6 +344,8 @@ async def fill_from_audible(book: dict) -> list[str]:
         changes["released"] = match["released"]
     if not book.get("asin") and match.get("asin"):
         changes["asin"] = match["asin"]
+    if match.get("series_first") and (book.get("series") or changes.get("series")):
+        changes["title"] = match["series_first"]  # the series is in its own fields now, not the title
     if changes:
         db.update(book["id"], **changes)
     return list(changes)

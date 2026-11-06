@@ -4230,6 +4230,8 @@ function editDetails(lib) {
       put("series", a.series);
       put("series_number", a.series_number);
       put("year", a.year);
+      // A name that led with its series ("Playing for Keeps #1 - Consider Me"): the series fields hold that now.
+      if (a.series_first && f.title && f.series.value.trim()) { f.title.value = a.series_first; filled.push("title"); }
       toast(filled.length ? "Filled in from Audible. Check them, then save." : "Audible has nothing these fields are missing.", { kind: "ok" });
     } catch (err) {
       toast(err.message, { kind: "err" });
