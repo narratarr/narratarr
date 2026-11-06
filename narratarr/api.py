@@ -802,6 +802,18 @@ async def save_progress(book_id: int, body: Progress, request: Request):
 # ---- wanted: releases ---------------------------------------------------------
 
 
+def _is_failed_release(item: dict, book: dict) -> bool:
+    if book.get("status") != "failed":
+        return False
+    url = book.get("release_url") or ""
+    ih = (book.get("info_hash") or "").strip().lower()
+    if url and item.get("url") == url:
+        return True
+    if ih and (item.get("info_hash") or "").strip().lower() == ih:
+        return True
+    return False
+
+
 @app.get("/api/library/{book_id}/releases")
 async def releases(book_id: int):
     book = _get_or_404(book_id)
@@ -810,6 +822,13 @@ async def releases(book_id: int):
     except ProwlarrError as e:
         raise HTTPException(502, str(e))
     db.update(book_id, last_searched=time.time())
+    for item in found:
+        if _is_failed_release(item, book):
+            item["failed"] = True
+            item["failed_reason"] = book.get("error") or ""
+        else:
+            item["failed"] = False
+            item["failed_reason"] = ""
     return {"items": found[:60], "auto_match": wanted.AUTO_MATCH}
 
 

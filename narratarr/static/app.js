@@ -4037,9 +4037,11 @@ function releasesHTML(res) {
       const quality = r.match >= res.auto_match ? "good" : r.match >= 75 ? "ok" : "weak";
       const facts = [label(r), r.protocol === "usenet" ? "Usenet" : r.protocol === "torrent" ? "Torrent" : "Direct",
         r.format, r.size, r.language, r.seeders != null ? `${r.seeders} seeder${r.seeders === 1 ? "" : "s"}` : "", r.posted].filter(Boolean);
-      return `<div class="rel ${r.language_ok === false ? "other-lang" : ""}" ${r.language_ok === false ? 'title="Not in your languages: automatic search skips it, but you can still grab it"' : ""}>
+      const failedBadge = r.failed ? `<span class="rel-failed" title="${esc(r.failed_reason || "This release failed previously")}">Failed</span>` : "";
+      const failedCls = r.failed ? " failed" : "";
+      return `<div class="rel${failedCls} ${r.language_ok === false ? "other-lang" : ""}" ${r.language_ok === false ? 'title="Not in your languages: automatic search skips it, but you can still grab it"' : ""}>
         <div class="rel-main"><b title="${esc(r.release || r.title)}">${esc(r.release || r.title)}</b>
-          <small>${facts.map(esc).join(" · ")}</small></div>
+          <small>${facts.map(esc).join(" · ")}</small>${failedBadge}</div>
         <span class="match ${quality}" title="How closely it matches the title and author">${r.match}%</span>
         <button class="btn sm" data-grab="${i}" ${r.usable ? "" : `disabled title="Set up a download client for ${r.protocol === "usenet" ? "Usenet" : "torrents"} first"`}>Grab</button>
       </div>`;

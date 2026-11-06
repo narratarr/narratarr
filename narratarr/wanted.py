@@ -127,8 +127,24 @@ async def find_releases(book: dict) -> list[dict]:
     return found
 
 
-def best(found: list[dict]) -> dict | None:
+def _is_excluded(item: dict, exclude: dict | None) -> bool:
+    if not exclude:
+        return False
+    url = (exclude.get("release_url") or exclude.get("url") or "").strip()
+    ih = (exclude.get("info_hash") or "").strip().lower()
+    if url and item.get("url") == url:
+        return True
+    if ih and (item.get("info_hash") or "").strip().lower() == ih:
+        return True
+    return False
+
+
+def best(found: list[dict], exclude: dict | None = None) -> dict | None:
     for item in found:
+        if _is_excluded(item, exclude):
+            continue
+        if item.get("failed"):
+            continue
         if item["usable"] and item.get("language_ok", True) and item["match"] >= AUTO_MATCH and item.get("seeders") != 0:
             return item
     return None
