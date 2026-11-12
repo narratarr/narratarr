@@ -2801,6 +2801,7 @@ function Settings(root, page) {
   let routes = [];
   let advertised = [];
   let defaultClient = s.default_client || "";
+  let fallbackClient = s.debrid_fallback_client || "";
   let defaults = { torrent: "", usenet: "" };  // where a release no rule matches goes, per protocol
   const DELIVERY = { sabnzbd: "usenet", nzbget: "usenet" };
   const deliveryOf = (c) => DELIVERY[c.type] || "torrent";
@@ -2815,6 +2816,7 @@ function Settings(root, page) {
     hidden("clients", JSON.stringify(clients));
     hidden("client_routes", JSON.stringify({ version: 1, rules: routes }));
     hidden("default_client", defaultClient);
+    hidden("debrid_fallback_client", fallbackClient);
     dirty();
   };
   const clientName = (c) => esc(TYPE_LABEL[c.type] || c.type) + (c.id === c.type ? "" : ` · ${esc(c.id)}`);
@@ -2855,7 +2857,21 @@ function Settings(root, page) {
 
   const drawClients = () => {
     const firstOfType = new Set();
-    clientBox.innerHTML = clients.length ? clients.map((c, i) => {
+    // Only a local torrent client is a valid fallback: the point is to download and seed
+    // on the user's own machine when a cloud service doesn't have the release cached.
+    const localTorrent = clients.filter((c) => deliveryOf(c) === "torrent" && !DEBRID.includes(c.type));
+    if (fallbackClient && !localTorrent.some((c) => c.id === fallbackClient)) fallbackClient = "";
+    const fallbackHTML = localTorrent.length ? `
+      <div class="field" style="margin-top:14px">
+        <label>When your cloud service hasn't cached a torrent</label>
+        <select class="input" data-fallback>
+          <option value="">Off — send it to the cloud service anyway</option>
+          ${localTorrent.map((c) => `<option value="${esc(c.id)}" ${c.id === fallbackClient ? "selected" : ""}>Send it to ${clientName(c)} instead, so it downloads and seeds</option>`).join("")}
+        </select>
+        <span class="hint">Only when the service says it definitely doesn't have it. If it can't answer, or the service has no cache check, the release still goes to the cloud service.</span>
+      </div>` : "";
+
+    clientBox.innerHTML = (clients.length ? clients.map((c, i) => {
       const fields = FIELDS[c.type] || [];
       const own = fields.filter(([k]) => ["url", "username", "password", "api_key"].includes(k));
       const extra = fields.filter(([k]) => ["category", "save_path"].includes(k));
@@ -2882,7 +2898,7 @@ function Settings(root, page) {
         ${del ? `<label class="switch"><input type="checkbox" name="${del[0]}" ${deleteAfter[del[0]] ? "checked" : ""}><i></i>${del[1]}</label>` : ""}
         <div data-out></div>
       </div>`;
-    }).join("") : `<p class="muted client-empty">No download client yet. Add the one you already use.</p>`;
+    }).join("") : `<p class="muted client-empty">No download client yet. Add the one you already use.</p>`) + fallbackHTML;
   };
   // Until the server says otherwise, a protocol's default is its first client.
   const fillDefaults = () => {
@@ -3130,6 +3146,7 @@ function Settings(root, page) {
       const [c, cov] = await Promise.all([api("/api/download-clients"), api("/api/routing/coverage")]);
       adoptClients(c.clients);
       defaultClient = c.default_client || "";
+      fallbackClient = c.debrid_fallback_client || "";
       defaults = { torrent: "", usenet: "", ...(c.defaults || {}) };
       advertised = cov.indexers || [];
       routes = (cov.rules || []).map((r) => ({ match: { indexers: r.match.indexers || [], categories: r.match.categories || [] },
@@ -3263,6 +3280,7 @@ function Settings(root, page) {
     // The list comes back with its secrets masked, so a typed password doesn't stay in the page.
     adoptClients(state.settings.clients);
     defaultClient = state.settings.default_client || "";
+    fallbackClient = state.settings.debrid_fallback_client || "";
     try { defaults = { torrent: "", usenet: "", ...((await api("/api/download-clients")).defaults || {}) }; } catch { fillDefaults(); }
     drawClients(); drawRoutes(); sync();
     state.sources = await api("/api/sources"); // the Prowlarr tab appears once it's set up
@@ -3333,6 +3351,12 @@ function Settings(root, page) {
   tidyUndoState();
   form.addEventListener("input", dirty);
   form.addEventListener("change", dirty);
+  clientBox.addEventListener("change", (e) => {
+    const pick = e.target.closest("[data-fallback]");
+    if (!pick) return;
+    fallbackClient = pick.value;
+    sync();
+  });
   $("#discard", root).onclick = () => { state.view = Settings(root, page); };
   $$(".stepper [data-step]", form).forEach((b) => {
     b.onclick = () => {

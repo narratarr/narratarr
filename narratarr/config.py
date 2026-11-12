@@ -101,6 +101,11 @@ class Settings:
     # settings above the first time, so an existing install keeps working untouched.
     clients: list = field(default_factory=list)
     default_client: str = ""  # the client a grab falls through to when no route matches
+    # An optional local torrent client (a client entry id) to use when the selected
+    # debrid service says it does not have a release cached. Empty means off, which is
+    # the default: sending a grab somewhere the user did not choose is not something to
+    # do uninvited.
+    debrid_fallback_client: str = ""
     # Ordered routing rules, versioned so a future format change is a migration and not a repair.
     client_routes: dict = field(default_factory=lambda: {"version": 1, "rules": []})
 
