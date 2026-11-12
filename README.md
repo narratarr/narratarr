@@ -288,6 +288,23 @@ Press **Test** next to each one. Once Prowlarr is connected, a **Prowlarr** tab 
 - **qBittorrent / Transmission / Deluge:** when the torrent finishes, Narratarr **hard-links** the files into your library (copying only if they're on different drives). The torrent keeps seeding, which matters on private trackers.
 - **Stop or Remove** in Narratarr also removes an unfinished download from the client.
 
+**When your cloud service hasn't got the torrent yet.** Real-Debrid, AllDebrid, TorBox and Premiumize download the torrent themselves, which is what makes them fast. If the release is not already on their servers they have to fetch it first, and some of them charge that against a tight budget: TorBox allows only 60 uncached adds an hour, against 300 a minute when it already has the file.
+
+If you also run qBittorrent, Transmission or Deluge, you can tell Narratarr to send uncached torrents there instead. It appears under **Settings → Downloads** as *When your cloud service hasn't cached a torrent*. Pick a local client and the release downloads from the swarm on your own machine, seeds for other people, and only then is it linked into your library. Leave it on **Off** and nothing changes. The torrent is never removed from the local client afterwards, so it keeps seeding.
+
+The fallback only fires on a definite "not cached" answer:
+
+| What the service says | What Narratarr does |
+| --- | --- |
+| It has the torrent | Sends it there as usual |
+| It definitely hasn't got it | Sends it to your local client, and says so on the book |
+| It can't answer (an error, a timeout, an unclear reply) | Sends it there as usual, and says why it didn't fall back |
+| It has no cache check Narratarr trusts | Sends it there as usual, and says so |
+
+That last pair matters: a provider having a bad minute will never quietly send your download somewhere you didn't pick. **TorBox** has a documented cache check that Narratarr uses. **Real-Debrid** still documents one but several other tools report it was switched off, so Narratarr only trusts a positive answer from it and treats everything else as unknown; it has not been verified against a live Real-Debrid account. **AllDebrid** and **Premiumize** are not wired up, so uncached fallback does not apply to them.
+
+Two smaller limits, stated rather than hidden: a `.torrent` file whose hash Narratarr doesn't already know cannot be checked (there is no bencode parser in the app), and a cloud service that removes the torrent after downloading it does not help the swarm, which is the other half of why the local route exists.
+
 Narratarr searches category `3030` (*Audio › Audiobook*) for audiobooks and `7020` (*Books › EBook*) for ebooks by default; you can change either under **Settings → Prowlarr**. The Prowlarr tab on Discover has an **Audiobooks / Ebooks** switch, and **Test** tells you which of your indexers offer ebooks. To go easy on indexer API limits, each search is sent once as typed, and a second, spelling-corrected search is only made when the first finds little.
 
 > [!TIP]
