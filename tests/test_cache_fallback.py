@@ -98,14 +98,15 @@ async def test_torbox_empty_answer_is_a_miss():
     assert await _torbox(handler).cached(HEX) is False
 
 
-async def test_torbox_entry_with_no_files_is_not_cached():
+async def test_torbox_entry_with_no_files_is_unknown_not_a_miss():
+    """A listed hash without files isn't a clear "no": it stays on TorBox (review of #16)."""
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={
             "success": True, "error": None, "detail": "",
             "data": {HEX: {"hash": HEX, "files": [], "size": 0}},
         })
 
-    assert await _torbox(handler).cached(HEX) is False
+    assert await _torbox(handler).cached(HEX) is None
 
 
 def _rd(handler):
@@ -161,8 +162,9 @@ BOOK = {"id": 7, "info_hash": HEX, "download_url": "https://x/y.torrent", "sourc
 async def _run(w, monkeypatch, answer, settings, fallback_id="qb"):
     diverted = {}
 
-    async def fake_local(book, source, entry, decision):
+    async def fake_local(book, source, entry, decision, fetched=None):
         diverted["entry"] = entry.id
+        diverted["fetched"] = fetched
 
     monkeypatch.setattr(w, "_process_torrent_client", fake_local)
     settings.debrid_fallback_client = fallback_id
@@ -182,6 +184,7 @@ async def test_uncached_diverts_to_the_local_client(w, monkeypatch):
     decided, diverted = await _run(w, monkeypatch, False, _Settings())
     assert decided is True
     assert diverted["entry"] == "qb"
+    assert diverted["fetched"] == ("magnet", MAGNET), "the payload in hand goes along; the indexer isn't asked twice"
     assert any("downloads from the swarm" in f.get("detail", "") for _, f in worker.db.updates)
 
 

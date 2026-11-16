@@ -63,8 +63,28 @@ async def lifespan(app: FastAPI):
     await worker.stop()
 
 
+# A release's indexer link and tracker list stay on the server. Either can carry a private tracker's
+# passkey (a Torznab feed straight from a tracker, a magnet's announce URLs), the page never uses them,
+# and listeners see library and Discover rows too. The worker reads them from the database.
+SERVER_ONLY = frozenset({"download_url", "trackers"})
+
+
+def _scrub(value):
+    if isinstance(value, dict):
+        return {k: _scrub(v) for k, v in value.items() if k not in SERVER_ONLY}
+    if isinstance(value, list):
+        return [_scrub(v) for v in value]
+    return value
+
+
+class ScrubbedJSON(JSONResponse):
+    def render(self, content) -> bytes:
+        return super().render(_scrub(content))
+
+
 # The internal API is the web UI's and changes freely, so it isn't published; apps use /api/v1.
-app = FastAPI(title="Narratarr", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+app = FastAPI(title="Narratarr", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None,
+              default_response_class=ScrubbedJSON)
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 app.mount("/api/v1", apiv1.v1)
 
@@ -1061,7 +1081,11 @@ async def tidy_fill_details(body: FillDetails):
     settings = config.load()
     todo = [b for b in db.list_books() if wanted.details_due(b)]
     batch, filled, from_abs = todo[:max(1, min(body.batch, 25))], 0, 0
-    items = await audiobookshelf.owned(settings) if todo else []  # kept for ten minutes between batches
+    items = []  # kept for ten minutes between batches
+    if todo:
+        items = await audiobookshelf.owned(settings)
+        if settings.audiobookshelf_ebook_library_id:
+            items = items + await audiobookshelf.owned(settings, settings.audiobookshelf_ebook_library_id)
     for b in batch:
         changed = wanted.fill_from_audiobookshelf(b, items, settings.library_dir) if items else []
         if changed:
@@ -1868,17 +1892,25 @@ async def abs_check(body: Check):
             library = next((lib for lib in await server.libraries() if lib["id"] == s.audiobookshelf_library_id), None)
             if not library:
                 raise AudiobookshelfError("Audiobookshelf doesn't know that library any more. Pick it again.")
-            # Ebooks filed apart with {kind} live in their own library; look there too.
-            ids = list(dict.fromkeys(x for x in (library["id"], s.audiobookshelf_ebook_library_id) if x))
+            # Ebooks filed apart with {kind} live in their own library: each kind is checked against its own.
+            ebook_lib = s.audiobookshelf_ebook_library_id if s.audiobookshelf_ebook_library_id != library["id"] else ""
+            groups = ([(library["id"], [b for b in books if wanted.kind_of(b) != "ebook"]),
+                       (ebook_lib, [b for b in books if wanted.kind_of(b) == "ebook"])] if ebook_lib
+                      else [(library["id"], books)])
             if body.scan and books:
-                for library_id in ids:
-                    await server.scan(library_id)
+                for library_id, group in groups:
+                    if group:
+                        await server.scan(library_id)
             # A scan runs in the background, so look a few times while it finds things.
             for attempt in range(6 if body.scan and books else 1):
                 if attempt:
                     await asyncio.sleep(1.5)
-                items = [i for library_id in ids for i in await server.items(library_id)]
-                result = audiobookshelf.compare(books, library_dir, items)
+                parts = [audiobookshelf.compare(group, library_dir, await server.items(library_id))
+                         for library_id, group in groups if group]
+                result = {"books": sum(r["books"] for r in parts), "seen": sum(r["seen"] for r in parts),
+                          "missing": [t for r in parts for t in r["missing"]][:5],
+                          "seen_at": next((r["seen_at"] for r in parts if r["seen_at"]), "")} if parts else \
+                    audiobookshelf.compare([], library_dir, [])
                 if result["seen"] == result["books"]:
                     break
     except AudiobookshelfError as e:

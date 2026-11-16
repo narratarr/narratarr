@@ -425,27 +425,33 @@ def _first_series(text: str) -> list[dict]:
 
 
 OWNED_SECONDS = 600
-_owned: dict = {"key": None, "at": 0.0, "books": []}
+_owned: dict = {}  # (url, library id) -> {"at": time, "books": [...]}
+KIND_FOLDERS = ("Audiobooks", "Ebooks")  # what {kind} names a folder (layout.KIND_FOLDERS)
 
 
-async def owned(settings) -> list[dict]:
-    """The books in the connected Audiobookshelf library, as {title, author, asin}. Kept for ten minutes,
-    so pages that check it stay quick. Nothing, rather than an error, when it can't be reached."""
+async def owned(settings, library: str | None = None) -> list[dict]:
+    """The books in the connected Audiobookshelf library (or another one, by id), as {title, author, asin,
+    ...}. Kept for ten minutes, so pages that check it stay quick. Nothing, rather than an error, when it
+    can't be reached."""
     import time
 
-    url, token, library = settings.audiobookshelf_url, settings.audiobookshelf_token, settings.audiobookshelf_library_id
+    url, token = settings.audiobookshelf_url, settings.audiobookshelf_token
+    library = library or settings.audiobookshelf_library_id
     if not (url and token and library):
         return []
     key = (url, library)
-    if _owned["key"] == key and time.time() - _owned["at"] < OWNED_SECONDS:
-        return _owned["books"]
+    cached = _owned.get(key)
+    if cached and time.time() - cached["at"] < OWNED_SECONDS:
+        return cached["books"]
     try:
         async with Audiobookshelf(url, token) as server:
             books = [i for i in await server.items(library) if not i["missing"] and i["title"]]
     except AudiobookshelfError as e:
         log.info("Couldn't read the Audiobookshelf library: %s", e)
-        return _owned["books"] if _owned["key"] == key else []
-    _owned.update(key=key, at=time.time(), books=books)
+        return cached["books"] if cached else []
+    for old in [k for k in _owned if k[0] != url]:
+        del _owned[old]  # a different server now: forget the old one's books
+    _owned[key] = {"at": time.time(), "books": books}
     return books
 
 
@@ -471,6 +477,10 @@ def compare(books: list[dict], library_dir: str, items: list[dict]) -> dict:
     for path, title in folders.items():
         rel = path[len(root):] if path[:len(root)] == root and len(path) > len(root) else path[-2:]
         hit = next((full for full, r in there if len(r) >= len(rel) and r[-len(rel):] == rel), None)
+        if hit is None and len(rel) > 2 and rel[0] in KIND_FOLDERS:
+            # Filed apart with {kind}: the library watches Audiobooks/ or Ebooks/, so its paths start below it.
+            rel = rel[1:]
+            hit = next((full for full, r in there if len(r) >= len(rel) and r[-len(rel):] == rel), None)
         if hit is None:
             missing.append(title)
             continue

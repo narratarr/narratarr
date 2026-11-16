@@ -136,3 +136,32 @@ def test_a_library_id_is_only_an_id(bad):
 def test_real_library_ids_are_accepted():
     for good in ("lib_c1u6t4p45c35rf0nzd", "e2a7f6b4-1c3d-4e5f-8a9b-0c1d2e3f4a5b", ""):
         assert config.update({"audiobookshelf_ebook_library_id": good}).audiobookshelf_ebook_library_id == good
+
+
+# ---- review fixes: matching when each library watches its own kind folder ----------------------
+
+
+def test_check_matches_books_when_audiobookshelf_watches_the_kind_folder(isolated_data):
+    from narratarr import audiobookshelf
+    lib = str(Path(config.load().library_dir).resolve())
+    books = [{"title": "Dune", "kind": "audiobook", "path": f"{lib}/Audiobooks/Frank Herbert/Dune"}]
+    items = [{"path": "/abs/audiobooks/Frank Herbert/Dune", "rel": "Frank Herbert/Dune", "missing": False}]
+    assert audiobookshelf.compare(books, lib, items)["seen"] == 1
+
+
+def test_fill_matches_by_folder_below_the_kind_folder(isolated_data):
+    from narratarr import wanted
+    lib = config.load().library_dir
+    b = db.insert({"source": "local", "source_url": "local:x", "title": "dune rip", "author": "?",
+                   "status": "completed", "path": str(Path(lib) / "Ebooks/Frank Herbert/Dune/Dune.epub"), "kind": "ebook"})
+    item = {"rel": "Frank Herbert/Dune", "title": "Dune", "author": "Frank Herbert"}
+    assert wanted.abs_match(b, [item], lib) is item
+
+
+def test_tidy_says_why_when_an_unfinished_ebook_is_in_the_folder(lib):
+    folder = put(lib, "dune audiobook", files=("01.mp3", "Dune.epub"))
+    audio = book(folder, series=[])
+    book(folder / "Dune.epub", kind="ebook", series=[], status="downloading")
+    config.update({"folder_template": APART})
+    r = rows()[audio["id"]]
+    assert r["state"] == "held" and "isn't finished" in r["reason"]

@@ -505,6 +505,9 @@ class Worker:
             if job_id and not await cloud.exists(job_id):
                 job_id = ""
             if not job_id:
+                # Before anything is fetched: a grab that already went to a local client carries on there.
+                if await self._resume_local(book, source, decision, settings):
+                    return
                 kind, payload = await self._torrent_payload(book, source, settings)
                 diverted = await self._fall_back_if_uncached(
                     book, source, entry, decision, cloud, kind, payload, settings
@@ -532,6 +535,21 @@ class Worker:
 
         await self._finish(book, tmp, settings, rd_torrent_id="" if remove else cloud.prefix + job_id)
 
+    async def _resume_local(self, book, source, decision, settings) -> bool:
+        """A grab that already went to a local client (and then Narratarr restarted, say) carries on there.
+
+        Asking the cloud service again could get a different answer and start the same book on both.
+        This only resumes a job the local client still has; it never adds one, and fetches nothing.
+        """
+        prior = next((e for e in downloaders.entries(settings) if e.id == book.get("download_client")), None)
+        if not (book.get("client_job_id") and prior is not None and not prior.is_debrid and prior.delivery == "torrent"):
+            return False
+        async with downloaders.client_for(prior, self._transport) as client:
+            still_there = bool(await self._resume_job(client, book, prior.id))
+        if still_there:
+            await self._process_torrent_client(book, source, prior, decision)
+        return still_there
+
     async def _fall_back_if_uncached(self, book, source, entry, decision, cloud, kind, payload, settings) -> bool:
         """Send an uncached release to the user's own torrent client so it downloads and seeds.
 
@@ -540,17 +558,6 @@ class Worker:
         having a bad minute must not silently reroute somebody's download, and an empty
         answer is not the same as a miss.
         """
-        # A grab that already went to a local client (and then Narratarr restarted, say) carries on
-        # there. Asking the cloud service again could get a different answer and start the same
-        # book on both. This only resumes a job the local client still has; it never adds one.
-        prior = next((e for e in downloaders.entries(settings) if e.id == book.get("download_client")), None)
-        if book.get("client_job_id") and prior is not None and not prior.is_debrid and prior.delivery == "torrent":
-            async with downloaders.client_for(prior, self._transport) as client:
-                still_there = bool(await self._resume_job(client, book, prior.id))
-            if still_there:
-                await self._process_torrent_client(book, source, prior, decision)
-                return True
-
         chosen_id = settings.debrid_fallback_client
         if not chosen_id:
             return False
@@ -578,7 +585,8 @@ class Worker:
             f"{reason} Sending it to {fallback.label} instead, so it downloads from the "
             f"swarm and seeds for others. The torrent stays in {fallback.label}."
         ))
-        await self._process_torrent_client(book, source, fallback, decision)
+        # The payload already fetched goes along, so a private tracker sees one grab, not two.
+        await self._process_torrent_client(db.get(book["id"]) or book, source, fallback, decision, (kind, payload))
         return True
 
     async def _torrent_payload(self, book: dict, source, settings: config.Settings) -> tuple[str, str | bytes]:
@@ -677,15 +685,16 @@ class Worker:
         except ClientError:
             log.info("Couldn't clear job %s from the Usenet client's history", job_id)
 
-    async def _process_torrent_client(self, book: dict, source, entry, decision) -> None:
-        """Torrents through the user's own qBittorrent, Transmission or Deluge. The torrent keeps seeding afterwards."""
+    async def _process_torrent_client(self, book: dict, source, entry, decision, fetched=None) -> None:
+        """Torrents through the user's own qBittorrent, Transmission or Deluge. The torrent keeps seeding afterwards.
+        `fetched` is a (kind, payload) already in hand, so the indexer isn't asked twice."""
         settings = config.load()
         book_id = book["id"]
         name = entry.id
         async with downloaders.client_for(entry, self._transport) as client:
             job_id = await self._resume_job(client, book, name)
             if not job_id:
-                kind, payload = await self._torrent_payload(book, source, settings)
+                kind, payload = fetched or await self._torrent_payload(book, source, settings)
                 tag = f"narratarr-{book_id}"
                 # A route may set its own label and save path; otherwise the client's own apply.
                 job_id = await client.add(

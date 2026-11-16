@@ -137,8 +137,7 @@ class TorBox:
         files = entry.get("files")
         if isinstance(files, list) and files:
             return True
-        if entry.get("hash") and (entry.get("size") or files == []):
-            return False
+        # The hash is listed but without files: not a clear "no", so it stays on TorBox.
         return None
 
     # ---- the steps a download goes through (the same ones RealDebrid has) ----

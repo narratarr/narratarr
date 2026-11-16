@@ -105,15 +105,18 @@ async def _grab(w, monkeypatch, book, job_still_there):
     async def fake_resume(client, b, name):
         return b["client_job_id"] if job_still_there else ""
 
-    async def fake_local(b, source, entry, decision):
+    async def fake_local(b, source, entry, decision, fetched=None):
         went["entry"] = entry.id
 
     monkeypatch.setattr(w, "_resume_job", fake_resume)
     monkeypatch.setattr(w, "_process_torrent_client", fake_local)
     cloud = _AskingCloud()
-    diverted = await w._fall_back_if_uncached(
-        book, None, ClientEntry(id="torbox", type="torbox"), None, cloud, "magnet", MAGNET, _Settings(),
-    )
+    # The order _process_torrent uses: resume first, before anything is fetched or asked.
+    diverted = await w._resume_local(book, None, None, _Settings())
+    if not diverted:
+        diverted = await w._fall_back_if_uncached(
+            book, None, ClientEntry(id="torbox", type="torbox"), None, cloud, "magnet", MAGNET, _Settings(),
+        )
     return diverted, went, cloud
 
 

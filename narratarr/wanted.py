@@ -346,8 +346,14 @@ def abs_match(book: dict, items: list[dict], library_dir: str) -> dict | None:
         rel = folder[len(root):] if inside else folder
         for item in items:
             theirs = _parts(item.get("rel") or "")
-            # Inside the library the whole relative path must agree; outside it, at least author/title.
-            if theirs and (theirs == rel if inside else (len(theirs) >= 2 and rel[-len(theirs):] == theirs)):
+            # Inside the library the whole relative path must agree (less a leading Audiobooks/ or Ebooks/
+            # from {kind}, when Audiobookshelf watches that folder); outside it, at least author/title.
+            if inside:
+                hit = theirs and (theirs == rel or (len(rel) > 2 and rel[0] in ("Audiobooks", "Ebooks")
+                                                   and theirs == rel[1:]))
+            else:
+                hit = len(theirs) >= 2 and rel[-len(theirs):] == theirs
+            if hit:
                 return item
     if book.get("asin"):
         hit = next((i for i in items if i.get("asin") == book["asin"]), None)

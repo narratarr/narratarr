@@ -199,19 +199,21 @@ def plan(settings: config.Settings, prefer: str = "library", books: list[dict] |
         d, origin = details(b, prefer)
         dst = folder_for(d, settings, root)
         m = moves[b["id"]] = Move(b, src, dst, dst, d, origin)
-        held_ebook = False
+        held_ebook = ""
         if src.is_dir() and _inside(src, root):
             for e in books:
                 if e["id"] != b["id"] and wanted.kind_of(e) == "ebook" and _inside(where[e["id"]], src):
                     if apart:
-                        held_ebook = True
+                        held_ebook = held_ebook or ("done" if e["status"] == "completed" else "busy")
                         continue
                     m.carries.append(e)
                     carried.add(e["id"])
         if src == dst:
             m.state = "tidy"
-        elif held_ebook:
+        elif held_ebook == "done":
             m.hold("Its ebook moves to its own folder first. Run Tidy again afterwards to move this one")
+        elif held_ebook:
+            m.hold("An ebook in this folder isn't finished yet, so the folder stays put until it is")
 
     for b in done:
         if wanted.kind_of(b) != "ebook" or b["id"] in carried:
