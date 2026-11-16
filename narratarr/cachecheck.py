@@ -34,6 +34,18 @@ UNKNOWN = "unknown"
 UNAVAILABLE = "unavailable"
 
 _BTIH = re.compile(r"urn:btih:([0-9a-zA-Z]{32,40})", re.IGNORECASE)
+_HEX40 = re.compile(r"[0-9a-f]{40}")
+
+
+def valid_infohash(value) -> str:
+    """A v1 info hash as 40 lowercase hex characters, or "".
+
+    Hashes come from indexers and magnets, so they are untrusted text. The answer is put
+    in a cloud service's URL (Real-Debrid takes it as a path segment), and anything but
+    plain hex there could point an authenticated request somewhere else.
+    """
+    text = str(value or "").strip().lower()
+    return text if _HEX40.fullmatch(text) else ""
 
 
 def infohash_from_payload(kind: str, payload: str | bytes) -> str:
@@ -54,16 +66,17 @@ def infohash_from_payload(kind: str, payload: str | bytes) -> str:
                 import base64
 
                 try:
-                    return base64.b32decode(token.upper()).hex()
+                    return valid_infohash(base64.b32decode(token.upper()).hex())
                 except Exception:  # noqa: BLE001 - a malformed magnet is a miss, not a crash
                     return ""
-            return token.lower()
+            return valid_infohash(token)
     return ""
 
 
 async def torrent_state(cloud, infohash: str) -> tuple[str, str]:
     """Ask a debrid client about one hash. Returns (state, sentence for the user)."""
     label = getattr(cloud, "label", "The cloud service")
+    infohash = valid_infohash(infohash)
     if not infohash:
         return UNKNOWN, (
             f"Narratarr couldn't identify this torrent's hash, so it can't ask {label} "

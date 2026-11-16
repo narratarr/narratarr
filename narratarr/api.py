@@ -1336,6 +1336,7 @@ async def download_clients():
     return {
         "clients": out,
         "default_client": s.default_client,
+        "debrid_fallback_client": s.debrid_fallback_client,
         # Where a release with no matching rule goes, per protocol: what the cards show as Default.
         "defaults": {"torrent": routing.default_for(s, "torrent"), "usenet": routing.default_for(s, "usenet")},
         "types": [{"type": t, "label": downloaders.LABELS[t], "delivery": downloaders.DELIVERY[t]}

@@ -98,6 +98,9 @@ class RealDebrid:
         the moment Real-Debrid returns an empty body, which is indistinguishable from
         "this endpoint is off". An empty body is not evidence a torrent is missing.
         """
+        from .cachecheck import valid_infohash
+
+        infohash = valid_infohash(infohash)  # never put untrusted text in the request
         if not infohash:
             return None
         data = await self._call("GET", f"/torrents/instantAvailability/{infohash.lower()}")

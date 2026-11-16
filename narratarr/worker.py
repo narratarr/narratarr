@@ -538,6 +538,17 @@ class Worker:
         having a bad minute must not silently reroute somebody's download, and an empty
         answer is not the same as a miss.
         """
+        # A grab that already went to a local client (and then Narratarr restarted, say) carries on
+        # there. Asking the cloud service again could get a different answer and start the same
+        # book on both. This only resumes a job the local client still has; it never adds one.
+        prior = next((e for e in downloaders.entries(settings) if e.id == book.get("download_client")), None)
+        if book.get("client_job_id") and prior is not None and not prior.is_debrid and prior.delivery == "torrent":
+            async with downloaders.client_for(prior, self._transport) as client:
+                still_there = bool(await self._resume_job(client, book, prior.id))
+            if still_there:
+                await self._process_torrent_client(book, source, prior, decision)
+                return True
+
         chosen_id = settings.debrid_fallback_client
         if not chosen_id:
             return False

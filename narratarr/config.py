@@ -252,7 +252,7 @@ def update(changes: dict) -> Settings:
                 from . import routing
 
                 v = routing.validate(v, s)
-            elif k == "default_client":
+            elif k in ("default_client", "debrid_fallback_client"):
                 v = str(v or "").strip().lower()
             if k == "max_concurrent":
                 v = max(1, min(int(v), 8))
@@ -280,7 +280,14 @@ def update(changes: dict) -> Settings:
         ids = [c["id"] for c in s.clients]
         if s.default_client not in ids:
             s.default_client = ids[0] if ids else ""
-        from .downloaders import DELIVERY
+        from .downloaders import DEBRID as DEBRID_TYPES, DELIVERY
+
+        # The uncached fallback may only name a local torrent client that exists. Anything else
+        # (a removed client, a cloud service, a Usenet client) turns it off rather than misroutes.
+        local_torrent = {c["id"] for c in s.clients
+                         if DELIVERY.get(c["type"]) == "torrent" and c["type"] not in DEBRID_TYPES}
+        if s.debrid_fallback_client not in local_torrent:
+            s.debrid_fallback_client = ""
 
         flat_for = {"usenet": "usenet_client", "torrent": "torrent_client"}
         if s.default_client != prev_default and "default_client" in changes:

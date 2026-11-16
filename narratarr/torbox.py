@@ -117,6 +117,9 @@ class TorBox:
         as cached: a bare key with no file list means TorBox knows the hash but has no
         files for it, which is not something to send there expecting an instant copy.
         """
+        from .cachecheck import valid_infohash
+
+        infohash = valid_infohash(infohash)  # never put untrusted text in the request
         if not infohash:
             return None
         data = await self._call(
