@@ -2269,7 +2269,7 @@ function Settings(root, page) {
             <button class="btn primary" type="button" id="tidy-open">Preview changes</button>
           </div>
         </div>
-        <div class="body"><span class="hint" id="tidy-fill-note">Books whose tags don’t say their series, narrator or year come out as singles. <b>Fill in missing details</b> asks Audible for them, book by book, and only takes a book whose title and author match exactly. Nothing is moved or overwritten. Fix any single book with Edit details.</span></div>
+        <div class="body"><span class="hint" id="tidy-fill-note">Books whose tags don’t say their series, narrator or year come out as singles. <b>Fill in missing details</b> takes them from your Audiobookshelf library when it's connected and has the book, then asks Audible for the rest, book by book, only taking a book whose title and author match exactly. Nothing is moved or overwritten. Fix any single book with Edit details.</span></div>
         <div class="body" id="tidy-gate" hidden><span class="hint">${I.alert} Save your library folder and layout first, so the preview uses them.</span></div>
       </section>
 
@@ -3328,17 +3328,18 @@ function Settings(root, page) {
   $("#tidy-fill", root).onclick = async (e) => {
     const btn = e.currentTarget, note = $("#tidy-fill-note", root);
     spinBtn(btn, true);
-    let checked = 0, filled = 0;
+    let checked = 0, filled = 0, fromAbs = 0;
     try {
       for (;;) {
         const r = await api("/api/tidy/fill-details", { method: "POST", body: { batch: 12 } });
-        checked += r.checked; filled += r.filled;
-        note.textContent = r.remaining ? `Asked Audible about ${checked} books, filled in ${filled}. ${r.remaining} to go…` : "";
+        checked += r.checked; filled += r.filled; fromAbs += r.from_audiobookshelf || 0;
+        note.textContent = r.remaining ? `Looked up ${checked} books, filled in ${filled}. ${r.remaining} to go…` : "";
         if (!r.remaining || !root.isConnected) break;
       }
+      const absNote = fromAbs ? ` ${fromAbs} of them came from your Audiobookshelf library.` : "";
       note.innerHTML = checked
-        ? `Asked Audible about ${checked} book${checked === 1 ? "" : "s"} and filled in details for ${filled}. Press <b>Preview changes</b> to see the new folder names.`
-        : "Every book already has its series, narrator and year, or Audible has been asked about it before.";
+        ? `Looked up ${checked} book${checked === 1 ? "" : "s"} and filled in details for ${filled}.${absNote} Press <b>Preview changes</b> to see the new folder names.`
+        : "Every book already has its series, narrator and year, or has been looked up before.";
       await refreshLibrary();
     } catch (err) {
       toast(err.message, { kind: "err" });

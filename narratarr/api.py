@@ -1055,17 +1055,29 @@ class FillDetails(BaseModel):
 
 @app.post("/api/tidy/fill-details")
 async def tidy_fill_details(body: FillDetails):
-    """Ask Audible for the series, narrators and year that library books are missing, a few at a time.
+    """Fill in the series, narrators and year that library books are missing, a few at a time: from the
+    connected Audiobookshelf library first, which often has them already, then from Audible.
     Call again until `remaining` is 0. Each book is asked once; only empty details are filled."""
+    settings = config.load()
     todo = [b for b in db.list_books() if wanted.details_due(b)]
-    batch, filled = todo[:max(1, min(body.batch, 25))], 0
+    batch, filled, from_abs = todo[:max(1, min(body.batch, 25))], 0, 0
+    items = await audiobookshelf.owned(settings) if todo else []  # kept for ten minutes between batches
     for b in batch:
+        changed = wanted.fill_from_audiobookshelf(b, items, settings.library_dir) if items else []
+        if changed:
+            from_abs += 1
+            b = db.get(b["id"])
+            if not wanted.missing_details(b):
+                db.update(b["id"], details_checked=time.time())
+                filled += 1
+                continue
         try:
-            if await wanted.fill_from_audible(b):
+            if await wanted.fill_from_audible(b) or changed:
                 filled += 1
         except audible.AudibleError as e:
             raise HTTPException(502, str(e))
-    return {"checked": len(batch), "filled": filled, "remaining": len(todo) - len(batch)}
+    return {"checked": len(batch), "filled": filled, "from_audiobookshelf": from_abs,
+            "remaining": len(todo) - len(batch)}
 
 
 @app.get("/api/tidy/status")

@@ -15,6 +15,7 @@ import logging
 import re
 import time
 from datetime import date
+from pathlib import Path
 from urllib.parse import urlencode
 
 from rapidfuzz import fuzz
@@ -326,6 +327,54 @@ def details_due(book: dict) -> bool:
     checked = book.get("details_checked")
     return not checked or (checked < SERIES_FIRST_SINCE and not book.get("series")
                            and series_first(book.get("title") or "") is not None)
+
+
+def _parts(path: str) -> tuple[str, ...]:
+    return tuple(x for x in str(path).replace("\\", "/").split("/") if x)
+
+
+def abs_match(book: dict, items: list[dict], library_dir: str) -> dict | None:
+    """The Audiobookshelf item for a library book: the one at the same place in the library folder
+    (paths differ across Docker mounts, so it's the part under the library that has to agree), else
+    the same ASIN, else the same title and author."""
+    if book.get("path"):
+        folder = _parts(book["path"])
+        if kind_of(book) == "ebook":
+            folder = folder[:-1]
+        root = _parts(str(Path(library_dir).expanduser()))
+        inside = folder[:len(root)] == root and len(folder) > len(root)
+        rel = folder[len(root):] if inside else folder
+        for item in items:
+            theirs = _parts(item.get("rel") or "")
+            # Inside the library the whole relative path must agree; outside it, at least author/title.
+            if theirs and (theirs == rel if inside else (len(theirs) >= 2 and rel[-len(theirs):] == theirs)):
+                return item
+    if book.get("asin"):
+        hit = next((i for i in items if i.get("asin") == book["asin"]), None)
+        if hit:
+            return hit
+    return next((i for i in items if i.get("title") and _titles_match(i["title"], i.get("author", ""),
+                                                                  book["title"], book["author"])), None)
+
+
+def fill_from_audiobookshelf(book: dict, items: list[dict], library_dir: str) -> list[str]:
+    """Fill what the book is missing (series, narrators, year, ASIN) from the user's own Audiobookshelf
+    library, which often already has it right. Only empty details are filled. Returns what changed."""
+    match = abs_match(book, items, library_dir)
+    if not match:
+        return []
+    changes: dict = {}
+    if not book.get("series") and match.get("series"):
+        changes["series"] = match["series"][:1]
+    if not book.get("narrators") and match.get("narrators"):
+        changes["narrators"] = match["narrators"][:4]
+    if not book.get("released") and match.get("released"):
+        changes["released"] = match["released"]
+    if not book.get("asin") and re.fullmatch(r"[A-Z0-9]{10}", match.get("asin") or ""):
+        changes["asin"] = match["asin"]
+    if changes:
+        db.update(book["id"], **changes)
+    return list(changes)
 
 
 async def fill_from_audible(book: dict) -> list[str]:

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import re
 import logging
 import socket
 from urllib.parse import urlparse
@@ -399,10 +400,28 @@ class Audiobookshelf:
 
 
 def _book_of(item: dict) -> dict:
-    """The title, author and ASIN Audiobookshelf has for a library item."""
+    """What Audiobookshelf knows about a library item: title, author and ASIN for matching, and the
+    narrators, series and release date Fill in missing details can take from it."""
     meta = ((item.get("media") or {}).get("metadata") or {}) if isinstance(item.get("media"), dict) else {}
+    narrators = [n.strip()[:120] for n in str(meta.get("narratorName") or "").split(",") if n.strip()][:4]
+    date = str(meta.get("publishedDate") or "")
+    year = str(meta.get("publishedYear") or "")
+    released = date[:10] if re.fullmatch(r"\d{4}-\d{2}-\d{2}", date[:10]) else (year if re.fullmatch(r"\d{4}", year) else "")
     return {"title": str(meta.get("title") or ""), "author": str(meta.get("authorName") or ""),
-            "asin": str(meta.get("asin") or "")}
+            "asin": str(meta.get("asin") or ""), "narrators": narrators,
+            "series": _first_series(str(meta.get("seriesName") or "")), "released": released}
+
+
+def _first_series(text: str) -> list[dict]:
+    """The first series in Audiobookshelf's one-line seriesName ("Dune Chronicles #1, Other #2").
+    A name with a comma and no number can't be told apart from two series, so it's left alone."""
+    text = text.strip()
+    numbered = re.match(r"(.+?) #(\d+(?:\.\d+)?)(?:, |$)", text)
+    if numbered:
+        return [{"asin": "", "title": numbered.group(1).strip()[:200], "sequence": numbered.group(2)}]
+    if text and ", " not in text and "#" not in text:
+        return [{"asin": "", "title": text[:200], "sequence": ""}]
+    return []
 
 
 OWNED_SECONDS = 600
