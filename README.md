@@ -405,6 +405,7 @@ A few things are set with environment variables instead:
 | `{series}` | The series name | `Dune Chronicles` |
 | `{series_number}` | The book's number in its series | `1`, `2.5` |
 | `{year}` | The year it came out | `1965` |
+| `{kind}` | `Audiobooks` or `Ebooks` | `Ebooks` |
 
 When a book doesn't have one of these, that part is left out along with the words and punctuation around it, so one layout works for every book:
 
@@ -415,6 +416,8 @@ When a book doesn't have one of these, that part is left out along with the word
 | `{author}/{title} ({year})` | `Frank Herbert/Dune (1965)` | `Andy Weir/Project Hail Mary (2021)` |
 
 Settings has one-click presets for these, including an **Audiobookshelf style** one, `{author}/{series}/Vol {series_number} - {year} - {title} {{narrator}}`, which gives `Frank Herbert/Dune Chronicles/Vol 1 - 1965 - Dune {Scott Brick}`: Audiobookshelf reads the series, volume, year and narrator straight from that name. (Double braces keep a brace in the name; an empty narrator leaves the braces out too.) The second layout above is how Audiobookshelf likes series laid out. Series and year come from the Audible catalog for Wanted books, and from the file's tags (`SERIES`, `SERIES-PART`, the date) for imports. Settings shows a live preview as you type. Changing the layout applies to books downloaded from then on. To move the books already in your library, use Tidy library.
+
+**Audiobooks and ebooks in separate Audiobookshelf libraries.** Normally an ebook goes into its audiobook's folder, which is how Audiobookshelf shows both formats as one book. If you'd rather have an ebook library of their own, start the layout with `{kind}` (the **Audiobooks and ebooks apart** preset is `{kind}/{author}/{title}`). Audiobooks then go under `Audiobooks/` and ebooks under `Ebooks/`, both inside your library folder. In Audiobookshelf, point one library at each folder, and under **Settings → Audiobookshelf → Library for ebooks** pick the ebook one, so it's rescanned after an ebook download. Tidy library moves existing books to match: an ebook that sits in its audiobook's folder moves out first, and the audiobook moves on the next run.
 
 ### Tidy library
 
@@ -427,7 +430,7 @@ Settings has one-click presets for these, including an **Audiobookshelf style** 
 
 Audiobookshelf rescans once when tidying finishes, if it's connected.
 
-Books whose tags don't say their series, narrator or year are filed as singles. **Fill in missing details** (next to **Preview changes**) asks Audible for them, only for books whose title and author match exactly, and never overwrites what a book already has. A name that leads with its series, such as `Playing for Keeps #1 - Consider Me`, is matched by its title alone as long as Audible has it in that series, and then loses the prefix, since the series fields hold it. For a single book, open it and use **Edit details**: set the series, its number and the year yourself, or press **Fill in from Audible**.
+Books whose tags don't say their series, narrator or year are filed as singles. **Fill in missing details** (next to **Preview changes**) takes them from your Audiobookshelf library first, when it's connected and has the book (matched by where it sits in the library folder, then ASIN, then title and author), and asks Audible for the rest, only for books whose title and author match exactly, and never overwrites what a book already has. A name that leads with its series, such as `Playing for Keeps #1 - Consider Me`, is matched by its title alone as long as Audible has it in that series, and then loses the prefix, since the series fields hold it. For a single book, open it and use **Edit details**: set the series, its number and the year yourself, or press **Fill in from Audible**.
 
 **Tidying a library Narratarr didn't download.** Tidy works on the books in Narratarr's library, so bring the others in first without moving them:
 
