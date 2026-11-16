@@ -2102,6 +2102,7 @@ function Activity(root) {
 const LAYOUT_VARS = [
   ["author", "The author"], ["title", "The book's title"], ["narrator", "The narrator (up to two)"],
   ["series", "The series name"], ["series_number", "The book's number in its series, like 1 or 2.5"], ["year", "The year it came out"],
+  ["kind", "Audiobooks or Ebooks, to keep the two in separate folders (say, for separate Audiobookshelf libraries)"],
 ];
 // The languages offered under Settings → Search & sources (as narratarr/languages.py COMMON).
 const AUDIBLE_STORES = [["us", "United States"], ["uk", "United Kingdom"], ["ca", "Canada"], ["au", "Australia"], ["in", "India"],
@@ -2121,9 +2122,10 @@ const LAYOUT_PRESETS = [
   ["Author / Title", "{author}/{title}"],
   ["Author / Series / Title", "{author}/{series}/{series_number} - {title}"],
   ["Audiobookshelf style", "{author}/{series}/Vol {series_number} - {year} - {title} {{narrator}}"],
+  ["Audiobooks and ebooks apart", "{kind}/{author}/{title}"],
 ];
-const LAYOUT_SAMPLE = { author: "Frank Herbert", title: "Dune", narrator: "Scott Brick", series: "Dune Chronicles", series_number: "1", year: "1965" };
-const LAYOUT_SAMPLE_SOLO = { author: "Andy Weir", title: "Project Hail Mary", narrator: "Ray Porter", series: "", series_number: "", year: "2021" };
+const LAYOUT_SAMPLE = { author: "Frank Herbert", title: "Dune", narrator: "Scott Brick", series: "Dune Chronicles", series_number: "1", year: "1965", kind: "Audiobooks" };
+const LAYOUT_SAMPLE_SOLO = { author: "Andy Weir", title: "Project Hail Mary", narrator: "Ray Porter", series: "", series_number: "", year: "2021", kind: "Audiobooks" };
 const LAYOUT_EDGES = /^[\s\-–—_.,;:#~]+|[\s\-–—_.,;:#~]+$/g;
 
 function layoutClean(part) {
@@ -2245,7 +2247,7 @@ function Settings(root, page) {
             <div class="layout-vars" role="group" aria-label="Add a variable">
               ${LAYOUT_VARS.map(([v, tip]) => `<button type="button" class="fill-in" data-var="${v}" title="${esc(tip)}">{${v}}</button>`).join("")}
             </div>
-            <span class="hint">Put <code>/</code> between folders. If a book has no series or year, that part is left out, along with the words around it. Double braces keep braces in the name: <code>{{narrator}}</code> becomes <code>{Ray Porter}</code>, which Audiobookshelf reads as the narrator. Ebooks go into the same folder as their audiobook.</span>
+            <span class="hint">Put <code>/</code> between folders. If a book has no series or year, that part is left out, along with the words around it. Double braces keep braces in the name: <code>{{narrator}}</code> becomes <code>{Ray Porter}</code>, which Audiobookshelf reads as the narrator. Ebooks go into the same folder as their audiobook, unless the layout has <code>{kind}</code>: then audiobooks go under <code>Audiobooks</code> and ebooks under <code>Ebooks</code>, so each can be its own Audiobookshelf library.</span>
           </div>
           <div class="set-row">
             <label for="max_concurrent"><b>Downloads at once</b><small>More finish sooner, but share your bandwidth.</small></label>
@@ -2578,6 +2580,14 @@ function Settings(root, page) {
                 <button class="btn" type="button" id="test-audiobookshelf">Test</button>
               </div>
             </div>
+            <div class="set-row">
+              <label for="audiobookshelf_ebook_library_id"><b>Library for ebooks</b><small>For a folder layout with {kind}. It should watch the Ebooks folder.</small></label>
+              <div class="input-row">
+                <select class="select abs-select" id="audiobookshelf_ebook_library_id" name="audiobookshelf_ebook_library_id">
+                  <option value="${esc(s.audiobookshelf_ebook_library_id || "")}">${s.audiobookshelf_ebook_library_id ? "Loading…" : "The same library"}</option>
+                </select>
+              </div>
+            </div>
             <div id="audiobookshelf-result"></div>
           </div>
 
@@ -2672,7 +2682,9 @@ function Settings(root, page) {
     const template = form.folder_template.value || "{author}/{title}";
     const row = (label, book) => `<div><span>${label}</span>${esc(dir)}/<b>${esc(layoutFolders(template, book).join("/"))}</b></div>`;
     const usesSeries = /\{(series|series_number|year)\}/.test(template);
-    $("#path-preview", root).innerHTML = usesSeries
+    $("#path-preview", root).innerHTML = template.includes("{kind}")
+      ? row("Audiobook", LAYOUT_SAMPLE) + row("Ebook", { ...LAYOUT_SAMPLE, kind: "Ebooks" })
+      : usesSeries
       ? row("In a series", LAYOUT_SAMPLE) + row("On its own", LAYOUT_SAMPLE_SOLO)
       : row("", LAYOUT_SAMPLE);
   };
@@ -3743,6 +3755,10 @@ function Settings(root, page) {
       const known = r.libraries.some((l) => l.id === r.library_id);
       sel.innerHTML = (known ? "" : `<option value="">Choose a library</option>`)
         + r.libraries.map((l) => `<option value="${esc(l.id)}" ${l.id === r.library_id ? "selected" : ""}>${esc(l.name)}</option>`).join("");
+      const ebookId = r.ebook_library_id || "";
+      form.audiobookshelf_ebook_library_id.innerHTML = `<option value="">The same library</option>`
+        + r.libraries.filter((l) => l.id !== r.library_id)
+          .map((l) => `<option value="${esc(l.id)}" ${l.id === ebookId ? "selected" : ""}>${esc(l.name)}</option>`).join("");
     } catch (err) {
       $("#audiobookshelf-result", root).innerHTML = badLine(err.message);
     }
@@ -3823,6 +3839,9 @@ function Settings(root, page) {
 
   form.audiobookshelf_library_id.onchange = async () => {
     $("#audiobookshelf-result", root).innerHTML = "";
+    try { await save(true); absShow(); } catch (err) { toast(err.message, { kind: "err" }); }
+  };
+  form.audiobookshelf_ebook_library_id.onchange = async () => {
     try { await save(true); } catch (err) { toast(err.message, { kind: "err" }); }
   };
   $("#abs-check", root).onclick = async (e) => {
@@ -3846,7 +3865,7 @@ function Settings(root, page) {
   tester("audiobookshelf", (r) => `Connected to Audiobookshelf ${esc(r.version)} · rescans <b>${esc(r.library)}</b> after each download`);
   $("#abs-disconnect", root).onclick = async (e) => {
     e.preventDefault();
-    state.settings = await api("/api/settings", { method: "PUT", body: { audiobookshelf_token: "", audiobookshelf_library_id: "" } });
+    state.settings = await api("/api/settings", { method: "PUT", body: { audiobookshelf_token: "", audiobookshelf_library_id: "", audiobookshelf_ebook_library_id: "" } });
     form.audiobookshelf_token.value = "";
     $("#audiobookshelf-result", root).innerHTML = "";
     $("#abs-check-result", root).hidden = true;

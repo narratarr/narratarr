@@ -41,6 +41,9 @@ class Settings:
     audiobookshelf_url: str = ""
     audiobookshelf_token: str = ""
     audiobookshelf_library_id: str = ""
+    # A second library to rescan after an ebook download, for a layout that files ebooks apart with
+    # {kind}. Empty: ebooks go to the library above, like everything else.
+    audiobookshelf_ebook_library_id: str = ""
     prowlarr_url: str = ""
     prowlarr_api_key: str = ""
     prowlarr_categories: str = "3030"  # Newznab/Torznab "Audio/Audiobook"
@@ -254,6 +257,11 @@ def update(changes: dict) -> Settings:
                 v = routing.validate(v, s)
             elif k in ("default_client", "debrid_fallback_client"):
                 v = str(v or "").strip().lower()
+            elif k in ("audiobookshelf_library_id", "audiobookshelf_ebook_library_id"):
+                # Sent to Audiobookshelf as part of a URL path, so only an id's own characters.
+                v = str(v or "").strip()
+                if v and not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", v):
+                    raise ValueError("That isn't an Audiobookshelf library id.")
             if k == "max_concurrent":
                 v = max(1, min(int(v), 8))
             elif k == "auto_search_hours":

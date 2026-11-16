@@ -1087,7 +1087,7 @@ async def tidy_apply(body: TidyOptions):
             await asyncio.to_thread(tidy.apply, settings, body.books[:10000], body.prefer, _busy(),
                                     body.tags, body.sidecars, job)
             if job.moved:
-                await _worker()._notify_audiobookshelf(settings)
+                await _worker()._notify_audiobookshelf(settings, "all")
         except Exception as e:  # never leave the job looking busy forever
             log.exception("Tidy library failed")
             job.failed.append({"id": None, "title": "", "error": f"Unexpected error: {e}"})
@@ -1105,7 +1105,7 @@ async def tidy_undo():
     settings = config.load()
     result = await asyncio.to_thread(tidy.undo, settings, _busy())
     if result["back"]:
-        await _worker()._notify_audiobookshelf(settings)
+        await _worker()._notify_audiobookshelf(settings, "all")
     tidy.JOB = tidy.Job(undone=result["back"], failed=[{"id": None, "title": f["path"], "error": f["error"]} for f in result["failed"]],
                         finished_at=time.time())
     return {**result, "undo": len(db.last_tidy_batch()[1])}
@@ -1794,7 +1794,8 @@ async def abs_libraries():
     s = config.load()
     try:
         async with Audiobookshelf(s.audiobookshelf_url, s.audiobookshelf_token) as server:
-            return {"libraries": await server.libraries(), "library_id": s.audiobookshelf_library_id}
+            return {"libraries": await server.libraries(), "library_id": s.audiobookshelf_library_id,
+                    "ebook_library_id": s.audiobookshelf_ebook_library_id}
     except AudiobookshelfError as e:
         raise HTTPException(400, str(e))
 
@@ -1855,13 +1856,17 @@ async def abs_check(body: Check):
             library = next((lib for lib in await server.libraries() if lib["id"] == s.audiobookshelf_library_id), None)
             if not library:
                 raise AudiobookshelfError("Audiobookshelf doesn't know that library any more. Pick it again.")
+            # Ebooks filed apart with {kind} live in their own library; look there too.
+            ids = list(dict.fromkeys(x for x in (library["id"], s.audiobookshelf_ebook_library_id) if x))
             if body.scan and books:
-                await server.scan(library["id"])
+                for library_id in ids:
+                    await server.scan(library_id)
             # A scan runs in the background, so look a few times while it finds things.
             for attempt in range(6 if body.scan and books else 1):
                 if attempt:
                     await asyncio.sleep(1.5)
-                result = audiobookshelf.compare(books, library_dir, await server.items(library["id"]))
+                items = [i for library_id in ids for i in await server.items(library_id)]
+                result = audiobookshelf.compare(books, library_dir, items)
                 if result["seen"] == result["books"]:
                     break
     except AudiobookshelfError as e:

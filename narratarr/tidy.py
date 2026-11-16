@@ -87,7 +87,7 @@ def file_tags(folder: Path) -> dict:
 
 def details(book: dict, prefer: str = "library") -> tuple[dict, str]:
     """(the details a book's folder is named from, where they came from)."""
-    d = {k: book.get(k) for k in ("title", "author", "narrators", "series", "released")}
+    d = {k: book.get(k) for k in ("title", "author", "narrators", "series", "released", "kind")}
     origin = "audible" if book.get("asin") else ("import" if book.get("source") == "local" else "download")
     if prefer == "tags" and wanted.kind_of(book) == "audiobook" and book.get("path"):
         found = file_tags(Path(book["path"]))
@@ -188,7 +188,10 @@ def plan(settings: config.Settings, prefer: str = "library", books: list[dict] |
     places = _Places(where, root)
     moves: dict[int, Move] = {}
 
-    # Audiobooks first: an ebook may be carried inside one, or go to join it.
+    # Audiobooks first: an ebook may be carried inside one, or go to join it. A layout with {kind}
+    # keeps the two apart instead: an ebook moves out on its own, and an audiobook folder that still
+    # holds one waits for that, since moving the folder would move the ebook without telling the library.
+    apart = layout.separates_kinds(settings.folder_template)
     audiobooks = [b for b in done if wanted.kind_of(b) == "audiobook"]
     carried: set[int] = set()
     for b in audiobooks:
@@ -196,20 +199,26 @@ def plan(settings: config.Settings, prefer: str = "library", books: list[dict] |
         d, origin = details(b, prefer)
         dst = folder_for(d, settings, root)
         m = moves[b["id"]] = Move(b, src, dst, dst, d, origin)
+        held_ebook = False
         if src.is_dir() and _inside(src, root):
             for e in books:
                 if e["id"] != b["id"] and wanted.kind_of(e) == "ebook" and _inside(where[e["id"]], src):
+                    if apart:
+                        held_ebook = True
+                        continue
                     m.carries.append(e)
                     carried.add(e["id"])
         if src == dst:
             m.state = "tidy"
+        elif held_ebook:
+            m.hold("Its ebook moves to its own folder first. Run Tidy again afterwards to move this one")
 
     for b in done:
         if wanted.kind_of(b) != "ebook" or b["id"] in carried:
             continue
         path = where[b["id"]]
         d, origin = details(b, prefer)
-        partner = companions.get(b["id"])
+        partner = None if apart else companions.get(b["id"])
         pm = moves.get(partner["id"]) if partner else None
         if pm is not None:
             # The same book in both formats shares one folder, the way Audiobookshelf expects.

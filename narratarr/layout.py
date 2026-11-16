@@ -10,7 +10,15 @@ VARIABLES = {
     "series": "The series name",
     "series_number": "The book's number in its series, like 1 or 2.5",
     "year": "The year it came out",
+    "kind": "Audiobooks or Ebooks, to keep the two apart (say, for separate Audiobookshelf libraries)",
 }
+KIND_FOLDERS = {"audiobook": "Audiobooks", "ebook": "Ebooks"}
+
+
+def separates_kinds(template: str) -> bool:
+    """A layout with {kind} files audiobooks and ebooks in different folders, so the two formats of
+    one book no longer share a folder."""
+    return "{kind}" in (template or "")
 _FIELD = re.compile(r"\{([^{}]*)\}")
 _UNSAFE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
@@ -32,6 +40,7 @@ def values(book: dict) -> dict[str, str]:
         "series": str(first.get("title") or ""),
         "series_number": _number(first.get("sequence")),
         "year": released[:4] if released[:4].isdigit() else "",
+        "kind": KIND_FOLDERS["ebook" if book.get("kind") == "ebook" else "audiobook"],
     }
 
 

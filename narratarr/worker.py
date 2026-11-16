@@ -119,6 +119,8 @@ def _companion_folder(book: dict, books: list[dict], root: Path) -> Path | None:
     never a folder of the user's own, like an author folder imported where it was. Either
     way it has to be a folder in the library that no other book claims.
     """
+    if layout.separates_kinds(config.load().folder_template):
+        return None  # the layout keeps audiobooks and ebooks in separate folders
     other = wanted.companion(book, books)
     if not other or not other.get("path") or other["status"] != "completed":
         return None
@@ -466,7 +468,7 @@ class Worker:
         )
         if book["source"] != "local":
             notify.emit("completed", db.get(book["id"]))
-        await self._notify_audiobookshelf(settings)
+        await self._notify_audiobookshelf(settings, wanted.kind_of(book))
 
     async def _process_direct(self, book: dict, source) -> None:
         """Free sources (LibriVox, Old-Time Radio): plain HTTPS downloads, no Real-Debrid."""
@@ -861,11 +863,19 @@ class Worker:
             except httpx.HTTPError:
                 pass
 
-    async def _notify_audiobookshelf(self, settings: config.Settings) -> None:
-        if not (settings.audiobookshelf_url and settings.audiobookshelf_token and settings.audiobookshelf_library_id):
+    async def _notify_audiobookshelf(self, settings: config.Settings, kind: str = "audiobook") -> None:
+        """Rescan the library this kind of book goes to; kind "all" rescans every one (after Tidy)."""
+        main, ebook = settings.audiobookshelf_library_id, settings.audiobookshelf_ebook_library_id or ""
+        if kind == "all":
+            libraries = list(dict.fromkeys(x for x in (main, ebook) if x))
+        else:
+            libraries = [ebook if kind == "ebook" and ebook else main]
+        libraries = [x for x in libraries if x]
+        if not (settings.audiobookshelf_url and settings.audiobookshelf_token and libraries):
             return
         try:
             async with audiobookshelf.Audiobookshelf(settings.audiobookshelf_url, settings.audiobookshelf_token) as server:
-                await server.scan(settings.audiobookshelf_library_id)
+                for library in libraries:
+                    await server.scan(library)
         except audiobookshelf.AudiobookshelfError as e:
             log.warning("Audiobookshelf didn't rescan after this download: %s", e)
