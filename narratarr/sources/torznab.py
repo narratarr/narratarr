@@ -143,8 +143,9 @@ def to_details(r: dict) -> Details:
         release=release,
         info_hash=r.get("infohash") or "",
         trackers=trackers,
-        # Without an info hash the .torrent has to be fetched; the link is stored without the key.
-        download_url="" if r.get("infohash") else strip_key(r.get("link") or ""),
+        # Kept even when the hash is known, since the trackers are in what the link returns, not in
+        # the hash. The link is stored without the key.
+        download_url=strip_key(r.get("link") or ""),
     )
 
 

@@ -60,7 +60,7 @@ async def test_search_returns_both_shapes_with_clean_titles():
 
     magnet, *links = page.items
     assert magnet.info_hash == "0f54898dc1b8e49d96e32827377f651ea6c935af"  # fixture is upper case
-    assert magnet.download_url == ""  # the hash is enough; nothing to fetch
+    assert magnet.download_url.startswith("magnet:")  # kept, so the trackers travel with it
     assert magnet.seeders == 338
     assert links[0].info_hash == "" and links[0].download_url  # a /dl/ link with no published hash
     assert links[0].format == "MP3" and links[0].bitrate == "128 Kbps"
@@ -171,7 +171,7 @@ async def test_pipeline_fetches_the_torrent_through_the_right_source(isolated_da
     async with httpx.AsyncClient(transport=mock) as client:
         src = torznab.Torznab(BASE, KEY, client=client)
         page = await src.search("Project Hail Mary")
-        release = next(i for i in page.items if i.download_url)   # a /dl/ link, no published hash
+        release = next(i for i in page.items if i.download_url and not i.info_hash)   # a /dl/ link, no published hash
         d = await src.details(release.url)
         book = db.insert({
             "source": "torznab", "source_url": d.url, "title": d.title, "author": "Andy Weir",

@@ -60,7 +60,7 @@ def test_release_parsing():
     t = to_details(TORRENT)
     assert t.title == "Andy Weir - Project Hail Mary"
     assert t.info_hash == HASH and t.trackers == ["udp://tracker.example:1337"]
-    assert t.seeders == 31 and t.download_url == ""
+    assert t.seeders == 31 and t.download_url.startswith("magnet:")  # trackers travel with it
 
 
 def test_api_key_only_goes_back_to_prowlarr():

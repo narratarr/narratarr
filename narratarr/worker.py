@@ -582,22 +582,32 @@ class Worker:
     async def _torrent_payload(self, book: dict, source, settings: config.Settings) -> tuple[str, str | bytes]:
         """What to hand a torrent client: ("magnet", uri) or ("torrent", .torrent bytes)."""
         book_id = book["id"]
-        if not book["info_hash"] and book["download_url"]:
-            # A release without a published info hash: fetch the .torrent (or magnet) from the
-            # indexer that listed it. Torznab needs its own address and key, and its own key param.
-            if book.get("source") == "torznab":
-                db.update(book_id, detail="Fetching the torrent from your indexer…")
-                kind, payload = await torznab_fetch(
-                    book["download_url"], settings.torznab_url, settings.torznab_api_key, self._transport
-                )
+        if book["download_url"] and not (book["info_hash"] and book["trackers"]):
+            # Fetch the .torrent (or magnet) from the indexer that listed it: either there's no info
+            # hash, or a magnet built from the hash would carry no trackers. A trackerless magnet
+            # leaves the client hunting for peers over DHT ("Downloading metadata" for hours), and
+            # never works on a private tracker. Torznab needs its own address, key and key param.
+            try:
+                if book.get("source") == "torznab":
+                    db.update(book_id, detail="Fetching the torrent from your indexer…")
+                    kind, payload = await torznab_fetch(
+                        book["download_url"], settings.torznab_url, settings.torznab_api_key, self._transport
+                    )
+                else:
+                    db.update(book_id, detail="Fetching the torrent from Prowlarr…")
+                    kind, payload = await fetch(
+                        book["download_url"], settings.prowlarr_url, settings.prowlarr_api_key, self._transport
+                    )
+            except ProwlarrError as e:
+                if not book["info_hash"]:
+                    raise
+                # The hash alone still works on public trackers, just slowly. Say so rather than stop.
+                log.info("Book %s: couldn't fetch the torrent from the indexer (%s); using its info hash", book_id, e)
+                db.update(book_id, detail=f"{e} Trying the release's info hash instead, which can be slow to start.")
             else:
-                db.update(book_id, detail="Fetching the torrent from Prowlarr…")
-                kind, payload = await fetch(
-                    book["download_url"], settings.prowlarr_url, settings.prowlarr_api_key, self._transport
-                )
-            if kind == "nzb":
-                raise ProwlarrError("This is a Usenet release, not a torrent.")
-            return kind, payload
+                if kind == "nzb":
+                    raise ProwlarrError("This is a Usenet release, not a torrent.")
+                return kind, payload
 
         if not book["info_hash"]:
             db.update(book_id, detail="Reading book page…")

@@ -142,7 +142,10 @@ def to_details(r: dict) -> Details:
         release=release,
         info_hash=info_hash,
         trackers=trackers,
-        download_url="" if info_hash else strip_key(r.get("downloadUrl") or magnet),
+        # Kept even when the hash is known: Prowlarr's magnetUrl is usually a link back to Prowlarr,
+        # not a magnet, so the trackers (and a private tracker's passkey) are only in what that
+        # link returns. A magnet built from the hash alone has no trackers. Stored without the key.
+        download_url=strip_key(r.get("downloadUrl") or magnet),
     )
 
 
