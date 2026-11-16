@@ -81,6 +81,36 @@ class RealDebrid:
 
     # ---- the steps a download goes through (the same ones AllDebrid has) ----
 
+    async def cached(self, infohash: str) -> bool | None:
+        """Real-Debrid's instant-availability answer, and a deliberate refusal to guess.
+
+        GET /torrents/instantAvailability/{hash} is still in Real-Debrid's documentation
+        ("Get list of instantly available file IDs... {hash} is the SHA1 of the torrent")
+        and the route still answers, so it is wired up. But several tools report the
+        endpoint was switched off and now answers empty for everything
+        (rdt-client issue 617; Debrid Media Manager's FAQ says they lost it and rebuilt
+        on something else). Narratarr has no Real-Debrid account to test against, so:
+
+            a non-empty answer  -> True   (something is definitely there)
+            anything else       -> None   (unknown, NEVER False)
+
+        Returning False here would divert every uncached-looking release to qBittorrent
+        the moment Real-Debrid returns an empty body, which is indistinguishable from
+        "this endpoint is off". An empty body is not evidence a torrent is missing.
+        """
+        if not infohash:
+            return None
+        data = await self._call("GET", f"/torrents/instantAvailability/{infohash.lower()}")
+        if not isinstance(data, dict):
+            return None
+        entry = data.get(infohash.lower())
+        if not isinstance(entry, dict):
+            return None
+        for hoster_files in entry.values():
+            if isinstance(hoster_files, list) and hoster_files:
+                return True
+        return None
+
     async def add(self, kind: str, payload: str | bytes) -> str:
         return await (self.add_torrent(payload) if kind == "torrent" else self.add_magnet(payload))
 

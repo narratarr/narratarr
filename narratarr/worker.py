@@ -32,7 +32,7 @@ from pathlib import Path
 
 import httpx
 
-from . import audiobookshelf, config, db, downloaders, ebooks, importer, layout, media, notify, routing, wanted
+from . import audiobookshelf, cachecheck, config, db, downloaders, ebooks, importer, layout, media, notify, routing, wanted
 from .downloaders import ClientError, bad_release, is_bad_release
 from .alldebrid import AllDebridError
 from .premiumize import PremiumizeError
@@ -504,6 +504,12 @@ class Worker:
                 job_id = ""
             if not job_id:
                 kind, payload = await self._torrent_payload(book, source, settings)
+                diverted = await self._fall_back_if_uncached(
+                    book, source, entry, decision, cloud, kind, payload, settings
+                )
+                if diverted:
+                    # The local client owns this download now; it keeps seeding.
+                    return
                 job_id = await cloud.add(kind, payload)
                 db.update(book_id, rd_torrent_id=cloud.prefix + job_id)
 
@@ -523,6 +529,44 @@ class Worker:
                     log.info("Couldn't remove torrent %s from %s", job_id, cloud.label)
 
         await self._finish(book, tmp, settings, rd_torrent_id="" if remove else cloud.prefix + job_id)
+
+    async def _fall_back_if_uncached(self, book, source, entry, decision, cloud, kind, payload, settings) -> bool:
+        """Send an uncached release to the user's own torrent client so it downloads and seeds.
+
+        Only an explicit "I do not have it" diverts the grab. Unknown or unavailable is
+        reported on the book and the release stays on the cloud service: a provider
+        having a bad minute must not silently reroute somebody's download, and an empty
+        answer is not the same as a miss.
+        """
+        chosen_id = settings.debrid_fallback_client
+        if not chosen_id:
+            return False
+
+        fallback = next((e for e in downloaders.entries(settings) if e.id == chosen_id), None)
+        if fallback is None or fallback.is_debrid or fallback.delivery != "torrent":
+            db.update(book["id"], detail=(
+                f"Not cached, and the fallback client ({chosen_id}) isn't a torrent client "
+                f"Narratarr can use. Sending it to {cloud.label} instead."
+            ))
+            return False
+
+        infohash = wanted.info_hash_of(book) or cachecheck.infohash_from_payload(kind, payload)
+        state, reason = await cachecheck.torrent_state(cloud, infohash)
+
+        if state != cachecheck.UNCACHED:
+            # cached: nothing to say, the release is exactly what we wanted.
+            # unknown / unavailable: say why it did not divert, then carry on.
+            if state != cachecheck.CACHED:
+                db.update(book["id"], detail=f"{reason} Sending it to {cloud.label}.")
+            return False
+
+        log.info("Book %s: %s; sending it to %s to download and seed", book["id"], reason, fallback.label)
+        db.update(book["id"], detail=(
+            f"{reason} Sending it to {fallback.label} instead, so it downloads from the "
+            f"swarm and seeds for others. The torrent stays in {fallback.label}."
+        ))
+        await self._process_torrent_client(book, source, fallback, decision)
+        return True
 
     async def _torrent_payload(self, book: dict, source, settings: config.Settings) -> tuple[str, str | bytes]:
         """What to hand a torrent client: ("magnet", uri) or ("torrent", .torrent bytes)."""

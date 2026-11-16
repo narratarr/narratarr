@@ -108,6 +108,36 @@ class TorBox:
         data = await self._call("GET", "/v1/api/user/me")
         return data if isinstance(data, dict) else {}
 
+    async def cached(self, infohash: str) -> bool | None:
+        """Is TorBox holding this torrent already? True / False, or None when unclear.
+
+        GET /v1/api/torrents/checkcached takes comma-separated hashes (about 100 a call,
+        answered from a one-hour server-side cache) and answers with an object keyed by
+        hash, or an empty body when nothing matched. Only a key with files in it counts
+        as cached: a bare key with no file list means TorBox knows the hash but has no
+        files for it, which is not something to send there expecting an instant copy.
+        """
+        if not infohash:
+            return None
+        data = await self._call(
+            "GET", "/v1/api/torrents/checkcached",
+            params={"hash": infohash.lower(), "format": "object", "list_files": "true"},
+        )
+        if data is None:
+            # An empty answer is how TorBox says "no". It is a miss, not an error.
+            return False
+        if not isinstance(data, dict):
+            return None
+        entry = data.get(infohash.lower()) or data.get(infohash.upper())
+        if not isinstance(entry, dict):
+            return False
+        files = entry.get("files")
+        if isinstance(files, list) and files:
+            return True
+        if entry.get("hash") and (entry.get("size") or files == []):
+            return False
+        return None
+
     # ---- the steps a download goes through (the same ones RealDebrid has) ----
 
     async def add(self, kind: str, payload: str | bytes) -> str:
