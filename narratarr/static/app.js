@@ -2250,6 +2250,9 @@ function Settings(root, page) {
             <span class="hint">Put <code>/</code> between folders. If a book has no series or year, that part is left out, along with the words around it. Double braces keep braces in the name: <code>{{narrator}}</code> becomes <code>{Ray Porter}</code>, which Audiobookshelf reads as the narrator. Ebooks go into the same folder as their audiobook, unless the layout has <code>{kind}</code>: then audiobooks go under <code>Audiobooks</code> and ebooks under <code>Ebooks</code>, so each can be its own Audiobookshelf library.</span>
           </div>
           <div class="set-row">
+            <label class="switch"><input type="checkbox" name="fill_details_before_filing" ${s.fill_details_before_filing ? "checked" : ""}><i></i><span><b>Fill in missing details before filing a download</b><small>When a download finishes without a series, narrator or year, Narratarr looks it up on Audible before naming its folder, so the layout above can use them. Only empty details are filled, and only from a book whose title and author match.</small></span></label>
+          </div>
+          <div class="set-row">
             <label for="max_concurrent"><b>Downloads at once</b><small>More finish sooner, but share your bandwidth.</small></label>
             <div class="stepper">
               <button type="button" data-step="-1" aria-label="Fewer">−</button>
@@ -4144,6 +4147,7 @@ function libraryLiveHTML(lib) {
       <div class="cta" style="margin-top:14px">
         ${local ? "" : `<button class="btn sm ghost" data-act="download">${I.retry} Download again</button>`}
         <button class="btn sm ghost" data-act="edit">${I.pencil} Edit details</button>
+        ${isAdmin() ? `<button class="btn sm ghost" data-act="tidy">${I.folder} Tidy this book</button>` : ""}
         <button class="btn sm ghost danger" data-act="remove">${I.trash} Remove</button>
       </div>`;
   }
@@ -4162,6 +4166,7 @@ function libraryLiveHTML(lib) {
       <div class="cta" style="margin-top:14px">
         ${local ? "" : `<button class="btn sm ghost" data-act="download">${I.retry} Download again</button>`}
         <button class="btn sm ghost" data-act="edit">${I.pencil} Edit details</button>
+        ${isAdmin() ? `<button class="btn sm ghost" data-act="tidy">${I.folder} Tidy this book</button>` : ""}
         <button class="btn sm ghost danger" data-act="remove">${I.trash} Remove</button>
       </div>`;
   }
@@ -4255,7 +4260,7 @@ function editDetails(lib) {
         <div class="field me-num"><label for="me-number">Book</label><input class="input" id="me-number" name="series_number" inputmode="decimal" value="${esc(ser.sequence || "")}" placeholder="1" /></div>
         <div class="field me-num"><label for="me-year">Year</label><input class="input" id="me-year" name="year" inputmode="numeric" maxlength="4" value="${esc((lib.released || "").slice(0, 4))}" placeholder="1965" /></div>
       </div>
-      <p class="hint">This changes what Narratarr shows, how it matches authors you follow, and the folder name Tidy library gives the book. Your files and folders stay as they are until you tidy.</p>
+      <p class="hint">This changes what Narratarr shows, how it matches authors you follow, and the folder name Tidy gives the book. Your files and folders stay as they are until you press <b>Tidy this book</b>.</p>
       <div class="cta"><button class="btn primary" type="submit">Save</button><button class="btn" type="button" data-audible>${I.search} Fill in from Audible</button><button class="btn ghost" type="button" data-cancel>Cancel</button></div>
     </form>`;
   const form = $("#meta-edit", head);
@@ -4304,6 +4309,35 @@ function editDetails(lib) {
       spinBtn(btn, false);
     }
   };
+}
+
+// ---- tidying one book ----
+
+// The same move as Tidy library, for one book: shows where it goes (or why it can't), and asks first.
+async function tidyOne(lib, btn) {
+  if (!lib) return;
+  spinBtn(btn, true);
+  try {
+    const r = await api(`/api/tidy/book/${lib.id}`);
+    if (r.state === "tidy") { toast("This book is already where your folder layout puts it.", { kind: "ok" }); return; }
+    if (r.state !== "move") { toast(r.reason || "Tidy can't move this book yet.", { kind: "err" }); return; }
+    const carries = r.carries.length ? `<p class="tidy-one-note">Its ebook ${r.carries.map((t) => `“${esc(t)}”`).join(", ")} moves with it.</p>` : "";
+    const ok = await modal({
+      title: "Tidy this book?",
+      body: "It moves into the folder your layout gives it. Nothing else in your library changes, and Undo in Settings → General puts it back.",
+      confirm: "Move it",
+      extra: `<div class="tidy-one"><span>From</span><code>${esc(r.from)}</code><span>To</span><code>${esc(r.to)}</code></div>${carries}`,
+    });
+    if (!ok) return;
+    await api(`/api/tidy/book/${lib.id}`, { method: "POST" });
+    await refreshLibrary();
+    toast("Moved into your folder layout", { kind: "ok" });
+    openDrawer({ bookId: lib.id });
+  } catch (err) {
+    toast(err.message, { kind: "err" });
+  } finally {
+    spinBtn(btn, false);
+  }
 }
 
 // ---- following from the drawer ----
@@ -4518,6 +4552,7 @@ drawer.onclick = async (e) => {
   const act = btn.dataset.act;
   if (act === "releases") return showReleases(drawerBook());
   if (act === "edit") return editDetails(drawerBook());
+  if (act === "tidy") return tidyOne(drawerBook(), btn);
   spinBtn(btn, true);
   try {
     if (act === "add" || act === "want") {

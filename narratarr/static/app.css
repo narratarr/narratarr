@@ -601,6 +601,11 @@ body.has-player .save-float { bottom: 104px; }
 .modal p { color: var(--text-2); margin: 10px 0 0; }
 .modal .switch { margin-top: 20px; }
 .modal .actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 26px; }
+.tidy-one { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 12px; align-items: baseline; margin-top: 18px; padding: 14px 16px; border-radius: 14px; background: var(--bg-sunken, color-mix(in oklab, var(--text) 4%, transparent)); border: 1px solid var(--border); }
+.tidy-one span { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-3); }
+.tidy-one code { font: 12.5px/1.55 var(--mono); overflow-wrap: anywhere; color: var(--text-2); background: none; padding: 0; }
+.tidy-one code:last-of-type { color: var(--accent); }
+.modal p.tidy-one-note { font-size: 13px; margin-top: 12px; }
 
 .toasts { position: fixed; z-index: 70; bottom: 24px; left: 50%; transform: translateX(-50%); display: grid; gap: 10px; justify-items: center; pointer-events: none; }
 .toast {

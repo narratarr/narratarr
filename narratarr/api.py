@@ -1104,6 +1104,36 @@ async def tidy_fill_details(body: FillDetails):
             "remaining": len(todo) - len(batch)}
 
 
+@app.get("/api/tidy/book/{book_id}")
+async def tidy_book_preview(book_id: int):
+    """Where Tidy would move one book under the folder layout, or why it can't. Moves nothing."""
+    if not db.get(book_id):
+        raise HTTPException(404, "That book isn't in the library.")
+    found = await asyncio.to_thread(tidy.preview, config.load(), "library", _busy())
+    row = next((r for r in found["books"] if r["id"] == book_id), None)
+    if row is None:
+        raise HTTPException(409, "Only a finished book with files in the library can be tidied.")
+    return {**row, "root": found["root"]}
+
+
+@app.post("/api/tidy/book/{book_id}")
+async def tidy_book(book_id: int):
+    """Move one book into the folder layout: the same move, checks and Undo as Tidy library."""
+    if tidy.JOB.running:
+        raise HTTPException(409, "Tidying is already under way. Try again when it's done.")
+    settings = config.load()
+    tidy.JOB = job = tidy.Job(running=True, total=1)
+    try:
+        await asyncio.to_thread(tidy.apply, settings, [book_id], "library", _busy(), False, False, job)
+    finally:
+        tidy.finished(job)
+    if job.moved:
+        await _worker()._notify_audiobookshelf(settings, "all")
+    if job.failed:
+        raise HTTPException(409, job.failed[0]["error"])
+    return {"moved": job.moved, "book": db.get(book_id)}
+
+
 @app.get("/api/tidy/status")
 async def tidy_status():
     return await asyncio.to_thread(tidy.JOB.as_dict)

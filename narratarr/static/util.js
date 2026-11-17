@@ -38,6 +38,7 @@ export const I = {
   alert: '<svg viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>',
   x: '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>',
   books: '<svg viewBox="0 0 24 24"><path d="M4 19V5a1 1 0 0 1 1-1h3v16H5a1 1 0 0 1-1-1Z"/><path d="M8 4h4v16H8"/><path d="m14 5.2 3.6-.9 3.2 13.6-3.6.9z"/></svg>',
+  folder: '<svg viewBox="0 0 24 24"><path d="M3.5 7V17.5a1.5 1.5 0 0 0 1.5 1.5h14a1.5 1.5 0 0 0 1.5-1.5v-8A1.5 1.5 0 0 0 19 8h-7l-2-2.5H5A1.5 1.5 0 0 0 3.5 7Z"/></svg>',
   headphones: '<svg viewBox="0 0 24 24"><path d="M4 15v-3a8 8 0 0 1 16 0v3"/><rect x="3" y="14" width="5" height="7" rx="2"/><rect x="16" y="14" width="5" height="7" rx="2"/></svg>',
   book: '<svg viewBox="0 0 24 24"><path d="M12 6.8C10.4 5.3 7.9 4.6 3.5 4.6v13.2c4.4 0 6.9.7 8.5 2.2 1.6-1.5 4.1-2.2 8.5-2.2V4.6c-4.4 0-6.9.7-8.5 2.2Z"/><path d="M12 6.8V20"/></svg>',
 };

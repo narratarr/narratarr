@@ -84,6 +84,9 @@ class Settings:
     auto_search_hours: int = 12
     # A release that searching finds on its own waits under Awaiting approval instead of downloading.
     found_needs_approval: bool = False
+    # Look up a finished download's missing series, narrators and year on Audible before its folder is
+    # named, so a layout that uses them gets them. Off by default: it's a request to Audible per book.
+    fill_details_before_filing: bool = False
     # When a download fails because of the release itself (a dead torrent, a failed repair, no audio in
     # it), look for another release of the book and take that instead, like Sonarr and Radarr do.
     retry_failed_downloads: bool = True

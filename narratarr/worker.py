@@ -460,6 +460,7 @@ class Worker:
         return tmp
 
     async def _finish(self, book: dict, tmp: Path, settings: config.Settings, **extra) -> None:
+        book = await self._fill_before_filing(book, settings)
         db.update(book["id"], status="organizing", progress=100, speed=0, detail="Organizing files…")
         dest = await self._organize(book, tmp, settings)
         db.update(
@@ -469,6 +470,21 @@ class Worker:
         if book["source"] != "local":
             notify.emit("completed", db.get(book["id"]))
         await self._notify_audiobookshelf(settings, wanted.kind_of(book))
+
+    async def _fill_before_filing(self, book: dict, settings: config.Settings) -> dict:
+        """With the setting on, a download's missing series, narrators and year come from Audible before
+        its folder is named. Only empty details are filled, and a failed lookup never fails the download."""
+        if not (settings.fill_details_before_filing and book["source"] != "local" and wanted.missing_details(book)):
+            return book
+        db.update(book["id"], detail="Looking up missing details on Audible…")
+        try:
+            changed = await wanted.fill_from_audible(book)
+        except Exception as e:  # noqa: BLE001 - a lookup is a nicety; the files are already here
+            log.warning("Book %s: couldn't look up missing details before filing: %s", book["id"], e)
+            return book
+        if changed:
+            log.info("Book %s: filled in %s from Audible before filing", book["id"], ", ".join(changed))
+        return db.get(book["id"]) or book
 
     async def _process_direct(self, book: dict, source) -> None:
         """Free sources (LibriVox, Old-Time Radio): plain HTTPS downloads, no Real-Debrid."""
