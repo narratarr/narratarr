@@ -516,6 +516,58 @@ def add_wanted(b: dict, kind: str = "audiobook", source: str = "audible", status
     })
 
 
+HARDCOVER_PER_SYNC = 25  # new shelf books matched per check, so a big first check goes easy on Audible
+
+
+async def _hardcover_match(item: dict) -> dict | None:
+    """Audible's book for a shelf book. An audio edition's ASIN first, but only if Audible's book has the same
+    title and author (Hardcover's data is community-edited, and an ASIN can be another store's or a Kindle
+    one); then the exact title and author, the way Fill in missing details matches."""
+    if not (item["title"] and item["author"]):
+        return None
+    if item["asin"]:
+        hit = await audible_match({"title": item["title"], "author": item["author"], "asin": item["asin"]})
+        if hit and _titles_match(hit.get("title") or "", hit.get("author") or "", item["title"], item["author"]):
+            return hit
+    return await audible_match({"title": item["title"], "author": item["author"], "asin": ""})
+
+
+async def sync_hardcover(transport=None, most: int = HARDCOVER_PER_SYNC) -> dict:
+    """Books on the connected Hardcover account's Want to Read shelf come to Wanted.
+
+    Each new shelf book is matched on Audible and added in the format chosen in Settings. Each is handled
+    once: a book you take off Wanted stays off, and a book Audible doesn't have is listed as not found.
+    One check at a time; a second one asked for meanwhile is told so (hardcover.Busy)."""
+    from . import hardcover
+
+    lock = hardcover._lock("sync")
+    if lock.locked():
+        raise hardcover.Busy("Narratarr is already checking your Hardcover shelf.")
+    async with lock:
+        new, more = await hardcover.want_to_read(transport, skip=db.hardcover_seen_ids(), enough=most)
+        fmt = config.load().hardcover_format
+        kinds = ("audiobook", "ebook") if fmt == "both" else (fmt if fmt in ("audiobook", "ebook") else "audiobook",)
+        counts = {"added": 0, "in_library": 0, "not_found": 0}
+        added_ids: list[int] = []
+        for item in new:
+            match = await _hardcover_match(item)
+            outcome, book_id = "not_found", None
+            if match and match.get("url"):
+                outcome = "in_library"
+                for kind in kinds:
+                    row = add_wanted(match, kind, "audible", "wanted")
+                    if row:
+                        outcome = "added"
+                        added_ids.append(row["id"])
+                        book_id = book_id or row["id"]
+                    else:
+                        have = in_library(match.get("asin") or "", match["title"], match["author"], kind=kind)
+                        book_id = book_id or (have or {}).get("id")
+            db.hardcover_record(item["id"], item["title"], item["author"], outcome, book_id)
+            counts[outcome] += 1
+        return {**counts, "checked": len(new), "more": more, "added_ids": added_ids}
+
+
 def want_other_format(book: dict, status: str = "wanted") -> tuple[dict, bool]:
     """Add the other format of a library book to Wanted. Returns (that row, whether it's new)."""
     kind = "ebook" if kind_of(book) == "audiobook" else "audiobook"

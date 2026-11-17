@@ -32,7 +32,7 @@ from pathlib import Path
 
 import httpx
 
-from . import audiobookshelf, cachecheck, config, db, downloaders, ebooks, importer, layout, media, notify, routing, wanted
+from . import audible, audiobookshelf, cachecheck, config, hardcover, db, downloaders, ebooks, importer, layout, media, notify, routing, wanted
 from .downloaders import ClientError, bad_release, is_bad_release
 from .alldebrid import AllDebridError
 from .premiumize import PremiumizeError
@@ -46,6 +46,7 @@ log = logging.getLogger("narratarr.worker")
 
 POLL_SECONDS = 4
 AUTOMATION_SECONDS = 60  # how often to check the import folder
+HARDCOVER_SECONDS = 6 * 60 * 60  # how often to look at the Hardcover shelf (a sync costs a request or two)
 AUTO_SEARCH_SECONDS = 10 * 60  # how often to look for a few Wanted books
 RD_TIMEOUT_SECONDS = 6 * 60 * 60
 CLIENT_TIMEOUT_SECONDS = 7 * 24 * 60 * 60  # a torrent with no seeds shouldn't hold a download slot forever
@@ -284,6 +285,7 @@ class Worker:
     async def _automation(self) -> None:
         """Background chores: the import folder, automatic searches for Wanted books, followed authors."""
         last_search = last_follow = 0.0
+        last_hardcover = time.monotonic() - HARDCOVER_SECONDS + 5 * 60  # first look five minutes after starting
         while True:
             try:
                 await self.watch_folder()
@@ -297,9 +299,32 @@ class Worker:
                     if await wanted.refresh_due():
                         if await wanted.auto_search():
                             self.poke()
+                if now - last_hardcover >= HARDCOVER_SECONDS:
+                    last_hardcover = now
+                    if await self.sync_hardcover():
+                        if await wanted.auto_search():
+                            self.poke()
             except Exception:
                 log.exception("Automation error")
             await asyncio.sleep(AUTOMATION_SECONDS)
+
+    async def sync_hardcover(self) -> int:
+        """The Hardcover shelf, now and then while it's connected. Returns how many books came to Wanted."""
+        s = config.load()
+        if not (s.hardcover_sync and (s.hardcover_refresh_token or s.hardcover_access_token) and hardcover.available()):
+            return 0
+        try:
+            result = await wanted.sync_hardcover()
+        except hardcover.Busy:
+            return 0  # Check now is already doing it
+        except (hardcover.HardcoverError, audible.AudibleError, httpx.HTTPError) as e:
+            hardcover.last_sync.clear()
+            hardcover.last_sync.update(at=time.time(), error=str(e))
+            log.warning("Hardcover check: %s", e)
+            return 0
+        hardcover.last_sync.clear()
+        hardcover.last_sync.update(at=time.time(), error="", **{k: result[k] for k in ("added", "not_found", "more")})
+        return result["added"]
 
     async def watch_folder(self) -> int:
         """Queue any finished book that has appeared in the import folder."""

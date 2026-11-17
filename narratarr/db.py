@@ -159,6 +159,14 @@ CREATE TABLE IF NOT EXISTS tidy_moves (         -- every folder Tidy library mov
     paths   TEXT NOT NULL DEFAULT '[]',         -- [[book_id, path before, path after], ...]
     undone  INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS hardcover_seen (     -- books from the Hardcover shelf already handled, so a book
+    user_book_id INTEGER PRIMARY KEY,           -- taken off Wanted isn't added back on the next sync
+    title   TEXT NOT NULL DEFAULT '',
+    author  TEXT NOT NULL DEFAULT '',
+    outcome TEXT NOT NULL,                      -- added | in_library | not_found
+    book_id INTEGER,
+    at      REAL NOT NULL
+);
 """
 
 # Whose listening progress book rows carry: set per request to the signed-in user.
@@ -441,6 +449,28 @@ def last_tidy_batch() -> tuple[str, list[dict]]:
             return "", []
         rows = conn.execute("SELECT * FROM tidy_moves WHERE batch=? AND undone=0 ORDER BY id", (row["batch"],)).fetchall()
     return row["batch"], [{**dict(r), "paths": json.loads(r["paths"] or "[]")} for r in rows]
+
+
+def hardcover_seen_ids() -> set[int]:
+    with connect() as conn:
+        return {r[0] for r in conn.execute("SELECT user_book_id FROM hardcover_seen")}
+
+
+def hardcover_record(user_book_id: int, title: str, author: str, outcome: str, book_id: int | None) -> None:
+    with connect() as conn:
+        conn.execute("INSERT OR REPLACE INTO hardcover_seen (user_book_id, title, author, outcome, book_id, at) "
+                     "VALUES (?, ?, ?, ?, ?, ?)", (user_book_id, title, author, outcome, book_id, time.time()))
+
+
+def hardcover_recent(limit: int = 30) -> list[dict]:
+    with connect() as conn:
+        rows = conn.execute("SELECT * FROM hardcover_seen ORDER BY at DESC, user_book_id DESC LIMIT ?", (limit,))
+        return [dict(r) for r in rows]
+
+
+def hardcover_forget() -> None:
+    with connect() as conn:
+        conn.execute("DELETE FROM hardcover_seen")
 
 
 def mark_tidy_undone(move_id: int) -> None:

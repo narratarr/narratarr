@@ -2,6 +2,10 @@
 
 All notable changes to Narratarr. The app shows this under **Settings → Updates**.
 
+## 0.9.7 — 2026-11-17
+
+- **Your Hardcover shelf comes to Wanted.** Connect Hardcover under Settings → Search & sources, and books you mark **Want to Read** on hardcover.app are matched on Audible and added to Wanted, as an audiobook, an ebook or both. Narratarr checks every six hours, or when you press **Check now**. Connecting uses a short code you approve on Hardcover, so you never paste a password or key into Narratarr. It can only read your profile and shelves, and **Disconnect** signs it out on Hardcover too. Each shelf book is handled once, so one you take off Wanted stays off, and the panel shows what happened to each, including books Audible doesn't have. Hardcover's API is still in beta. Asked for on the Discord by NOAH.
+
 ## 0.9.6 — 2026-11-17
 
 - **Tidy one book.** A finished book has a **Tidy this book** button next to **Edit details**. Fix its details, press it, and Narratarr shows where the book will go (or why it can't move yet), then moves just that one. It uses the same checks as Tidy library, and Undo puts it back. Admins only. Suggested on the Discord by aarsenca.

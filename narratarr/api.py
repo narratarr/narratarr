@@ -30,7 +30,7 @@ from . import (apiv1, audible, audiobookshelf, auth, brave, config, db, download
                routing, search, tokens, updates, users, wanted)
 from .audiobookshelf import Audiobookshelf, AudiobookshelfError
 from .downloaders import ClientError
-from . import alldebrid, languages, notify, tidy
+from . import alldebrid, hardcover, languages, notify, tidy
 from .alldebrid import AllDebrid, AllDebridError
 from . import torbox
 from .premiumize import Premiumize, PremiumizeError
@@ -1337,10 +1337,67 @@ async def get_settings(request: Request):
 
 @app.put("/api/settings")
 async def put_settings(changes: dict):
+    changes = {k: v for k, v in changes.items() if k not in config.SERVER_ONLY}  # see hardcover.py
     try:
         return config.update(changes).public()
     except ValueError as e:
         raise HTTPException(400, str(e))
+
+
+# ---- Hardcover: the Want to Read shelf comes to Wanted (see hardcover.py) ----
+
+
+@app.get("/api/hardcover")
+async def hardcover_status():
+    s = config.load()
+    return {"available": hardcover.available(), "connected": bool(s.hardcover_refresh_token or s.hardcover_access_token),
+            "user": s.hardcover_user, "sync": s.hardcover_sync, "format": s.hardcover_format,
+            "last_sync": hardcover.last_sync, "recent": db.hardcover_recent()}
+
+
+@app.post("/api/hardcover/connect")
+async def hardcover_connect():
+    try:
+        return await hardcover.start()
+    except hardcover.HardcoverError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/hardcover/poll")
+async def hardcover_poll():
+    return await hardcover.poll()
+
+
+@app.post("/api/hardcover/sync")
+async def hardcover_sync_now():
+    if not hardcover.available():
+        raise HTTPException(400, "This copy of Narratarr hasn't been registered with Hardcover yet.")
+    try:
+        result = await wanted.sync_hardcover()
+    except hardcover.Busy as e:
+        raise HTTPException(409, str(e))
+    except (hardcover.HardcoverError, audible.AudibleError) as e:
+        hardcover.last_sync.clear()
+        hardcover.last_sync.update(at=time.time(), error=str(e))
+        raise HTTPException(502, str(e))
+    hardcover.last_sync.clear()
+    hardcover.last_sync.update(at=time.time(), error="", **{k: result[k] for k in ("added", "not_found", "more")})
+    if result["added_ids"]:
+        _background(_hardcover_search(result["added_ids"]))
+    return {k: v for k, v in result.items() if k != "added_ids"}
+
+
+async def _hardcover_search(book_ids: list[int]) -> None:
+    if config.load().auto_search:
+        for book_id in book_ids:
+            await _search_in_background(book_id)
+
+
+@app.post("/api/hardcover/disconnect")
+async def hardcover_disconnect():
+    await hardcover.disconnect()  # the list of shelf books already handled stays, so reconnecting doesn't re-add them
+    hardcover.last_sync.clear()
+    return {"ok": True}
 
 
 @app.post("/api/settings/test-brave")

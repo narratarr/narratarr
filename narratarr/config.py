@@ -44,6 +44,14 @@ class Settings:
     # A second library to rescan after an ebook download, for a layout that files ebooks apart with
     # {kind}. Empty: ebooks go to the library above, like everything else.
     audiobookshelf_ebook_library_id: str = ""
+    # Hardcover (hardcover.app): books on your Want to Read shelf come to Wanted. Connected with Hardcover's
+    # device sign-in, so no token is ever pasted in. The tokens never leave the server (see SERVER_ONLY).
+    hardcover_access_token: str = ""
+    hardcover_refresh_token: str = ""
+    hardcover_token_expires: float = 0.0
+    hardcover_user: str = ""  # the username it's connected as, to show in Settings
+    hardcover_sync: bool = True  # look at the shelf now and then while connected
+    hardcover_format: str = "audiobook"  # what a book from the shelf is wanted as: audiobook, ebook or both
     prowlarr_url: str = ""
     prowlarr_api_key: str = ""
     prowlarr_categories: str = "3030"  # Newznab/Torznab "Audio/Audiobook"
@@ -116,10 +124,13 @@ class Settings:
     client_routes: dict = field(default_factory=lambda: {"version": 1, "rules": []})
 
     def public(self) -> dict:
-        """Settings safe to send to the browser (secrets masked)."""
+        """Settings safe to send to the browser (secrets masked, account tokens left out)."""
         d = asdict(self)
         for key in SECRETS:
             d[key] = _mask(d[key], key)
+        for key in SERVER_ONLY:
+            d.pop(key, None)
+        d["hardcover_connected"] = bool(self.hardcover_refresh_token or self.hardcover_access_token)
         from .downloaders import entry_from_dict
 
         d["clients"] = []
@@ -161,11 +172,15 @@ class Settings:
         return d
 
 
+# Never sent to the browser, even masked, and never changed through the settings form: they act as the
+# user's own account elsewhere. Only the code that connects and disconnects that account writes them.
+SERVER_ONLY = ("hardcover_access_token", "hardcover_refresh_token", "hardcover_token_expires")
 SECRETS = (
     "rd_api_key", "ad_api_key", "tb_api_key", "pm_api_key", "audiobookshelf_token", "brave_api_key", "prowlarr_api_key", "sabnzbd_api_key",
     "nzbget_password", "qbittorrent_password", "transmission_password", "deluge_password", "torznab_api_key",
 )
 CHOICES = {
+    "hardcover_format": ("audiobook", "ebook", "both"),
     "search_provider": ("audiobookbay", "brave"),
     "usenet_client": ("sabnzbd", "nzbget"),
     "torrent_client": ("realdebrid", "alldebrid", "torbox", "premiumize", "qbittorrent", "transmission", "deluge"),

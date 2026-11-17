@@ -526,6 +526,23 @@ img { display: block; }
 .abs-badge svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .abs-who { flex: 1 1 240px; min-width: 0; }
 .abs-who code { font: 12.5px var(--mono); color: var(--text); word-break: break-all; }
+.hc-code { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px 16px; margin-top: 14px; padding: 16px 18px; border-radius: 16px; background: var(--surface-2); }
+.hc-code > span { grid-column: 1 / -1; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-3); }
+.hc-code > b { font: 600 26px/1.1 var(--mono); letter-spacing: 0.12em; color: var(--text); }
+.hc-code > a { justify-self: start; }
+.hc-code > small { grid-column: 1 / -1; color: var(--text-3); font-size: 12.5px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.hc-code > small code { font: 12px var(--mono); color: var(--text-2); }
+.hc-code > [data-hc-cancel] { grid-row: 2; grid-column: 3; }
+.hc-recent { list-style: none; margin: 4px 0 0; padding: 0; display: grid; }
+.hc-recent:empty { display: none; }
+.hc-recent li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 2px; border-top: 1px solid var(--border); }
+.hc-recent li > span { display: grid; gap: 1px; min-width: 0; }
+.hc-recent b { font-size: 13.5px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hc-recent small { color: var(--text-3); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hc-recent em { flex: none; font-style: normal; font-size: 12px; color: var(--text-3); }
+.hc-recent em.ok { color: var(--ok); }
+.hc-recent em.warn { color: var(--warn); }
+@media (max-width: 560px) { .hc-code { grid-template-columns: 1fr; } .hc-code > [data-hc-cancel] { grid-row: auto; grid-column: auto; justify-self: start; } }
 .abs-count { display: flex; align-items: center; gap: 14px; padding: 14px 16px; border-radius: 14px; background: var(--surface-2); font-size: 13.5px; color: var(--text-2); }
 .abs-count b { font: 500 28px var(--serif); color: var(--text); white-space: nowrap; }
 .abs-count.ok b { color: var(--ok); }

@@ -2511,6 +2511,39 @@ function Settings(root, page) {
         </div>
       </section>
 
+      <section class="panel" data-page="search" id="hc-panel" hidden>
+        <div class="ph abs-connected-head" id="hc-head" hidden>
+          <span class="abs-badge" aria-hidden="true">${I.books}</span>
+          <div class="abs-who"><h3>Hardcover</h3><p class="desc">Connected as <b id="hc-user"></b>. Books you mark <b>Want to Read</b> come to Wanted by themselves.</p></div>
+          <button class="btn" type="button" id="hc-disconnect">Disconnect</button>
+        </div>
+        <div class="ph" id="hc-intro"><h3>Hardcover</h3><p class="desc">Mark a book <b>Want to Read</b> on Hardcover and it comes to Wanted here, matched on Audible, then Narratarr looks for it like any other.</p></div>
+        <div class="body">
+          <div class="field" id="hc-connect">
+            <div><button class="btn primary" type="button" id="hc-start">${I.books} Connect Hardcover</button></div>
+            <div id="hc-code"></div>
+            <span class="hint">You approve it on hardcover.app with a short code, so you never paste a password or key in here. Narratarr can only read your profile and your shelves, never change anything on Hardcover, and Disconnect signs it out there too.</span>
+          </div>
+          <div id="hc-on" hidden>
+            <div class="set-row">
+              <label class="switch"><input type="checkbox" name="hardcover_sync" ${s.hardcover_sync ? "checked" : ""}><i></i><span><b>Check the shelf every six hours</b><small>Up to 25 new books each time. Each book is added once, so a book you take off Wanted stays off.</small></span></label>
+            </div>
+            <div class="set-row">
+              <label for="hardcover_format"><b>Add books as</b><small>What a book from your shelf is wanted as.</small></label>
+              <select class="select" id="hardcover_format" name="hardcover_format">
+                ${[["audiobook", "Audiobook"], ["ebook", "Ebook"], ["both", "Audiobook and ebook"]]
+                  .map(([v, l]) => `<option value="${v}" ${s.hardcover_format === v ? "selected" : ""}>${l}</option>`).join("")}
+              </select>
+            </div>
+            <div class="set-row">
+              <label><b>From your shelf</b><small id="hc-last"></small></label>
+              <button class="btn" type="button" id="hc-sync">${I.retry} Check now</button>
+            </div>
+            <ul class="hc-recent" id="hc-recent"></ul>
+          </div>
+        </div>
+      </section>
+
       <section class="panel" data-page="search">
         <div class="ph"><h3>Rating metadata</h3><p class="desc">The star pill on every Discover card. Ratings are read from a local cache, never fetched while a page loads: a book with no rating yet is filled in the background and appears on your next search.</p></div>
         <div class="body">
@@ -3879,6 +3912,89 @@ function Settings(root, page) {
     toast("Disconnected. Narratarr’s key is still listed in Audiobookshelf, where you can revoke it.");
   };
   absShow();
+
+  // ---- Hardcover (see narratarr/hardcover.py): connect with a code, then the shelf comes to Wanted ----
+  const HC_OUTCOME = { added: ["Added to Wanted", "ok"], in_library: ["Already in your library", ""], not_found: ["Not found on Audible", "warn"] };
+  let hcWaiting = 0;  // which sign-in the polling belongs to, so Cancel or a new one stops the old loop
+  const hcShow = async () => {
+    let r;
+    try { r = await api("/api/hardcover"); } catch { return; }
+    if (!root.isConnected) return;
+    $("#hc-panel", root).hidden = !r.available;
+    if (!r.available) return;
+    $("#hc-head", root).hidden = !r.connected;
+    $("#hc-intro", root).hidden = r.connected;
+    $("#hc-connect", root).hidden = r.connected;
+    $("#hc-on", root).hidden = !r.connected;
+    $("#hc-user", root).textContent = r.user || "your account";
+    const last = r.last_sync || {};
+    $("#hc-last", root).innerHTML = last.error ? `<span class="bad-text">${esc(last.error)}</span>`
+      : last.at ? `Looked ${esc(ago(last.at))}: ${last.added || 0} added${last.not_found ? `, ${last.not_found} not found on Audible` : ""}${last.more ? ", more next time" : ""}.`
+      : "It looks a few minutes after Narratarr starts, then every six hours.";
+    $("#hc-recent", root).innerHTML = (r.recent || []).map((b) => {
+      const [label, tone] = HC_OUTCOME[b.outcome] || [b.outcome, ""];
+      return `<li><span><b>${esc(b.title || "Untitled")}</b><small>${esc(b.author || "")}</small></span><em class="${tone}">${esc(label)}</em></li>`;
+    }).join("");
+  };
+  const hcWait = async (mine, every) => {
+    while (mine === hcWaiting && root.isConnected) {
+      await new Promise((ok) => setTimeout(ok, every * 1000));
+      if (mine !== hcWaiting || !root.isConnected) return;
+      let r;
+      try { r = await api("/api/hardcover/poll", { method: "POST" }); } catch { continue; }
+      if (r.state === "pending") continue;
+      hcWaiting++;
+      $("#hc-start", root).hidden = false;
+      $("#hc-code", root).innerHTML = r.state === "connected" ? ""
+        : badLine(r.state === "denied" ? "Access wasn't approved on Hardcover." : "The code ran out before it was approved. Connect again for a new one.");
+      if (r.state === "connected") {
+        toast(`Connected to Hardcover${r.user ? ` as ${r.user}` : ""}`, { kind: "ok" });
+        state.settings = await api("/api/settings");
+      }
+      return hcShow();
+    }
+  };
+  $("#hc-start", root).onclick = async (e) => {
+    const btn = e.currentTarget;
+    spinBtn(btn, true);
+    try {
+      const r = await api("/api/hardcover/connect", { method: "POST" });
+      const mine = ++hcWaiting;
+      $("#hc-code", root).innerHTML = `<div class="hc-code">
+          <span>Your code</span><b>${esc(r.user_code)}</b>
+          <a class="btn primary" href="${esc(r.verification_uri_complete)}" target="_blank" rel="noopener noreferrer">Open Hardcover</a>
+          <small><span class="spinner"></span> Waiting for you to approve it. Or go to <code>${esc(r.verification_uri)}</code> and type the code in.</small>
+          <button class="btn ghost sm" type="button" data-hc-cancel>Cancel</button>
+        </div>`;
+      btn.hidden = true;  // one sign-in at a time; Cancel or the end of this one brings it back
+      $("[data-hc-cancel]", root).onclick = () => { hcWaiting++; $("#hc-code", root).innerHTML = ""; btn.hidden = false; };
+      hcWait(mine, Math.max(3, r.interval || 5));
+    } catch (err) {
+      $("#hc-code", root).innerHTML = badLine(err.message);
+    }
+    spinBtn(btn, false);
+  };
+  $("#hc-sync", root).onclick = async (e) => {
+    const btn = e.currentTarget;
+    spinBtn(btn, true);
+    try {
+      const r = await api("/api/hardcover/sync", { method: "POST" });
+      toast(r.added ? `Added ${r.added} book${r.added === 1 ? "" : "s"} from Hardcover to Wanted` : "Nothing new on your shelf", { kind: "ok" });
+      refreshLibrary();
+    } catch (err) {
+      toast(err.message, { kind: "err" });
+    }
+    spinBtn(btn, false);
+    hcShow();
+  };
+  $("#hc-disconnect", root).onclick = async () => {
+    const ok = await modal({ title: "Disconnect Hardcover?", body: "Narratarr stops looking at your shelf and is signed out on Hardcover. Books it already added stay in Wanted.", confirm: "Disconnect" });
+    if (!ok) return;
+    try { await api("/api/hardcover/disconnect", { method: "POST" }); } catch (err) { toast(err.message, { kind: "err" }); }
+    hcWaiting++;
+    hcShow();
+  };
+  hcShow();
   $$("[data-guide]", root).forEach((el) => {
     el.onclick = (e) => {
       e.preventDefault();
