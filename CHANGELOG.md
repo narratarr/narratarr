@@ -2,6 +2,11 @@
 
 All notable changes to Narratarr. The app shows this under **Settings → Updates**.
 
+## 0.9.6 — 2026-11-17
+
+- **Tidy one book.** A finished book has a **Tidy this book** button next to **Edit details**. Fix its details, press it, and Narratarr shows where the book will go (or why it can't move yet), then moves just that one. It uses the same checks as Tidy library, and Undo puts it back. Admins only. Suggested on the Discord by aarsenca.
+- **Fill in missing details before filing a download.** Turn this on under Settings → General, and a download that finishes without a series, narrator or year is looked up on Audible before its folder is named, so a layout that uses them gets them. Only empty details are filled, only from a book whose title and author match, and if Audible can't be reached the book is filed as it is. Off by default. Suggested on the Discord by aarsenca.
+
 ## 0.9.5 — 2026-11-17
 
 - **Torrents from Prowlarr start downloading.** Prowlarr gives most torrents an info hash, and Narratarr built the magnet from that hash alone, with no trackers. qBittorrent (or any client) then sat on **Downloading metadata** for hours while it hunted for peers, and on a private tracker it never started. Narratarr now fetches the indexer's own torrent or magnet, which has the trackers, and only falls back to the hash, saying so, if the indexer won't hand it over. The same goes for Torznab. Books grabbed before this update need their release picked again. Reported on the Discord by ook4mi.
