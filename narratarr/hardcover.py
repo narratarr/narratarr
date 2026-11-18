@@ -50,7 +50,7 @@ LINK_HOST = "https://hardcover.app/"  # where the sign-in page may point, and no
 
 # Narratarr's public app id on Hardcover. A public client has no secret, so this is safe to publish (Hardcover:
 # "anyone can decompile your app or read your script, so it has to be safe for this to be public").
-BUILT_IN_CLIENT_ID = ""
+BUILT_IN_CLIENT_ID = "49f4cc30-5f4b-4b5a-abed-60e97a926bf9"
 WANT_TO_READ = 1  # user_books.status_id
 AUDIO, BOTH = 2, 3  # editions.reading_format_id
 PAGE = 100
@@ -336,7 +336,9 @@ async def query(text: str, variables: dict | None = None, transport: httpx.Async
     if resp.status_code == 401 or _expired_token_error(body):
         raise HardcoverError("Hardcover didn't accept Narratarr's sign-in. Connect it again.")
     if resp.status_code == 403:
-        raise HardcoverError(f"Hardcover refused that ({body.get('error') or 'forbidden'}). Connect it again to grant access.")
+        missing = _clean(body.get("scope"), 120)
+        raise HardcoverError(f"Hardcover refused that ({body.get('error') or 'forbidden'}"
+                             f"{f', needs {missing}' if missing else ''}). Connect it again to grant access.")
     if resp.status_code >= 400:
         raise HardcoverError(f"Hardcover answered with an error ({resp.status_code}).")
     if body.get("errors"):
