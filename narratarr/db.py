@@ -468,9 +468,15 @@ def hardcover_recent(limit: int = 30) -> list[dict]:
         return [dict(r) for r in rows]
 
 
-def hardcover_forget() -> None:
+def hardcover_forget(outcome: str | None = None, older_than: float | None = None) -> int:
+    """Forget handled shelf books, so the next check looks at them again: all, or one outcome, or older ones."""
+    sql, args = "DELETE FROM hardcover_seen WHERE 1=1", []
+    if outcome:
+        sql, args = sql + " AND outcome=?", [*args, outcome]
+    if older_than is not None:
+        sql, args = sql + " AND at<?", [*args, older_than]
     with connect() as conn:
-        conn.execute("DELETE FROM hardcover_seen")
+        return conn.execute(sql, args).rowcount
 
 
 def mark_tidy_undone(move_id: int) -> None:

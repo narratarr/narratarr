@@ -2540,6 +2540,7 @@ function Settings(root, page) {
               <button class="btn" type="button" id="hc-sync">${I.retry} Check now</button>
             </div>
             <ul class="hc-recent" id="hc-recent"></ul>
+            <div><button class="btn ghost sm" type="button" id="hc-retry" hidden>${I.search} Look again for the ones not found</button></div>
           </div>
         </div>
       </section>
@@ -3935,6 +3936,21 @@ function Settings(root, page) {
       const [label, tone] = HC_OUTCOME[b.outcome] || [b.outcome, ""];
       return `<li><span><b>${esc(b.title || "Untitled")}</b><small>${esc(b.author || "")}</small></span><em class="${tone}">${esc(label)}</em></li>`;
     }).join("");
+    $("#hc-retry", root).hidden = !(r.recent || []).some((b) => b.outcome === "not_found");
+  };
+  $("#hc-retry", root).onclick = async (e) => {
+    const btn = e.currentTarget;
+    spinBtn(btn, true);
+    try {
+      await api("/api/hardcover/retry", { method: "POST" });
+      const r = await api("/api/hardcover/sync", { method: "POST" });
+      toast(r.added ? `Found ${r.added} more on Audible` : "Audible still doesn’t have them. Narratarr looks again each month.", { kind: "ok" });
+      refreshLibrary();
+    } catch (err) {
+      toast(err.message, { kind: "err" });
+    }
+    spinBtn(btn, false);
+    hcShow();
   };
   const hcWait = async (mine, every) => {
     while (mine === hcWaiting && root.isConnected) {

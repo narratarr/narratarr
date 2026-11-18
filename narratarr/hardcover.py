@@ -81,6 +81,28 @@ def _lock(name: str) -> asyncio.Lock:
     return mine[name]
 
 
+async def record(check):
+    """Run a shelf check and note what it did in last_sync, unless the account was disconnected (or a new
+    one connected) meanwhile, so an old check's result never shows against the new state."""
+    generation = _generation
+    try:
+        result = await check
+    except Busy:
+        raise
+    except Exception as e:
+        if generation == _generation:
+            from . import audible
+
+            known = isinstance(e, (HardcoverError, audible.AudibleError, httpx.HTTPError))
+            last_sync.clear()
+            last_sync.update(at=time.time(), error=str(e) if known else "Couldn't finish checking the shelf. Try again later.")
+        raise
+    if generation == _generation:
+        last_sync.clear()
+        last_sync.update(at=time.time(), error="", **{k: result[k] for k in ("added", "not_found", "more")})
+    return result
+
+
 def client_id() -> str:
     """The app id: Narratarr's own, or one set with NARRATARR_HARDCOVER_CLIENT_ID (for a fork)."""
     return os.environ.get("NARRATARR_HARDCOVER_CLIENT_ID", "").strip() or BUILT_IN_CLIENT_ID
@@ -161,13 +183,19 @@ async def poll(transport: httpx.AsyncBaseTransport | None = None) -> dict:
     if now < _pending["next_poll"]:
         return {"state": "pending"}  # Hardcover asks for no faster than `interval`; the page can ask as often as it likes
     _pending["next_poll"] = now + _pending["interval"]
+    code = _pending["device_code"]
     async with _client(transport) as c:
         try:
             resp = await c.post(TOKEN, data={"grant_type": "urn:ietf:params:oauth:grant-type:device_code",
-                                             "device_code": _pending["device_code"], "client_id": client_id()})
+                                             "device_code": code, "client_id": client_id()})
         except httpx.HTTPError:
             return {"state": "pending"}  # a blip; the next poll tries again
     body = _json(resp)
+    if _pending.get("device_code") != code:
+        # Cancelled, replaced by a new sign-in, or Disconnect was pressed while this answer was on its way.
+        if body.get("access_token"):
+            await _revoke(str(body.get("refresh_token") or body["access_token"]), transport)
+        return {"state": "pending" if _pending else "idle"}
     if body.get("access_token"):
         _pending.clear()
         global _generation
@@ -213,12 +241,23 @@ async def disconnect(transport: httpx.AsyncBaseTransport | None = None) -> None:
     hint = "refresh_token" if s.hardcover_refresh_token else "access_token"
     _pending.clear()
     _forget_tokens()  # first, so a renewal already under way can't store new ones (see _generation)
-    if token and available():
-        async with _client(transport) as c:
-            try:
-                await c.post(REVOKE, data={"token": token, "client_id": client_id(), "token_type_hint": hint})
-            except httpx.HTTPError:
-                log.info("Couldn't reach Hardcover to revoke Narratarr's sign-in; it's forgotten here anyway")
+    if token:
+        await _revoke(token, transport, hint)
+
+
+async def _revoke(token: str, transport=None, hint: str = "refresh_token", client: httpx.AsyncClient | None = None) -> None:
+    """Best effort: tell Hardcover a token is no longer wanted (revoking either half revokes the pair)."""
+    if not (token and available()):
+        return
+    data = {"token": token, "client_id": client_id(), "token_type_hint": hint}
+    try:
+        if client is not None:
+            await client.post(REVOKE, data=data)
+        else:
+            async with _client(transport) as c:
+                await c.post(REVOKE, data=data)
+    except httpx.HTTPError:
+        log.info("Couldn't reach Hardcover to revoke a sign-in; it's forgotten here anyway")
 
 
 # ---- asking -------------------------------------------------------------------------------------
@@ -250,7 +289,9 @@ async def _access_token(c: httpx.AsyncClient, stale: str = "") -> str:
             raise HardcoverError("Couldn't reach Hardcover.") from e
         body = _json(resp)
         if generation != _generation:
-            raise HardcoverError("Hardcover was disconnected.")  # Disconnect won; store nothing
+            if body.get("access_token"):  # Disconnect won: store nothing, and don't leave this new pair signed in
+                await _revoke(str(body.get("refresh_token") or body["access_token"]), client=c)
+            raise HardcoverError("Hardcover was disconnected.")
         if not body.get("access_token"):
             refused = body.get("error") in ("invalid_grant", "invalid_token", "unauthorized_client")
             if refused and config.load().hardcover_refresh_token == sent:
@@ -322,7 +363,7 @@ query WantToRead($user: Int!, $status: Int!, $limit: Int!, $offset: Int!) {
   user_books(where: {user_id: {_eq: $user}, status_id: {_eq: $status}},
              order_by: {date_added: desc}, limit: $limit, offset: $offset) {
     id
-    book { title contributions { author { name } } }
+    book { title contributions { contribution author { name } } }
     edition { asin reading_format_id }
   }
 }
@@ -337,8 +378,10 @@ def _row(row) -> dict | None:
     if not isinstance(row, dict) or not isinstance(row.get("id"), int):
         return None
     book = row.get("book") if isinstance(row.get("book"), dict) else {}
-    authors = [_clean((c.get("author") or {}).get("name"), 120) for c in book.get("contributions") or []
-               if isinstance(c, dict) and isinstance(c.get("author"), dict)]
+    people = [c for c in book.get("contributions") or [] if isinstance(c, dict) and isinstance(c.get("author"), dict)]
+    # The writers, not the translator, illustrator or narrator (`contribution` is the role; empty means author).
+    writers = [c for c in people if str(c.get("contribution") or "author").strip().lower() == "author"] or people
+    authors = [_clean(c["author"].get("name"), 120) for c in writers]
     edition = row.get("edition") if isinstance(row.get("edition"), dict) else {}
     asin = _clean(edition.get("asin"), 20).upper()
     audio = edition.get("reading_format_id") in (AUDIO, BOTH)

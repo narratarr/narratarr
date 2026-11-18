@@ -314,16 +314,12 @@ class Worker:
         if not (s.hardcover_sync and (s.hardcover_refresh_token or s.hardcover_access_token) and hardcover.available()):
             return 0
         try:
-            result = await wanted.sync_hardcover()
+            result = await hardcover.record(wanted.sync_hardcover())
         except hardcover.Busy:
             return 0  # Check now is already doing it
-        except (hardcover.HardcoverError, audible.AudibleError, httpx.HTTPError) as e:
-            hardcover.last_sync.clear()
-            hardcover.last_sync.update(at=time.time(), error=str(e))
+        except Exception as e:  # noqa: BLE001 - hardcover.record has noted it for Settings
             log.warning("Hardcover check: %s", e)
             return 0
-        hardcover.last_sync.clear()
-        hardcover.last_sync.update(at=time.time(), error="", **{k: result[k] for k in ("added", "not_found", "more")})
         return result["added"]
 
     async def watch_folder(self) -> int:

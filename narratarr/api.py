@@ -1373,24 +1373,31 @@ async def hardcover_sync_now():
     if not hardcover.available():
         raise HTTPException(400, "This copy of Narratarr hasn't been registered with Hardcover yet.")
     try:
-        result = await wanted.sync_hardcover()
+        result = await hardcover.record(wanted.sync_hardcover())
     except hardcover.Busy as e:
         raise HTTPException(409, str(e))
-    except (hardcover.HardcoverError, audible.AudibleError) as e:
-        hardcover.last_sync.clear()
-        hardcover.last_sync.update(at=time.time(), error=str(e))
-        raise HTTPException(502, str(e))
-    hardcover.last_sync.clear()
-    hardcover.last_sync.update(at=time.time(), error="", **{k: result[k] for k in ("added", "not_found", "more")})
+    except Exception as e:  # noqa: BLE001 - hardcover.record has written down what went wrong
+        raise HTTPException(502, str(e) if isinstance(e, (hardcover.HardcoverError, audible.AudibleError))
+                            else "Couldn't finish checking the Hardcover shelf. Try again later.")
     if result["added_ids"]:
-        _background(_hardcover_search(result["added_ids"]))
+        _background(_hardcover_search())
     return {k: v for k, v in result.items() if k != "added_ids"}
 
 
-async def _hardcover_search(book_ids: list[int]) -> None:
-    if config.load().auto_search:
-        for book_id in book_ids:
-            await _search_in_background(book_id)
+async def _hardcover_search() -> None:
+    """New Wanted books from the shelf are searched the way the automatic search does it: a few at a time,
+    only books already out, and only with an indexer set up."""
+    try:
+        if config.load().auto_search and await wanted.auto_search():
+            _worker().poke()
+    except Exception:
+        log.exception("Searching for books from Hardcover failed")
+
+
+@app.post("/api/hardcover/retry")
+async def hardcover_retry():
+    """Look again at the shelf books Audible didn't have, on the next check."""
+    return {"forgotten": db.hardcover_forget("not_found")}
 
 
 @app.post("/api/hardcover/disconnect")

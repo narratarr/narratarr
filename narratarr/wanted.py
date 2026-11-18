@@ -517,6 +517,7 @@ def add_wanted(b: dict, kind: str = "audiobook", source: str = "audible", status
 
 
 HARDCOVER_PER_SYNC = 25  # new shelf books matched per check, so a big first check goes easy on Audible
+HARDCOVER_RETRY_DAYS = 30  # a shelf book Audible didn't have is looked up again after this long
 
 
 async def _hardcover_match(item: dict) -> dict | None:
@@ -544,6 +545,8 @@ async def sync_hardcover(transport=None, most: int = HARDCOVER_PER_SYNC) -> dict
     if lock.locked():
         raise hardcover.Busy("Narratarr is already checking your Hardcover shelf.")
     async with lock:
+        # Audible adds books all the time: one it didn't have gets another look after a month.
+        db.hardcover_forget("not_found", older_than=time.time() - HARDCOVER_RETRY_DAYS * 86400)
         new, more = await hardcover.want_to_read(transport, skip=db.hardcover_seen_ids(), enough=most)
         fmt = config.load().hardcover_format
         kinds = ("audiobook", "ebook") if fmt == "both" else (fmt if fmt in ("audiobook", "ebook") else "audiobook",)

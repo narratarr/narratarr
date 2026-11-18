@@ -19,6 +19,21 @@ CLIENT = "test-public-client-id"
 def registered(monkeypatch):
     monkeypatch.setenv("NARRATARR_HARDCOVER_CLIENT_ID", CLIENT)
     monkeypatch.setattr(hardcover, "PAGE_PAUSE", 0)
+
+
+@pytest.fixture(autouse=True)
+def offline(monkeypatch):
+    """No test may reach the real Hardcover: a connection made without a test transport fails loudly."""
+    real = hardcover._client
+
+    def guarded(transport=None):
+        if transport is None:
+            def refuse(request):
+                raise AssertionError(f"tried to reach the real Hardcover: {request.url}")
+            transport = httpx.MockTransport(refuse)
+        return real(transport)
+
+    monkeypatch.setattr(hardcover, "_client", guarded)
     hardcover._pending.clear()
     hardcover.last_sync.clear()
 
@@ -381,7 +396,8 @@ async def test_disconnect_wins_over_a_renewal_under_way():
         if request.url == hardcover.TOKEN:
             hardcover._forget_tokens()  # Disconnect pressed while the renewal was out
             return httpx.Response(200, json={"access_token": "hc_at_late", "refresh_token": "hc_rt_late", "expires_in": 3600})
-        raise AssertionError("asked Hardcover after Disconnect")
+        assert request.url == hardcover.REVOKE, "only revoking may follow Disconnect"
+        return httpx.Response(200, json={})
 
     with pytest.raises(hardcover.HardcoverError, match="disconnected"):
         await hardcover.query("query Me { me { id } }", transport=httpx.MockTransport(handler))
@@ -427,3 +443,112 @@ def test_check_now_says_when_a_check_is_already_running(client, monkeypatch):
 
     monkeypatch.setattr(wanted, "sync_hardcover", busy)
     assert client.post("/api/hardcover/sync").status_code == 409
+
+
+# ---- second review ----------------------------------------------------------------------------------
+
+
+async def test_an_answer_for_a_cancelled_sign_in_is_revoked_not_stored():
+    hardcover._pending.update(device_code="old", interval=0, next_poll=0.0, expires_at=time.time() + 600)
+    revoked = []
+
+    def handler(request):
+        if request.url == hardcover.TOKEN:
+            hardcover._pending.clear()  # Cancel (or Disconnect) while the answer was on its way
+            return httpx.Response(200, json={"access_token": "hc_at_x", "refresh_token": "hc_rt_x", "expires_in": 3600})
+        revoked.append(form(request)["token"])
+        return httpx.Response(200, json={})
+
+    assert (await hardcover.poll(httpx.MockTransport(handler)))["state"] == "idle"
+    assert revoked == ["hc_rt_x"] and not config.load().hardcover_refresh_token
+
+
+async def test_an_old_sign_ins_answer_doesnt_end_a_newer_one():
+    hardcover._pending.update(device_code="old", interval=0, next_poll=0.0, expires_at=time.time() + 600)
+
+    def handler(request):
+        hardcover._pending.update(device_code="new")  # Connect pressed again meanwhile
+        return httpx.Response(400, json={"error": "slow_down"})
+
+    assert (await hardcover.poll(httpx.MockTransport(handler)))["state"] == "pending"
+    assert hardcover._pending["device_code"] == "new"
+
+
+async def test_disconnect_during_a_renewal_revokes_the_new_pair_too():
+    connected(expires_in=-10)
+    revoked = []
+
+    def handler(request):
+        if request.url == hardcover.TOKEN:
+            hardcover._forget_tokens()
+            return httpx.Response(200, json={"access_token": "hc_at_late", "refresh_token": "hc_rt_late", "expires_in": 3600})
+        revoked.append(form(request)["token"])
+        return httpx.Response(200, json={})
+
+    with pytest.raises(hardcover.HardcoverError):
+        await hardcover.query("query Me { me { id } }", transport=httpx.MockTransport(handler))
+    assert revoked == ["hc_rt_late"]
+
+
+async def test_the_writer_is_the_author_not_the_translator():
+    connected()
+    row = {"id": 1, "book": {"title": "The Three-Body Problem", "contributions": [
+        {"contribution": "Translator", "author": {"name": "Ken Liu"}},
+        {"contribution": None, "author": {"name": "Cixin Liu"}}]}, "edition": None}
+    got, _ = await hardcover.want_to_read(httpx.MockTransport(gql(lambda v: {"user_books": [row]})))
+    assert got[0]["author"] == "Cixin Liu"
+
+
+async def test_not_found_gets_another_look_after_a_month(shelf):
+    db.hardcover_record(1, "Dune", "Frank Herbert", "not_found", None)
+    with db.connect() as conn:
+        conn.execute("UPDATE hardcover_seen SET at=? WHERE user_book_id=1", (time.time() - 31 * 86400,))
+    shelf.append({"id": 1, "title": "Dune", "author": "Frank Herbert", "asin": ""})
+    assert (await wanted.sync_hardcover())["added"] == 1
+
+
+def test_look_again_forgets_only_the_ones_not_found(client):
+    db.hardcover_record(1, "A", "X", "not_found", None)
+    db.hardcover_record(2, "B", "Y", "added", 5)
+    assert client.post("/api/hardcover/retry").json() == {"forgotten": 1}
+    assert db.hardcover_seen_ids() == {2}
+
+
+def test_check_now_searches_the_way_automatic_search_does(client, monkeypatch):
+    calls = []
+
+    async def sync(transport=None, most=25):
+        return {"added": 2, "in_library": 0, "not_found": 0, "checked": 2, "more": False, "added_ids": [1, 2]}
+
+    async def auto_search():
+        calls.append("auto")
+        return 0
+
+    async def direct(book_id):
+        raise AssertionError("searched a book directly, skipping automatic search's limits")
+
+    monkeypatch.setattr(wanted, "sync_hardcover", sync)
+    monkeypatch.setattr(wanted, "auto_search", auto_search)
+    monkeypatch.setattr(api, "_search_in_background", direct)
+    assert client.post("/api/hardcover/sync").json()["added"] == 2
+    assert calls == ["auto"]
+
+
+async def test_a_check_that_outlives_a_disconnect_doesnt_report_back():
+    async def check():
+        hardcover._forget_tokens()  # Disconnect while the check was running
+        raise hardcover.HardcoverError("Hardcover was disconnected.")
+
+    with pytest.raises(hardcover.HardcoverError):
+        await hardcover.record(check())
+    assert hardcover.last_sync == {}
+
+
+def test_an_unexpected_failure_is_reported_plainly(client, monkeypatch):
+    async def sync(transport=None, most=25):
+        raise ValueError("Expecting value: line 1 column 1")  # e.g. Audible sent something that wasn't JSON
+
+    monkeypatch.setattr(wanted, "sync_hardcover", sync)
+    r = client.post("/api/hardcover/sync")
+    assert r.status_code == 502 and "Expecting value" not in r.text
+    assert hardcover.last_sync["error"].startswith("Couldn't finish checking")
