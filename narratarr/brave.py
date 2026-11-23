@@ -10,6 +10,9 @@ Docs: https://api-dashboard.search.brave.com/app/documentation/web-search
 
 from __future__ import annotations
 
+import asyncio
+import json
+import os
 import re
 from urllib.parse import urlparse, urlunparse
 
@@ -19,6 +22,7 @@ from .sources.audiobookbay import split_title
 from .sources.base import Listing
 
 API = "https://api.search.brave.com/res/v1/web/search"
+MONID_API = "https://api.monid.ai"
 PER_PAGE = 20
 MAX_OFFSET = 9  # Brave only pages this far
 
@@ -58,9 +62,15 @@ def to_listing(result: dict, base_url: str) -> Listing | None:
 
 
 async def search(
-    query: str, api_key: str, base_url: str, page: int = 1, client: httpx.AsyncClient | None = None
+    query: str, api_key: str, base_url: str, page: int = 1, client: httpx.AsyncClient | None = None,
+    *, use_monid: bool = True,
 ) -> dict:
     """One page of AudiobookBay results from Brave, plus Brave's spelling correction."""
+    if use_monid and (key := os.environ.get("MONID_API_KEY")):
+        if client:
+            return await _search_monid(query, key, base_url, page, client)
+        async with httpx.AsyncClient(timeout=15) as c:
+            return await _search_monid(query, key, base_url, page, c)
     if not api_key:
         raise BraveError("Add your Brave Search API key in Settings first.")
     host = urlparse(base_url).netloc
@@ -81,13 +91,7 @@ async def search(
     except httpx.HTTPError as e:
         raise BraveError("Couldn't reach Brave Search.") from e
 
-    bad_key = resp.status_code in (401, 403) or (resp.status_code == 422 and "token" in resp.text.lower())
-    if bad_key:
-        raise BraveError("Brave rejected the API key. Check it in Settings.")
-    if resp.status_code == 429:
-        raise BraveError("Brave Search rate limit reached. Wait a moment, or check your plan's monthly quota.")
-    if resp.status_code >= 400:
-        raise BraveError(f"Brave Search error {resp.status_code}.")
+    _check_search_status(resp.status_code, resp.text if resp.status_code == 422 else "")
 
     data = resp.json()
     items, seen = [], set()
@@ -101,3 +105,67 @@ async def search(
     altered = re.sub(r"\s*site:\S+", "", q.get("altered") or "").strip()
     more = bool(q.get("more_results_available")) and page - 1 < MAX_OFFSET
     return {"items": items, "more": more, "altered": altered}
+
+
+def _check_search_status(status: int, error: str) -> None:
+    if status in (401, 403) or (status == 422 and "token" in error.lower()):
+        raise BraveError("Brave rejected the API key. Check it in Settings.")
+    if status == 429:
+        raise BraveError("Brave Search rate limit reached. Wait a moment, or check your plan's monthly quota.")
+    if status >= 400:
+        raise BraveError(f"Brave Search error {status}.")
+
+
+def _monid_results(output: dict, base_url: str, page: int) -> dict:
+    results = output.get("results") or []
+    items = {}
+    for result in results:
+        listing = to_listing({
+            "url": result.get("link") or "",
+            "title": result.get("title") or "",
+            "page_age": result.get("published_date") or "",
+        }, base_url)
+        if listing:
+            items.setdefault(listing.url, listing)
+    # Search1API doesn't report whether another page exists.
+    return {"items": list(items.values()), "more": len(results) == PER_PAGE and page <= MAX_OFFSET, "altered": ""}
+
+
+async def _search_monid(query: str, key: str, base_url: str, page: int, client: httpx.AsyncClient) -> dict:
+    host = urlparse(base_url).netloc
+    body = {
+        "query": f"{query} site:{host}",
+        "max_results": PER_PAGE,
+        "search_service": "bing",
+        "page": min(max(page, 1), MAX_OFFSET + 1),
+    }
+    payload = {"provider": "search1api", "endpoint": "/search", "input": {"body": body}}
+    headers = {"Authorization": f"Bearer {key}"}
+    try:
+        async with asyncio.timeout(15):
+            resp = await client.post(
+                f"{MONID_API}/v1/run",
+                headers={**headers, "Content-Type": "application/json; charset=utf-8"},
+                content=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            )
+            resp.raise_for_status()
+            run = resp.json()
+            if resp.status_code == 202:
+                run_id = run["runId"]
+                while True:
+                    await asyncio.sleep(2)
+                    resp = await client.get(f"{MONID_API}/v1/runs/{run_id}", headers=headers)
+                    resp.raise_for_status()
+                    run = resp.json()
+                    if run.get("status") in ("COMPLETED", "FAILED", "TIMED_OUT", "STOPPED", "BLOCKED"):
+                        break
+    except httpx.HTTPStatusError as e:
+        raise BraveError(f"Monid Search error {e.response.status_code}.") from e
+    except (httpx.HTTPError, TimeoutError) as e:
+        raise BraveError("Couldn't complete the Monid search.") from e
+
+    if run.get("status") not in (None, "COMPLETED"):
+        raise BraveError(f"Monid search run ended with status {run['status']}.")
+    provider = run.get("providerResponse") or {}
+    _check_search_status(provider.get("httpStatus", 200), str(provider.get("error", "")))
+    return _monid_results(run["output"], base_url, page)

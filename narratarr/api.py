@@ -273,11 +273,13 @@ async def discover(q: str = "", category: str = "", page: int = 1, source: str =
 
 async def _discover_fetch(src, q: str, category: str, page: int, kind: str) -> dict:
     settings = config.load()
-    use_brave = src.name == "audiobookbay" and settings.search_provider == "brave" and settings.brave_api_key
+    use_monid = bool(os.environ.get("MONID_API_KEY"))
+    use_brave = (src.name == "audiobookbay" and settings.search_provider == "brave"
+                 and (use_monid or settings.brave_api_key))
     try:
         if q.strip() and use_brave:
             data = await search.brave_smart_search(
-                q.strip(), settings.brave_api_key, settings.abb_base_url, page, settings.smart_search
+                q.strip(), "" if use_monid else settings.brave_api_key, settings.abb_base_url, page, settings.smart_search
             )
         elif q.strip() and src.name == "prowlarr":
             data = await search.careful_search(src, q.strip(), settings.smart_search)
@@ -1411,7 +1413,7 @@ async def hardcover_disconnect():
 async def test_brave():
     s = config.load()
     try:
-        res = await brave.search("dune", s.brave_api_key, s.abb_base_url)
+        res = await brave.search("dune", s.brave_api_key, s.abb_base_url, use_monid=False)
     except brave.BraveError as e:
         raise HTTPException(400, str(e))
     return {"results": len(res["items"])}
