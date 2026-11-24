@@ -424,9 +424,18 @@ img { display: block; }
 .drawer .more { background: none; border: 0; padding: 0; color: var(--accent); font-weight: 600; cursor: pointer; font-size: 13.5px; }
 .drawer dl { display: grid; grid-template-columns: auto 1fr; gap: 10px 18px; font-size: 13px; margin: 26px 0 0; }
 .drawer dt { color: var(--text-3); }
-.drawer dd { margin: 0; color: var(--text-2); word-break: break-word; }
+.drawer dd { margin: 0; min-width: 0; color: var(--text-2); word-break: break-word; }
 .drawer dd.mono { font-family: var(--mono); font-size: 12px; }
 .drawer dd a { color: var(--accent); }
+.audio-details { display: contents; }
+.audio-details summary { cursor: pointer; }
+.audio-details summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 4px; }
+.audio-details p { margin: 10px 0; line-height: 1.5; }
+.audio-details ul, .audio-details ol { max-height: 280px; overflow-y: auto; padding-left: 24px; margin: 10px 0 0; }
+.audio-details li { padding: 6px 0; overflow-wrap: anywhere; }
+.audio-detail-row { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
+.audio-detail-row span { min-width: 0; }
+.audio-detail-row small { flex-shrink: 0; color: var(--text-3); font-variant-numeric: tabular-nums; }
 .drawer-loading { display: grid; place-items: center; height: 70vh; color: var(--text-3); }
 
 /* ---- settings ----------------------------------------------------------- */

@@ -1,6 +1,6 @@
 // Narratarr web UI — no build step, just modules.
 
-import { $, $$, esc, I, api, hue, coverHTML, firstAuthor, fmtBytes, fmtLeft, ago, toast } from "./util.js";
+import { $, $$, esc, I, api, hue, coverHTML, firstAuthor, fmtBytes, fmtTime, fmtLeft, ago, toast } from "./util.js";
 import { player } from "./player.js";
 import { openAbsGuide } from "./guide.js";
 import { reader } from "./reader.js";
@@ -332,10 +332,12 @@ function route() {
 // ---------------------------------------------------------------------------
 // Discover
 
+const releaseBitrate = (b) => /[1-9]/.test(b.bitrate || "") ? b.bitrate : "";
+
 function cardHTML(item, lib, i = 0) {
   const h = hue(item.title + item.author);
   const facts = [
-    item.format, item.size, item.language && item.language !== "English" ? item.language : "",
+    item.format, releaseBitrate(item), item.size, item.language && item.language !== "English" ? item.language : "",
     item.protocol === "usenet" ? "Usenet" : item.seeders != null ? `${item.seeders} seeder${item.seeders === 1 ? "" : "s"}` : "",
     item.source === "audible" ? shortLength(item.length) : item.source === "openlibrary" ? item.posted : "",
     item.source === "audible" ? releaseLabel(item.released || item.posted) : "",
@@ -419,6 +421,7 @@ function spotlightHTML(item, lib, src) {
   const facts = [
     isCatalog(item.source) ? (formatFor(item.source) === "ebook" ? "Ebook" : "Audiobook") : item.format,
     item.source === "audible" ? shortLength(item.length) : item.size,
+    releaseBitrate(item),
     item.language && item.language !== "English" ? item.language : "",
     item.protocol === "usenet" ? "Usenet" : item.seeders != null ? `${item.seeders} seeder${item.seeders === 1 ? "" : "s"}` : "",
     releaseLabel(item.released || item.posted),
@@ -893,7 +896,7 @@ function libCardHTML(b, i) {
     : b.status === "failed" ? [(b.error || "Couldn’t download").slice(0, 70)]
     : active ? [b.status === "queued" ? "Waiting for a free slot" : b.detail || STATUS[b.status]]
     : b.finished ? [ebook ? "Read" : "Finished"]
-    : ebook ? [b.format, b.size] : [shortLength(b.length), b.size];
+    : ebook ? [b.format, b.size] : [shortLength(b.length), releaseBitrate(b), b.size];
   return `
     <article class="card" tabindex="0" data-id="${b.id}" style="--glow:hsl(${h} 80% 55%);animation-delay:${Math.min(i, 12) * 30}ms">
       <div class="cover-wrap">
@@ -4343,7 +4346,7 @@ function releasesHTML(res) {
     ${res.items.map((r, i) => {
       const quality = r.match >= res.auto_match ? "good" : r.match >= 75 ? "ok" : "weak";
       const facts = [label(r), r.protocol === "usenet" ? "Usenet" : r.protocol === "torrent" ? "Torrent" : "Direct",
-        r.format, r.size, r.language, r.seeders != null ? `${r.seeders} seeder${r.seeders === 1 ? "" : "s"}` : "", r.posted].filter(Boolean);
+        r.format, releaseBitrate(r), r.size, r.language, r.seeders != null ? `${r.seeders} seeder${r.seeders === 1 ? "" : "s"}` : "", r.posted].filter(Boolean);
       // A release that failed for this book, or that an admin turned down: still there to grab on
       // purpose, but marked, so nobody picks it again by accident. Automatic picking skips both.
       const flag = r.failed ? `<span class="rel-flag bad" title="${esc(r.failed)}">${I.alert}Failed before</span>`
@@ -4557,7 +4560,7 @@ function drawerHTML(b, loading) {
   const pills = [
     b.length && [/pages$/.test(b.length) ? I.book : I.clock, b.length],
     b.format && [I.file, b.format],
-    b.bitrate && b.bitrate !== "?" && [I.wave, b.bitrate],
+    releaseBitrate(b) && [I.wave, releaseBitrate(b)],
     b.size && [I.disc, b.size],
     isEbook(b) && [I.book, "Ebook"],
     b.language && [I.globe, b.language],
@@ -4584,12 +4587,13 @@ function drawerHTML(b, loading) {
       ${!loading ? seriesShelfHTML(b) : ""}
       ${desc ? `<div class="about"><h4>About this book</h4><p class="${desc.length > 520 ? "clamped" : ""}">${esc(desc)}</p>${desc.length > 520 ? '<button class="more" data-more>Read more</button>' : ""}</div>` : ""}
       ${!loading ? `<dl>
+        ${!isEbook(b) && b.status === "completed" ? '<div id="drawer-audio" class="audio-details"><dt>Audio</dt><dd class="muted">Loading audio details…</dd></div>' : ""}
         ${(b.series || []).length ? `<dt>Series</dt><dd>${b.series.map((x) => esc(x.sequence ? `${x.title} #${x.sequence}` : x.title)).join(" · ")}</dd>` : ""}
         ${(b.categories || []).length && b.source !== "audible" ? `<dt>${b.source === "openlibrary" ? "Subjects" : "Genres"}</dt><dd>${esc(b.categories.join(", "))}</dd>` : ""}
         ${b.released ? `<dt>Released</dt><dd>${esc(releaseLabel(b.released, true))}</dd>` : ""}
         ${b.posted && !b.released ? `<dt>${b.source === "openlibrary" ? "First published" : "Posted"}</dt><dd>${esc(b.posted)}</dd>` : ""}
         ${b.info_hash ? `<dt>Info hash</dt><dd class="mono">${esc(b.info_hash)}</dd>` : ""}
-        ${(b.files || []).length ? `<dt>Files</dt><dd>${b.files.length} ${esc(b.format || "audio")} file${b.files.length === 1 ? "" : "s"}${b.size ? ` · ${esc(b.size)}` : ""}</dd>` : ""}
+        ${(b.files || []).length && (isEbook(b) || b.status !== "completed") ? `<dt>Files</dt><dd>${b.files.length} ${esc(b.format || "audio")} file${b.files.length === 1 ? "" : "s"}${b.size ? ` · ${esc(b.size)}` : ""}</dd>` : ""}
         ${b.release ? `<dt>Release</dt><dd class="mono">${esc(b.release)}</dd>` : ""}
         ${b.indexer ? `<dt>Indexer</dt><dd>${esc(b.indexer)}</dd>` : ""}
         <dt>Source</dt><dd>${b.source === "local" ? `Your files${b.import_mode === "inplace" ? " (left in place)" : ""}`
@@ -4606,6 +4610,32 @@ function paintDrawer(b, loading) {
   if (/^https?:\/\//.test(b.cover_url || "")) bg.style.backgroundImage = `url(${JSON.stringify(b.cover_url)})`;
   else bg.style.background = `hsl(${hue(b.title + b.author)} 60% 40%)`;
   if (!loading) updateDrawerLive();
+  if (!loading && $("#drawer-audio", drawer)) showAudioDetails(b);
+}
+
+async function showAudioDetails(book) {
+  const box = $("#drawer-audio", drawer);
+  const rate = (value) => value > 0 ? `${Math.max(1, Math.round(value / 1000))} kbps` : "Unavailable";
+  try {
+    const info = await api(`/api/library/${book.id}/media`);
+    // The user may have opened another book while the files were being read.
+    if ($("#drawer-audio", drawer) !== box) return;
+    const chapters = info.chapters || [];
+    const fileBoundaries = chapters.some((c) => c.source === "file");
+    const multipleFiles = info.files.length > 1;
+    box.innerHTML = `
+      <dt>Bitrate${multipleFiles ? " (average)" : ""}</dt><dd>${esc(rate(info.bitrate))}</dd>
+      <dt>Duration</dt><dd>${info.duration > 0 ? esc(fmtTime(info.duration)) : "Unavailable"}</dd>
+      <dt>Chapters</dt><dd>${chapters.length ? `<details><summary>${chapters.length} chapters</summary>
+        ${fileBoundaries ? '<p class="muted">Where chapter markers are missing, each audio file is listed as a chapter.</p>' : ""}
+        <ol>${chapters.map((c) =>
+          `<li><div class="audio-detail-row"><span>${esc(c.title)}</span><small aria-label="Starts at ${esc(fmtTime(c.start))}">${esc(fmtTime(c.start))}</small></div></li>`).join("")}</ol>
+        </details>` : 'No chapter markers found.'}</dd>
+      <dt>Files</dt><dd><details><summary>${info.files.length} audio file${multipleFiles ? "s" : ""}</summary><ul>${info.files.map((f) =>
+        `<li><div class="audio-detail-row"><span>${esc(f.name)}</span>${multipleFiles ? `<small>${esc(rate(f.bitrate))} · ${f.duration > 0 ? esc(fmtTime(f.duration)) : "Unknown duration"}</small>` : ""}</div></li>`).join("")}</ul></details></dd>`;
+  } catch {
+    if ($("#drawer-audio", drawer) === box) box.innerHTML = '<dt>Audio</dt><dd class="muted">Audio details are unavailable.</dd>';
+  }
 }
 
 async function openDrawer({ url, bookId, preview, source, format }) {
