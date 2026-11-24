@@ -174,15 +174,19 @@ def qt_chapters(path: Path) -> list[tuple[float, str]]:
         return []
 
 
-def _file_info(path: Path) -> tuple[float, str, list[tuple[float, str]]]:
-    """(duration, tag title, embedded chapters) for one audio file."""
+def _file_info(path: Path) -> tuple[float, str, list[tuple[float, str]], int | None]:
+    """(duration, tag title, embedded chapters, bitrate in bits/s) for one audio file."""
     duration, title, chapters = 0.0, "", []
+    bitrate = None
     try:
         audio = mutagen.File(path)
     except Exception:
         audio = None
     if audio is not None and audio.info is not None:
         duration = float(getattr(audio.info, "length", 0) or 0)
+        rate = getattr(audio.info, "bitrate", 0) or 0
+        if rate > 0:
+            bitrate = round(rate)
         tags = audio.tags or {}
         for key in ("\xa9nam", "TIT2", "title"):
             if key in tags:
@@ -194,7 +198,7 @@ def _file_info(path: Path) -> tuple[float, str, list[tuple[float, str]]]:
                 chapters = [(float(c.start), c.title or "") for c in audio.chapters]
             if len(chapters) < 2:
                 chapters = qt_chapters(path) or chapters
-    return duration, title, chapters
+    return duration, title, chapters, bitrate
 
 
 @lru_cache(maxsize=64)
@@ -203,7 +207,7 @@ def _describe(book_dir: str, signature: tuple) -> dict:
     files, chapters, offset = [], [], 0.0
     paths = audio_files(root)
     for index, path in enumerate(paths):
-        duration, tag_title, embedded = _file_info(path)
+        duration, tag_title, embedded, bitrate = _file_info(path)
         files.append(
             {
                 "index": index,
@@ -211,19 +215,33 @@ def _describe(book_dir: str, signature: tuple) -> dict:
                 "duration": duration,
                 "offset": offset,
                 "type": AUDIO_TYPES[path.suffix.lower()],
+                "bitrate": bitrate,
             }
         )
         if embedded:
-            for i, (start, title) in enumerate(embedded):
-                chapters.append({"title": title or f"Chapter {len(chapters) + 1}", "start": offset + start})
+            for start, title in embedded:
+                chapters.append({
+                    "title": title or f"Chapter {len(chapters) + 1}",
+                    "start": offset + start,
+                    "source": "embedded",
+                })
         elif len(paths) > 1:
-            chapters.append({"title": tag_title or path.stem, "start": offset})
+            chapters.append({"title": tag_title or path.stem, "start": offset, "source": "file"})
         offset += duration
-    return {"files": files, "chapters": chapters, "duration": offset}
+    # Weight each file by its duration. A missing rate or duration means we
+    # cannot report an average for the whole book accurately.
+    bitrate = None
+    if files and all(f["bitrate"] is not None and f["duration"] > 0 for f in files):
+        bitrate = round(sum(f["bitrate"] * f["duration"] for f in files) / offset)
+    return {"files": files, "chapters": chapters, "duration": offset, "bitrate": bitrate}
 
 
 def describe(book_dir: Path) -> dict:
-    """Files (with offsets on a single book-wide timeline), chapters and total duration."""
+    """Files, chapters and duration on a book-wide timeline; bitrates in bits/s.
+
+    The book's bitrate is a duration-weighted average, or None when incomplete.
+    Chapter sources distinguish embedded markers from fallback file boundaries.
+    """
     paths = audio_files(book_dir)
     # Re-read when files change, otherwise serve from cache.
     signature = tuple((str(p), p.stat().st_size, p.stat().st_mtime) for p in paths)

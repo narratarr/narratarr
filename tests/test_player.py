@@ -3,6 +3,7 @@ import struct
 import subprocess
 import wave
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -51,6 +52,41 @@ def test_describe_multi_file_book(book_dir):
     assert round(info["duration"], 2) == 4.5
     # One chapter per file when files carry no chapter markers.
     assert [round(c["start"], 2) for c in info["chapters"]] == [0, 1.5, 3.5]
+    assert all(c["source"] == "file" for c in info["chapters"])
+    assert all(f["bitrate"] == 128000 for f in info["files"])
+    assert info["bitrate"] == 128000
+
+
+def test_describe_weights_bitrate_by_duration(book_dir, monkeypatch):
+    rates = {"Part 1.wav": (1, 64000), "Part 2.wav": (2, 128000), "Part 10.wav": (3, 192000)}
+
+    def read(path):
+        length, bitrate = rates[path.name]
+        return SimpleNamespace(info=SimpleNamespace(length=length, bitrate=bitrate), tags={})
+
+    monkeypatch.setattr(media.mutagen, "File", read)
+    info = media.describe(book_dir)
+    assert info["bitrate"] == 149333
+    assert [f["bitrate"] for f in info["files"]] == [64000, 128000, 192000]
+
+
+@pytest.mark.parametrize("bitrate", [None, 0, -1])
+def test_describe_unknown_bitrate_is_not_zero(book_dir, monkeypatch, bitrate):
+    monkeypatch.setattr(media.mutagen, "File", lambda path: SimpleNamespace(
+        info=SimpleNamespace(length=2, bitrate=bitrate if path.name == "Part 2.wav" else 64000), tags={}
+    ))
+    info = media.describe(book_dir)
+    assert info["bitrate"] is None
+    assert info["files"][1]["bitrate"] is None
+    assert info["files"][0]["bitrate"] == 64000
+
+
+def test_describe_unreadable_audio(tmp_path):
+    (tmp_path / "broken.mp3").write_bytes(b"not audio")
+    info = media.describe(tmp_path)
+    assert info["bitrate"] is None
+    assert info["files"][0]["bitrate"] is None
+    assert info["chapters"] == []
 
 
 @pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
@@ -72,6 +108,8 @@ def test_describe_reads_m4b_chapters(tmp_path):
     info = media.describe(out.parent)
     assert [c["title"] for c in info["chapters"]] == ["Opening", "The Spice"]
     assert info["files"][0]["type"] == "audio/mp4"
+    assert info["bitrate"] > 0
+    assert all(c["source"] == "embedded" for c in info["chapters"])
     # ffmpeg writes a QuickTime chapter track too (the format LibriVox uses); read it directly.
     assert [(round(s), title) for s, title in media.qt_chapters(out)] == [(0, "Opening"), (1, "The Spice")]
 
@@ -86,6 +124,7 @@ def test_media_and_stream_endpoints(client, book_dir):
     book = completed_book(book_dir)
     info = client.get(f"/api/library/{book['id']}/media").json()
     assert len(info["files"]) == 3
+    assert info["bitrate"] == 128000
 
     full = client.get(f"/api/library/{book['id']}/stream/1")
     assert full.status_code == 200
