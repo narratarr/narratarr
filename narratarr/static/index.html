@@ -1,81 +1,118 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Narratarr</title>
-  <meta name="theme-color" content="#0c0a0f" />
-  <link rel="icon" href="/static/icon.svg" type="image/svg+xml" />
-  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png" />
-  <link rel="manifest" href="/static/manifest.webmanifest" />
-  <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="apple-mobile-web-app-title" content="Narratarr" />
-  <meta name="referrer" content="no-referrer" />
-  <link rel="stylesheet" href="/static/fonts/fonts.css" />
-  <link rel="stylesheet" href="/static/app.css" />
-</head>
-<body>
-  <div class="ambient" aria-hidden="true"><span></span><span></span><span></span></div>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Narratarr</title>
+    <meta name="theme-color" content="#0c0a0f" />
+    <link rel="icon" href="/static/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/static/apple-touch-icon.png" />
+    <link rel="manifest" href="/static/manifest.webmanifest" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Narratarr" />
+    <meta name="referrer" content="no-referrer" />
+    <link rel="stylesheet" href="/static/fonts/fonts.css" />
+    <link rel="stylesheet" href="/static/app.css" />
+  </head>
+  <body>
+    <div class="ambient" aria-hidden="true"><span></span><span></span><span></span></div>
 
-  <aside class="sidebar">
-    <a class="brand" href="#/discover" aria-label="Narratarr home">
-      <img src="/static/icon.svg" alt="" width="36" height="36" />
-      <span>Narrat<em>arr</em></span>
-    </a>
-    <nav class="nav" aria-label="Main">
-      <a href="#/discover" data-nav="discover">
-        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m15.5 8.5-2 5-5 2 2-5z"/></svg>
-        <span>Discover</span>
+    <aside class="sidebar">
+      <a class="brand" href="#/discover" aria-label="Narratarr home">
+        <img src="/static/icon.svg" alt="" width="36" height="36" />
+        <span>Narrat<em>arr</em></span>
       </a>
-      <a href="#/library" data-nav="library">
-        <svg viewBox="0 0 24 24"><path d="M4 19V5a1 1 0 0 1 1-1h3v16H5a1 1 0 0 1-1-1Z"/><path d="M8 4h4v16H8"/><path d="m14 5.2 3.6-.9 3.2 13.6-3.6.9z"/></svg>
-        <span>Library</span>
-        <b class="badge" id="requests-badge" hidden title="Requests awaiting your approval">0</b>
-      </a>
-      <a href="#/authors" data-nav="authors">
-        <svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.6a3.5 3.5 0 0 1 0 6.8M18.5 14.4A6.5 6.5 0 0 1 21.5 20"/></svg>
-        <span>Authors</span>
-      </a>
-      <a href="#/activity" data-nav="activity">
-        <svg viewBox="0 0 24 24"><path d="M12 4v11"/><path d="m7.5 10.5 4.5 4.5 4.5-4.5"/><path d="M5 20h14"/></svg>
-        <span>Activity</span>
-        <b class="badge" id="activity-badge" hidden>0</b>
-      </a>
-      <a href="#/settings" data-nav="settings">
-        <svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>
-        <span>Settings</span>
-      </a>
-    </nav>
-    <button class="update-pill" id="update-pill" hidden>
-      <svg viewBox="0 0 24 24"><path d="M12 4v11"/><path d="m7.5 10.5 4.5 4.5 4.5-4.5"/><path d="M5 20h14"/></svg>
-      <span>Update available</span>
-    </button>
-    <div class="sidebar-foot">
-      <a class="community-link" href="https://discord.gg/kB5EgmfBrA" target="_blank" rel="noopener noreferrer">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5.5h14a1.5 1.5 0 0 1 1.5 1.5v8.5A1.5 1.5 0 0 1 19 17h-8l-4.5 3.5V17H5a1.5 1.5 0 0 1-1.5-1.5V7A1.5 1.5 0 0 1 5 5.5Z"/><path d="M8.5 11h.01M12 11h.01M15.5 11h.01"/></svg>
-        <span><b>Join the Discord</b><small>Help, ideas and news</small></span>
-      </a>
-      <a class="rd-pill" id="rd-pill" href="#/settings">
-        <i></i><span>Real-Debrid</span>
-      </a>
-      <button class="account" id="account" type="button" hidden aria-label="Your account">
-        <span class="avatar" id="account-avatar"></span>
-        <span class="who"><b id="account-name"></b><small id="account-role"></small></span>
+      <nav class="nav" aria-label="Main">
+        <a href="#/discover" data-nav="discover">
+          <svg viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="9" />
+            <path d="m15.5 8.5-2 5-5 2 2-5z" />
+          </svg>
+          <span>Discover</span>
+        </a>
+        <a href="#/library" data-nav="library">
+          <svg viewBox="0 0 24 24">
+            <path d="M4 19V5a1 1 0 0 1 1-1h3v16H5a1 1 0 0 1-1-1Z" />
+            <path d="M8 4h4v16H8" />
+            <path d="m14 5.2 3.6-.9 3.2 13.6-3.6.9z" />
+          </svg>
+          <span>Library</span>
+          <b class="badge" id="requests-badge" hidden title="Requests awaiting your approval">0</b>
+        </a>
+        <a href="#/authors" data-nav="authors">
+          <svg viewBox="0 0 24 24">
+            <circle cx="9" cy="8" r="3.5" />
+            <path d="M2.5 20a6.5 6.5 0 0 1 13 0" />
+            <path d="M16 4.6a3.5 3.5 0 0 1 0 6.8M18.5 14.4A6.5 6.5 0 0 1 21.5 20" />
+          </svg>
+          <span>Authors</span>
+        </a>
+        <a href="#/activity" data-nav="activity">
+          <svg viewBox="0 0 24 24">
+            <path d="M12 4v11" />
+            <path d="m7.5 10.5 4.5 4.5 4.5-4.5" />
+            <path d="M5 20h14" />
+          </svg>
+          <span>Activity</span>
+          <b class="badge" id="activity-badge" hidden>0</b>
+        </a>
+        <a href="#/settings" data-nav="settings">
+          <svg viewBox="0 0 24 24">
+            <path d="M4 7h10M18 7h2M4 17h4M12 17h8" />
+            <circle cx="16" cy="7" r="2" />
+            <circle cx="10" cy="17" r="2" />
+          </svg>
+          <span>Settings</span>
+        </a>
+      </nav>
+      <button class="update-pill" id="update-pill" hidden>
+        <svg viewBox="0 0 24 24">
+          <path d="M12 4v11" />
+          <path d="m7.5 10.5 4.5 4.5 4.5-4.5" />
+          <path d="M5 20h14" />
+        </svg>
+        <span>Update available</span>
       </button>
-    </div>
-  </aside>
+      <div class="sidebar-foot">
+        <a
+          class="community-link"
+          href="https://discord.gg/kB5EgmfBrA"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M5 5.5h14a1.5 1.5 0 0 1 1.5 1.5v8.5A1.5 1.5 0 0 1 19 17h-8l-4.5 3.5V17H5a1.5 1.5 0 0 1-1.5-1.5V7A1.5 1.5 0 0 1 5 5.5Z"
+            />
+            <path d="M8.5 11h.01M12 11h.01M15.5 11h.01" />
+          </svg>
+          <span><b>Join the Discord</b><small>Help, ideas and news</small></span>
+        </a>
+        <a class="rd-pill" id="rd-pill" href="#/settings"> <i></i><span>Real-Debrid</span> </a>
+        <button class="account" id="account" type="button" hidden aria-label="Your account">
+          <span class="avatar" id="account-avatar"></span>
+          <span class="who"><b id="account-name"></b><small id="account-role"></small></span>
+        </button>
+      </div>
+    </aside>
 
-  <main class="main">
-    <div id="view" class="view"></div>
-  </main>
+    <main class="main">
+      <div id="view" class="view"></div>
+    </main>
 
-  <div class="drawer-scrim" id="drawer-scrim"></div>
-  <section class="drawer" id="drawer" role="dialog" aria-modal="true" aria-label="Book details"></section>
+    <div class="drawer-scrim" id="drawer-scrim"></div>
+    <section
+      class="drawer"
+      id="drawer"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Book details"
+    ></section>
 
-  <div class="modal-scrim" id="modal" hidden></div>
-  <div class="toasts" id="toasts" aria-live="polite"></div>
+    <div class="modal-scrim" id="modal" hidden></div>
+    <div class="toasts" id="toasts" aria-live="polite"></div>
 
-  <script src="/static/app.js" type="module"></script>
-</body>
+    <script src="/static/app.js" type="module"></script>
+  </body>
 </html>

@@ -39,8 +39,13 @@ def client():
 
 def completed_book(path: Path) -> dict:
     return db.insert(
-        {"source": "audiobookbay", "source_url": "https://audiobookbay.lu/abss/dune/", "title": "Dune",
-         "status": "completed", "path": str(path)}
+        {
+            "source": "audiobookbay",
+            "source_url": "https://audiobookbay.lu/abss/dune/",
+            "title": "Dune",
+            "status": "completed",
+            "path": str(path),
+        }
     )
 
 
@@ -64,8 +69,26 @@ def test_describe_reads_m4b_chapters(tmp_path):
     out = tmp_path / "book" / "Dune.m4b"
     out.parent.mkdir()
     subprocess.run(
-        ["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "anullsrc=r=22050:cl=mono",
-         "-i", str(meta), "-map_metadata", "1", "-t", "2", "-c:a", "aac", "-f", "mp4", str(out)],
+        [
+            "ffmpeg",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "anullsrc=r=22050:cl=mono",
+            "-i",
+            str(meta),
+            "-map_metadata",
+            "1",
+            "-t",
+            "2",
+            "-c:a",
+            "aac",
+            "-f",
+            "mp4",
+            str(out),
+        ],
         check=True,
         timeout=60,
     )
@@ -73,7 +96,10 @@ def test_describe_reads_m4b_chapters(tmp_path):
     assert [c["title"] for c in info["chapters"]] == ["Opening", "The Spice"]
     assert info["files"][0]["type"] == "audio/mp4"
     # ffmpeg writes a QuickTime chapter track too (the format LibriVox uses); read it directly.
-    assert [(round(s), title) for s, title in media.qt_chapters(out)] == [(0, "Opening"), (1, "The Spice")]
+    assert [(round(s), title) for s, title in media.qt_chapters(out)] == [
+        (0, "Opening"),
+        (1, "The Spice"),
+    ]
 
 
 def test_qt_chapters_tolerates_non_mp4_files(tmp_path):
@@ -100,7 +126,14 @@ def test_media_and_stream_endpoints(client, book_dir):
 
 
 def test_media_requires_downloaded_book(client):
-    book = db.insert({"source": "audiobookbay", "source_url": "https://audiobookbay.lu/abss/x/", "title": "X", "status": "wanted"})
+    book = db.insert(
+        {
+            "source": "audiobookbay",
+            "source_url": "https://audiobookbay.lu/abss/x/",
+            "title": "X",
+            "status": "wanted",
+        }
+    )
     assert client.get(f"/api/library/{book['id']}/media").status_code == 404
 
 

@@ -84,12 +84,16 @@ def test_a_post_whose_inside_is_hidden_is_read_too(fixture_html):
     m = re.search(r'<div class="post">(.*?<div class="postInfo">.*?</div>)\s*</div>', html, re.S)
     assert m, "the fixture has posts to hide"
     hidden = base64.b64encode(m.group(1).encode()).decode()
-    html = html.replace(m.group(0), f'<div class="post re-ab" style="display:none;">{hidden}</div>', 1)
+    html = html.replace(
+        m.group(0), f'<div class="post re-ab" style="display:none;">{hidden}</div>', 1
+    )
     revealed = parse_listing(html, BASE)
     assert [i.url for i in revealed.items] == [i.url for i in normal.items]
     assert revealed.items[0].title == normal.items[0].title
 
 
 def test_a_re_ab_block_that_is_not_a_post_does_not_break_the_page(fixture_html):
-    html = fixture_html("abb_search.html").replace("<body", '<body><div class="re-ab">not base64 at all!!</div', 1)
+    html = fixture_html("abb_search.html").replace(
+        "<body", '<body><div class="re-ab">not base64 at all!!</div', 1
+    )
     assert parse_listing(html, BASE).items

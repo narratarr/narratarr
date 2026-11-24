@@ -15,7 +15,10 @@ from narratarr.worker import Worker, link_into
 
 def use(kind: str, **fields):
     """Configure one client the way Settings does now: a record in the list."""
-    return config.update({"clients": [{"id": kind, "type": kind, **fields}], "default_client": kind})
+    return config.update(
+        {"clients": [{"id": kind, "type": kind, **fields}], "default_client": kind}
+    )
+
 
 HASH = "061850ead3eb6f1c5c6d8420211b4bbf2d4ee3e2"
 NZB = b'<?xml version="1.0"?>\n<nzb xmlns="http://www.newzbin.com/DTD/2003/nzb"></nzb>'
@@ -27,10 +30,17 @@ def fast(monkeypatch):
 
 
 def torrent_book(**extra) -> dict:
-    return db.insert({
-        "source": "audiobookbay", "source_url": "https://audiobookbay.lu/abss/dune/", "title": "Dune",
-        "author": "Frank Herbert", "info_hash": HASH, "status": "queued", **extra,
-    })
+    return db.insert(
+        {
+            "source": "audiobookbay",
+            "source_url": "https://audiobookbay.lu/abss/dune/",
+            "title": "Dune",
+            "author": "Frank Herbert",
+            "info_hash": HASH,
+            "status": "queued",
+            **extra,
+        }
+    )
 
 
 def finished_download(root: Path) -> Path:
@@ -47,7 +57,10 @@ class FakeNZBGet:
     def __call__(self, request: httpx.Request) -> httpx.Response:
         if request.url.host == "prowlarr":
             return httpx.Response(200, content=NZB)
-        assert request.headers["authorization"] == "Basic " + base64.b64encode(b"nzbget:secret").decode()
+        assert (
+            request.headers["authorization"]
+            == "Basic " + base64.b64encode(b"nzbget:secret").decode()
+        )
         body = json.loads(request.content)
         method, params = body["method"], body["params"]
         self.calls.append(method)
@@ -57,24 +70,43 @@ class FakeNZBGet:
             result = 42
         elif method == "listgroups":
             self.polls += 1
-            result = [{"NZBID": 42, "Status": "DOWNLOADING", "FileSizeMB": 100, "RemainingSizeMB": 25}] if self.polls == 1 else []
+            result = (
+                [{"NZBID": 42, "Status": "DOWNLOADING", "FileSizeMB": 100, "RemainingSizeMB": 25}]
+                if self.polls == 1
+                else []
+            )
         elif method == "status":
             result = {"DownloadRate": 5000, "DownloadPaused": False}
         elif method == "history":
-            result = [{"NZBID": 42, "Status": self.history, "DestDir": str(self.dest), "FinalDir": ""}]
+            result = [
+                {"NZBID": 42, "Status": self.history, "DestDir": str(self.dest), "FinalDir": ""}
+            ]
         elif method == "editqueue":
             result = True
         return httpx.Response(200, json={"result": result})
 
 
 async def test_nzbget_pipeline(isolated_data):
-    use("nzbget", url="http://nzbget:6789", username="nzbget", password="secret", category="Audiobooks")
+    use(
+        "nzbget",
+        url="http://nzbget:6789",
+        username="nzbget",
+        password="secret",
+        category="Audiobooks",
+    )
     config.update({"prowlarr_url": "http://prowlarr:9696", "prowlarr_api_key": "K"})
     fake = FakeNZBGet(finished_download(isolated_data))
-    book = db.insert({
-        "source": "prowlarr", "source_url": "https://nzbs.example/1", "title": "Dune", "author": "Frank Herbert",
-        "protocol": "usenet", "download_url": "http://prowlarr:9696/1/download?link=x", "status": "queued",
-    })
+    book = db.insert(
+        {
+            "source": "prowlarr",
+            "source_url": "https://nzbs.example/1",
+            "title": "Dune",
+            "author": "Frank Herbert",
+            "protocol": "usenet",
+            "download_url": "http://prowlarr:9696/1/download?link=x",
+            "status": "queued",
+        }
+    )
 
     await Worker(transport=httpx.MockTransport(fake)).process(book["id"])
 
@@ -90,16 +122,32 @@ async def test_nzbget_pipeline(isolated_data):
 async def test_nzbget_failure(isolated_data):
     use("nzbget", url="http://nzbget:6789", username="nzbget", password="secret")
     config.update({"prowlarr_url": "http://prowlarr:9696", "prowlarr_api_key": "K"})
-    book = db.insert({"source": "prowlarr", "source_url": "https://nzbs.example/2", "title": "Dune",
-                      "protocol": "usenet", "download_url": "http://prowlarr:9696/x", "status": "queued"})
-    await Worker(transport=httpx.MockTransport(FakeNZBGet(isolated_data, history="FAILURE/PAR")))._run(book["id"])
+    book = db.insert(
+        {
+            "source": "prowlarr",
+            "source_url": "https://nzbs.example/2",
+            "title": "Dune",
+            "protocol": "usenet",
+            "download_url": "http://prowlarr:9696/x",
+            "status": "queued",
+        }
+    )
+    await Worker(
+        transport=httpx.MockTransport(FakeNZBGet(isolated_data, history="FAILURE/PAR"))
+    )._run(book["id"])
     failed = db.get(book["id"])
     assert failed["status"] == "failed" and "failure/par" in failed["error"]
 
 
 class FakeQbit:
     def __init__(self, path: Path):
-        self.path, self.logged_in, self.added, self.polls, self.deleted = path, False, None, 0, False
+        self.path, self.logged_in, self.added, self.polls, self.deleted = (
+            path,
+            False,
+            None,
+            0,
+            False,
+        )
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
@@ -107,7 +155,9 @@ class FakeQbit:
             ok = parse_qs(request.content.decode()) == {"username": ["admin"], "password": ["pw"]}
             self.logged_in = ok
             # qBittorrent 5.x: 204 on success, 401 on failure
-            return httpx.Response(204 if ok else 401, headers={"set-cookie": "SID=abc; path=/"} if ok else {})
+            return httpx.Response(
+                204 if ok else 401, headers={"set-cookie": "SID=abc; path=/"} if ok else {}
+            )
         if not self.logged_in or "SID=abc" not in request.headers.get("cookie", ""):
             return httpx.Response(403)
         if path == "/api/v2/torrents/add":
@@ -116,8 +166,14 @@ class FakeQbit:
         if path == "/api/v2/torrents/info":
             self.polls += 1
             done = self.polls > 2
-            t = {"hash": HASH, "state": "uploading" if done else "downloading", "progress": 1 if done else 0.5,
-                 "dlspeed": 1000, "num_seeds": 3, "content_path": str(self.path)}
+            t = {
+                "hash": HASH,
+                "state": "uploading" if done else "downloading",
+                "progress": 1 if done else 0.5,
+                "dlspeed": 1000,
+                "num_seeds": 3,
+                "content_path": str(self.path),
+            }
             return httpx.Response(200, json=[t])
         if path == "/api/v2/torrents/delete":
             self.deleted = True
@@ -126,7 +182,13 @@ class FakeQbit:
 
 
 async def test_qbittorrent_keeps_seeding(isolated_data):
-    use("qbittorrent", url="http://qbit:8080", username="admin", password="pw", category="audiobooks")
+    use(
+        "qbittorrent",
+        url="http://qbit:8080",
+        username="admin",
+        password="pw",
+        category="audiobooks",
+    )
     original = finished_download(isolated_data)
     fake = FakeQbit(original)
     book = torrent_book()
@@ -137,7 +199,9 @@ async def test_qbittorrent_keeps_seeding(isolated_data):
     assert done["status"] == "completed", done["error"]
     assert (Path(done["path"]) / "Dune.m4b").read_bytes() == b"audio"
     assert (original / "Dune.m4b").exists() and not fake.deleted  # still there to seed
-    assert HASH.encode() in fake.added and b"narratarr-" in fake.added and b"audiobooks" in fake.added
+    assert (
+        HASH.encode() in fake.added and b"narratarr-" in fake.added and b"audiobooks" in fake.added
+    )
     assert done["download_client"] == "qbittorrent" and done["client_job_id"] == HASH
 
 
@@ -156,7 +220,9 @@ async def test_qbittorrent_old_style_login(isolated_data):
             return httpx.Response(200, text="Ok.", headers={"set-cookie": "SID=abc; path=/"})
         return httpx.Response(200, text="v4.6.7")
 
-    async with QBittorrent("http://q:8080", "admin", "pw", transport=httpx.MockTransport(handler)) as q:
+    async with QBittorrent(
+        "http://q:8080", "admin", "pw", transport=httpx.MockTransport(handler)
+    ) as q:
         assert await q.version() == "v4.6.7"
 
 
@@ -170,16 +236,38 @@ class FakeTransmission:
         body = json.loads(request.content)
         if body["method"] == "torrent-add":
             self.added = body["arguments"]
-            return httpx.Response(200, json={"result": "success", "arguments": {
-                "torrent-added": {"hashString": HASH.upper(), "id": 1, "name": "Dune"}}})
+            return httpx.Response(
+                200,
+                json={
+                    "result": "success",
+                    "arguments": {
+                        "torrent-added": {"hashString": HASH.upper(), "id": 1, "name": "Dune"}
+                    },
+                },
+            )
         if body["method"] == "torrent-get":
             self.polls += 1
             done = self.polls > 1
             if body["arguments"].get("fields") == ["labels"]:
-                return httpx.Response(200, json={"result": "success", "arguments": {"torrents": [{"labels": getattr(self, "labels", [])}]}})
-            t = {"hashString": HASH, "name": self.folder.name, "status": 6 if done else 4,
-                 "percentDone": 1 if done else 0.3, "leftUntilDone": 0 if done else 10, "rateDownload": 500,
-                 "error": 0, "downloadDir": "/data/torrents", "metadataPercentComplete": 1, "peersSendingToUs": 2}
+                return httpx.Response(
+                    200,
+                    json={
+                        "result": "success",
+                        "arguments": {"torrents": [{"labels": getattr(self, "labels", [])}]},
+                    },
+                )
+            t = {
+                "hashString": HASH,
+                "name": self.folder.name,
+                "status": 6 if done else 4,
+                "percentDone": 1 if done else 0.3,
+                "leftUntilDone": 0 if done else 10,
+                "rateDownload": 500,
+                "error": 0,
+                "downloadDir": "/data/torrents",
+                "metadataPercentComplete": 1,
+                "peersSendingToUs": 2,
+            }
             return httpx.Response(200, json={"result": "success", "arguments": {"torrents": [t]}})
         if body["method"] == "torrent-set":
             self.labels = body["arguments"].get("labels", [])
@@ -207,7 +295,12 @@ async def test_transmission_with_path_mapping(isolated_data):
 
 async def test_transmission_saves_to_its_folder_with_the_label(isolated_data):
     original = finished_download(isolated_data)
-    use("transmission", url="http://transmission:9091", save_path="/data/torrents/books", category="books, audio")
+    use(
+        "transmission",
+        url="http://transmission:9091",
+        save_path="/data/torrents/books",
+        category="books, audio",
+    )
     config.update({"path_remote": "/data/torrents", "path_local": str(original.parent)})
     fake = FakeTransmission(original)
     book = torrent_book()
@@ -216,7 +309,10 @@ async def test_transmission_saves_to_its_folder_with_the_label(isolated_data):
 
     assert db.get(book["id"])["status"] == "completed"
     assert fake.added["download-dir"] == "/data/torrents/books"
-    assert fake.labels == [f"narratarr-{book['id']}", "books  audio"]  # no commas: Transmission refuses them
+    assert fake.labels == [
+        f"narratarr-{book['id']}",
+        "books  audio",
+    ]  # no commas: Transmission refuses them
 
 
 async def test_transmission_defaults_leave_the_folder_alone(isolated_data):
@@ -233,7 +329,13 @@ async def test_transmission_defaults_leave_the_folder_alone(isolated_data):
 
 
 async def test_qbittorrent_folder_overrides_automatic_management(isolated_data):
-    use("qbittorrent", url="http://qbit:8080", username="admin", password="pw", save_path="/data/torrents/books")
+    use(
+        "qbittorrent",
+        url="http://qbit:8080",
+        username="admin",
+        password="pw",
+        save_path="/data/torrents/books",
+    )
     original = finished_download(isolated_data)
     fake = FakeQbit(original)
     book = torrent_book()
@@ -266,7 +368,10 @@ class FakeDeluge:
 
     @staticmethod
     def _fail(message, body, code=2):
-        return httpx.Response(200, json={"result": None, "error": {"message": message, "code": code}, "id": body["id"]})
+        return httpx.Response(
+            200,
+            json={"result": None, "error": {"message": message, "code": code}, "id": body["id"]},
+        )
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content)
@@ -303,9 +408,18 @@ class FakeDeluge:
                 return self._ok({"label": torrent["label"]}, body)
             torrent["polls"] += 1
             done = torrent["polls"] > 1
-            return self._ok({"name": self.folder.name, "download_location": "/data/torrents",
-                             "state": "Seeding" if done else "Downloading", "progress": 100 if done else 30,
-                             "is_finished": done, "download_payload_rate": 500, "message": ""}, body)
+            return self._ok(
+                {
+                    "name": self.folder.name,
+                    "download_location": "/data/torrents",
+                    "state": "Seeding" if done else "Downloading",
+                    "progress": 100 if done else 30,
+                    "is_finished": done,
+                    "download_payload_rate": 500,
+                    "message": "",
+                },
+                body,
+            )
         if method == "core.remove_torrent":
             self.removed = params
             return self._ok(self.torrents.pop(params[0], None) is not None, body)
@@ -350,13 +464,17 @@ async def test_deluge_reports_an_rpc_error(isolated_data):
     def handler(request):
         body = json.loads(request.content)
         if body["method"] == "auth.login":
-            return httpx.Response(200, json={"result": False, "error": {"message": "Bad login", "code": 1}, "id": 1})
+            return httpx.Response(
+                200, json={"result": False, "error": {"message": "Bad login", "code": 1}, "id": 1}
+            )
         return httpx.Response(200, json={"result": None, "error": None, "id": 1})
 
     from narratarr.deluge import Deluge, DelugeError
 
     with pytest.raises(DelugeError):
-        async with Deluge("http://deluge:8112", "wrong", transport=httpx.MockTransport(handler)) as d:
+        async with Deluge(
+            "http://deluge:8112", "wrong", transport=httpx.MockTransport(handler)
+        ) as d:
             await d.version()
 
 
@@ -387,7 +505,9 @@ async def test_deluge_without_the_label_plugin_still_adds(isolated_data):
         assert h == HASH
         assert "label.add" not in fake.calls and "label.set_torrent" not in fake.calls
         await d.delete(h, tag="narratarr-9")
-        assert HASH in fake.torrents, "with no label there is no proof of ownership, so nothing is removed"
+        assert HASH in fake.torrents, (
+            "with no label there is no proof of ownership, so nothing is removed"
+        )
 
 
 def test_link_into_single_file_and_folder(tmp_path):
@@ -411,46 +531,83 @@ def test_settings_carry_over_old_sabnzbd_path_mapping(isolated_data, monkeypatch
     s = config.load()
     assert (s.path_remote, s.path_local) == ("/downloads", "/mnt/usenet")
     assert config.update({"torrent_client": "bogus"}).torrent_client == "realdebrid"
-    pub = config.update({"torrent_client": "qbittorrent", "qbittorrent_url": "http://q", "qbittorrent_password": "secret1"}).public()
+    pub = config.update(
+        {
+            "torrent_client": "qbittorrent",
+            "qbittorrent_url": "http://q",
+            "qbittorrent_password": "secret1",
+        }
+    ).public()
     assert pub["torrent_configured"] and "secret" not in pub["qbittorrent_password"]
 
 
 # ---- routing at grab time --------------------------------------------------------------------
 
+
 def routed_transmission(original, rules):
     """Transmission as the routed client, qBittorrent as the default, so the two are distinguishable."""
-    return config.update({
-        "clients": [{"id": "transmission", "type": "transmission", "url": "http://transmission:9091",
-                     "category": "books"},
-                    {"id": "qbittorrent", "type": "qbittorrent", "url": "http://qbit:8080"}],
-        "default_client": "qbittorrent",
-        "client_routes": {"version": 1, "rules": rules},
-        "path_remote": "/data/torrents", "path_local": str(original.parent),
-    })
+    return config.update(
+        {
+            "clients": [
+                {
+                    "id": "transmission",
+                    "type": "transmission",
+                    "url": "http://transmission:9091",
+                    "category": "books",
+                },
+                {"id": "qbittorrent", "type": "qbittorrent", "url": "http://qbit:8080"},
+            ],
+            "default_client": "qbittorrent",
+            "client_routes": {"version": 1, "rules": rules},
+            "path_remote": "/data/torrents",
+            "path_local": str(original.parent),
+        }
+    )
 
 
 async def test_a_rule_decides_the_client_and_its_own_label_and_path(isolated_data):
     original = finished_download(isolated_data)
-    routed_transmission(original, [{"match": {"indexers": ["The Pirate Bay"]}, "client": "transmission",
-                                    "label": "kids", "save_path": "/data/kids"}])
+    routed_transmission(
+        original,
+        [
+            {
+                "match": {"indexers": ["The Pirate Bay"]},
+                "client": "transmission",
+                "label": "kids",
+                "save_path": "/data/kids",
+            }
+        ],
+    )
     fake = FakeTransmission(original)
     book = torrent_book(indexer="The Pirate Bay")
 
     await Worker(transport=httpx.MockTransport(fake)).process(book["id"])
 
-    assert fake.added["download-dir"] == "/data/kids", "the route's save path wins over the client's"
+    assert fake.added["download-dir"] == "/data/kids", (
+        "the route's save path wins over the client's"
+    )
     assert "kids" in fake.labels
     assert db.get(book["id"])["download_client"] == "transmission"
 
 
 async def test_without_a_rule_the_grab_takes_the_same_path_it_always_did(isolated_data):
     original = finished_download(isolated_data)
-    config.update({
-        "clients": [{"id": "transmission", "type": "transmission", "url": "http://transmission:9091",
-                     "category": "books"}],
-        "default_client": "transmission", "client_routes": {"version": 1, "rules": []},
-        "path_remote": "/data/torrents", "path_local": str(original.parent),
-    })
+    config.update(
+        {
+            "clients": [
+                {
+                    "id": "transmission",
+                    "type": "transmission",
+                    "url": "http://transmission:9091",
+                    "category": "books",
+                }
+            ],
+            "default_client": "transmission",
+            "client_routes": {"version": 1, "rules": []},
+            "path_remote": "/data/torrents",
+            "path_local": str(original.parent),
+        }
+    )
     fake = FakeTransmission(original)
     book = torrent_book()
 
@@ -464,7 +621,9 @@ async def test_without_a_rule_the_grab_takes_the_same_path_it_always_did(isolate
 async def test_every_grab_says_why_in_the_log(isolated_data, caplog):
     """A file landing somewhere unexpected has to be explainable without guesswork."""
     original = finished_download(isolated_data)
-    routed_transmission(original, [{"match": {"indexers": ["The Pirate Bay"]}, "client": "transmission"}])
+    routed_transmission(
+        original, [{"match": {"indexers": ["The Pirate Bay"]}, "client": "transmission"}]
+    )
     fake = FakeTransmission(original)
     matched = torrent_book(indexer="The Pirate Bay")
 
@@ -476,8 +635,12 @@ async def test_every_grab_says_why_in_the_log(isolated_data, caplog):
 
 async def test_a_grab_with_no_matching_rule_says_so_in_the_log(isolated_data, caplog):
     original = finished_download(isolated_data)
-    routed_transmission(original, [{"match": {"indexers": ["The Pirate Bay"]}, "client": "transmission"}])
-    config.update({"default_client": "transmission"})  # so the fall-through lands on a reachable one
+    routed_transmission(
+        original, [{"match": {"indexers": ["The Pirate Bay"]}, "client": "transmission"}]
+    )
+    config.update(
+        {"default_client": "transmission"}
+    )  # so the fall-through lands on a reachable one
     fake = FakeTransmission(original)
     book = torrent_book(indexer="Some Other Tracker")
 
@@ -488,7 +651,9 @@ async def test_a_grab_with_no_matching_rule_says_so_in_the_log(isolated_data, ca
     assert "no rule matched" in text and "Some Other Tracker" in text
 
 
-async def test_a_route_to_a_deleted_client_is_reported_and_the_default_takes_it(isolated_data, caplog):
+async def test_a_route_to_a_deleted_client_is_reported_and_the_default_takes_it(
+    isolated_data, caplog
+):
     """A stale rule must not stop the download, and must not be silent either."""
     original = finished_download(isolated_data)
     routed_transmission(original, [{"match": {"indexers": ["The Pirate Bay"]}, "client": "gone"}])
@@ -508,7 +673,7 @@ async def test_a_route_to_a_deleted_client_is_reported_and_the_default_takes_it(
 async def test_a_draft_client_fails_with_a_clear_message_not_a_connection_error(isolated_data):
     """Issue #12 end to end: a saved client with no address must not be handed the release. Before
     the fix this built Deluge("") and failed with a connection error."""
-    use("deluge", url="")            # a draft: the row exists, the address does not
+    use("deluge", url="")  # a draft: the row exists, the address does not
     config.update({"default_client": "deluge"})
     book = torrent_book()
 
@@ -521,9 +686,15 @@ async def test_a_draft_client_fails_with_a_clear_message_not_a_connection_error(
 
 
 async def test_two_draft_clients_are_named_together(isolated_data):
-    config.update({"clients": [{"id": "deluge", "type": "deluge", "url": ""},
-                               {"id": "transmission", "type": "transmission", "url": ""}],
-                   "default_client": ""})
+    config.update(
+        {
+            "clients": [
+                {"id": "deluge", "type": "deluge", "url": ""},
+                {"id": "transmission", "type": "transmission", "url": ""},
+            ],
+            "default_client": "",
+        }
+    )
     book = torrent_book()
 
     await Worker(transport=httpx.MockTransport(FakeDeluge(isolated_data)))._run(book["id"])

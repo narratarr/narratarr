@@ -41,7 +41,9 @@ class FakeRD:
     def __call__(self, request: httpx.Request) -> httpx.Response:
         path, host = request.url.path, request.url.host
         if host == "covers.example":
-            return httpx.Response(200, content=b"\xff\xd8jpeg", headers={"content-type": "image/jpeg"})
+            return httpx.Response(
+                200, content=b"\xff\xd8jpeg", headers={"content-type": "image/jpeg"}
+            )
         if host == "dl.example":
             return httpx.Response(200, content=self.files[path.strip("/")])
         assert request.headers["authorization"] == "Bearer test-key"
@@ -51,18 +53,29 @@ class FakeRD:
         if path.endswith("/torrents/info/TID"):
             self.info_calls += 1
             if self.info_calls == 1:
-                return httpx.Response(200, json={"status": "waiting_files_selection", "progress": 0})
+                return httpx.Response(
+                    200, json={"status": "waiting_files_selection", "progress": 0}
+                )
             if self.info_calls == 2:
-                return httpx.Response(200, json={"status": "downloading", "progress": 50, "speed": 1000, "seeders": 4})
+                return httpx.Response(
+                    200, json={"status": "downloading", "progress": 50, "speed": 1000, "seeders": 4}
+                )
             links = [f"https://real-debrid.com/d/{name}" for name in self.files]
-            return httpx.Response(200, json={"status": self.final_status, "progress": 100, "links": links})
+            return httpx.Response(
+                200, json={"status": self.final_status, "progress": 100, "links": links}
+            )
         if path.endswith("/torrents/selectFiles/TID"):
             self.selected = True
             return httpx.Response(204)
         if path.endswith("/unrestrict/link"):
             name = request.content.decode().rsplit("%2F", 1)[-1]
             return httpx.Response(
-                200, json={"filename": name, "filesize": len(self.files[name]), "download": f"https://dl.example/{name}"}
+                200,
+                json={
+                    "filename": name,
+                    "filesize": len(self.files[name]),
+                    "download": f"https://dl.example/{name}",
+                },
             )
         if path.endswith("/torrents/delete/TID"):
             self.deleted = True
@@ -102,7 +115,9 @@ async def test_zip_from_real_debrid_is_extracted(isolated_data):
         zf.writestr("Dune/02.mp3", b"two")
     book = make_book()
 
-    await Worker(transport=httpx.MockTransport(FakeRD({"Dune.zip": buf.getvalue()}))).process(book["id"])
+    await Worker(transport=httpx.MockTransport(FakeRD({"Dune.zip": buf.getvalue()}))).process(
+        book["id"]
+    )
 
     dest = Path(db.get(book["id"])["path"])
     assert (dest / "Dune" / "01.mp3").read_bytes() == b"one"

@@ -23,8 +23,8 @@ from .store import Store
 
 log = logging.getLogger("narratarr.ratings")
 
-PRIOR_SCORE = 3.9       # the average a new book is treated as having, so few votes pull toward it
-PRIOR_WEIGHT = 1000     # how many real votes the prior is worth
+PRIOR_SCORE = 3.9  # the average a new book is treated as having, so few votes pull toward it
+PRIOR_WEIGHT = 1000  # how many real votes the prior is worth
 UNKNOWN_COUNT_WEIGHT = 100  # what a rating with no count is worth: real, but weak evidence
 
 
@@ -37,8 +37,8 @@ class Rating:
     scale: float = 5.0
     source: str = ""
     url: str = ""
-    label: str = ""            # the source mark beside the score, e.g. "Audible"
-    tooltip: str = ""          # the full sentence, for the title attribute
+    label: str = ""  # the source mark beside the score, e.g. "Audible"
+    tooltip: str = ""  # the full sentence, for the title attribute
     extra: dict = field(default_factory=dict)
 
     def bayes(self) -> float:
@@ -89,8 +89,15 @@ def compact_count(n: int | None) -> str:
 # ---- providers ----------------------------------------------------------------------------
 
 
-def make_rating(score, count, url: str, source: str, label: str = "", tooltip: str = "",
-                extra: dict | None = None) -> Rating | None:
+def make_rating(
+    score,
+    count,
+    url: str,
+    source: str,
+    label: str = "",
+    tooltip: str = "",
+    extra: dict | None = None,
+) -> Rating | None:
     """The one place a score becomes a rating, and the one place the vote floor is applied.
 
     Below its source's floor a score is noise, and a thin 5.0 outranks a solid 4.3 on any honest
@@ -166,7 +173,9 @@ def reset_for_tests() -> None:
 # ---- the page path ------------------------------------------------------------------------
 
 _queue: asyncio.Queue = asyncio.Queue()
-_queued: set[tuple[str, str, str]] = set()  # what's in the queue, so asking twice doesn't fetch twice
+_queued: set[tuple[str, str, str]] = (
+    set()
+)  # what's in the queue, so asking twice doesn't fetch twice
 _filler: set[asyncio.Task] = set()
 
 
@@ -212,6 +221,7 @@ def sort_items(items: list[dict]) -> list[dict]:
     reads that as a broken sort. `Rating.bayes` stays on the object for a ranked view that does not
     print the score.
     """
+
     def key(item):
         score = (item.get("rating") or {}).get("score")
         return (score is None, -(score or 0.0))

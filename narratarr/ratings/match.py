@@ -36,6 +36,7 @@ def clean_query_title(title: str, source: str = "") -> str:
         return BY_SUFFIX.sub("", title or "").strip()
     return title or ""
 
+
 _DIGIT = re.compile(r"\d")
 _TRAILING_GROUP = re.compile(r"\s*[\(\[][^\)\]]*[\)\]]\s*$")
 
@@ -54,7 +55,7 @@ def _strip_trailing_group(raw: str) -> tuple[str, str]:
     m = _TRAILING_GROUP.search(raw or "")
     if not m:
         return raw or "", ""
-    return (raw or "")[: m.start()], (raw or "")[m.start():].strip("()[] ")
+    return (raw or "")[: m.start()], (raw or "")[m.start() :].strip("()[] ")
 
 
 def _core(raw: str) -> str:
@@ -104,7 +105,10 @@ def author_matches(query: str, candidates: list[str] | str) -> bool:
     return False
 
 
-def strict_match(query_title: str, query_author: str, candidate_title: str,
-                 candidate_authors: list[str] | str) -> bool:
+def strict_match(
+    query_title: str, query_author: str, candidate_title: str, candidate_authors: list[str] | str
+) -> bool:
     """The single gate. Both halves must clear; a near miss is a no."""
-    return title_matches(query_title, candidate_title) and author_matches(query_author, candidate_authors)
+    return title_matches(query_title, candidate_title) and author_matches(
+        query_author, candidate_authors
+    )

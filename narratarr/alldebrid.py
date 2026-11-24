@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 
 import httpx
+
 from .downloaders import bad_release
 
 API = "https://api.alldebrid.com"
@@ -82,8 +83,12 @@ def _data(resp: httpx.Response) -> dict:
         body = None
     if not isinstance(body, dict):
         if resp.status_code in (429, 503):
-            raise AllDebridError("AllDebrid is busy right now. Try again in a minute.", str(resp.status_code))
-        raise AllDebridError(f"AllDebrid answered with an error ({resp.status_code}).", str(resp.status_code))
+            raise AllDebridError(
+                "AllDebrid is busy right now. Try again in a minute.", str(resp.status_code)
+            )
+        raise AllDebridError(
+            f"AllDebrid answered with an error ({resp.status_code}).", str(resp.status_code)
+        )
     if body.get("status") == "error" or resp.status_code >= 400:
         err = body.get("error") if isinstance(body.get("error"), dict) else {}
         code = str(err.get("code") or resp.status_code)
@@ -160,15 +165,28 @@ class AllDebrid:
     async def add(self, kind: str, payload: str | bytes) -> str:
         if kind == "torrent":
             files = {"files[]": ("release.torrent", payload, "application/x-bittorrent")}
-            item = _one((await self._call("POST", "/v4/magnet/upload/file", files=files)).get("files"), "torrent")
+            item = _one(
+                (await self._call("POST", "/v4/magnet/upload/file", files=files)).get("files"),
+                "torrent",
+            )
         else:
-            item = _one((await self._call("POST", "/v4/magnet/upload", data={"magnets[]": payload})).get("magnets"), "torrent")
+            item = _one(
+                (await self._call("POST", "/v4/magnet/upload", data={"magnets[]": payload})).get(
+                    "magnets"
+                ),
+                "torrent",
+            )
         if item.get("id") in (None, ""):
             raise AllDebridError("AllDebrid didn't say which torrent it added.")
         return str(item["id"])
 
     async def _status(self, magnet_id: str) -> dict:
-        return _one((await self._call("POST", "/v4.1/magnet/status", data={"id": magnet_id})).get("magnets"), "status")
+        return _one(
+            (await self._call("POST", "/v4.1/magnet/status", data={"id": magnet_id})).get(
+                "magnets"
+            ),
+            "status",
+        )
 
     async def exists(self, magnet_id: str) -> bool:
         try:
@@ -240,7 +258,12 @@ async def pin_start(transport: httpx.AsyncBaseTransport | None = None) -> dict:
     url = str(data.get("user_url") or "")
     if not url.startswith(SITE + "/"):  # only ever send the user to AllDebrid itself
         url = f"{SITE}/pin/"
-    return {"pin": pin, "check": check, "user_url": url, "expires_in": int(data.get("expires_in") or 600)}
+    return {
+        "pin": pin,
+        "check": check,
+        "user_url": url,
+        "expires_in": int(data.get("expires_in") or 600),
+    }
 
 
 async def pin_check(pin: str, check: str, transport: httpx.AsyncBaseTransport | None = None) -> str:

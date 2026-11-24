@@ -42,7 +42,24 @@ def clean_title(title: str) -> str:
     return " ".join(title.split())
 
 
-STOPWORDS = {"the", "a", "an", "of", "and", "by", "in", "on", "to", "for", "with", "at", "or", "de", "la", "le"}
+STOPWORDS = {
+    "the",
+    "a",
+    "an",
+    "of",
+    "and",
+    "by",
+    "in",
+    "on",
+    "to",
+    "for",
+    "with",
+    "at",
+    "or",
+    "de",
+    "la",
+    "le",
+}
 
 
 def _content(s: str) -> str:
@@ -71,7 +88,9 @@ def score(query: str, item: Listing) -> float:
     return float(s)
 
 
-async def suggestions(query: str, limit: int = 8, client: httpx.AsyncClient | None = None) -> list[dict]:
+async def suggestions(
+    query: str, limit: int = 8, client: httpx.AsyncClient | None = None
+) -> list[dict]:
     """Typo-tolerant title/author suggestions from Apple's audiobook catalog."""
     key = f"{normalize(query)}:{limit}"
     hit = _cache.get(key)
@@ -113,7 +132,12 @@ def correct_words(query: str, sugg: list[dict]) -> str:
 
     'harry poter' -> 'harry potter', 'brandon sandersen mistborn' -> 'brandon sanderson mistborn'
     """
-    vocab = {w for sg in sugg[:5] for w in normalize(f"{sg['title']} {sg['author']}").split() if len(w) > 2}
+    vocab = {
+        w
+        for sg in sugg[:5]
+        for w in normalize(f"{sg['title']} {sg['author']}").split()
+        if len(w) > 2
+    }
     fixed = []
     for word in normalize(query).split():
         if word in vocab or len(word) <= 2:
@@ -140,12 +164,16 @@ def corrected_queries(query: str, sugg: list[dict]) -> tuple[list[str], str]:
     return extra, corrected if corrected != q else ""
 
 
-async def _search_pages(source: Source, query: str, first: int, count: int) -> tuple[list[Listing], int]:
+async def _search_pages(
+    source: Source, query: str, first: int, count: int
+) -> tuple[list[Listing], int]:
     pages = await asyncio.gather(
         *(source.search(query, p) for p in range(first, first + count)), return_exceptions=True
     )
     errors = [p for p in pages if isinstance(p, BaseException)]
-    if errors and (len(errors) == len(pages) or (first == 1 and isinstance(pages[0], BaseException))):
+    if errors and (
+        len(errors) == len(pages) or (first == 1 and isinstance(pages[0], BaseException))
+    ):
         # The source is unreachable: let the caller report it. Page 1 failing counts even when later
         # pages "succeed", since a source that answers in one page (Torznab) returns those empty.
         raise errors[0] if len(errors) == len(pages) else pages[0]
@@ -162,14 +190,17 @@ def relevant(query: str, sugg: list[dict]) -> list[dict]:
     """Drop suggestions that only loosely relate to what was typed."""
     q = normalize(query)
     keep = [
-        sg for sg in sugg
+        sg
+        for sg in sugg
         if fuzz.token_set_ratio(q, normalize(f"{sg['title']} {sg['author']}")) >= 60
         or fuzz.partial_ratio(q, normalize(sg["title"])) >= 75
     ]
     return keep or sugg[:1]
 
 
-async def smart_search(source: Source, query: str, batch: int = 1, use_suggestions: bool = True) -> dict:
+async def smart_search(
+    source: Source, query: str, batch: int = 1, use_suggestions: bool = True
+) -> dict:
     """Return ranked results for one batch (several source pages) of a query."""
     first = (batch - 1) * PAGES_PER_BATCH + 1
     raw_task = asyncio.ensure_future(_search_pages(source, query, first, PAGES_PER_BATCH))
@@ -203,13 +234,22 @@ async def smart_search(source: Source, query: str, batch: int = 1, use_suggestio
             did_you_mean = label if best < 75 else ""
 
     total_batches = max(1, -(-total // PAGES_PER_BATCH)) if total else 1
-    return {"items": rank(items, queries), "page": batch, "total_pages": total_batches, "did_you_mean": did_you_mean}
+    return {
+        "items": rank(items, queries),
+        "page": batch,
+        "total_pages": total_batches,
+        "did_you_mean": did_you_mean,
+    }
 
 
-async def latest_batch(source: Source, batch: int = 1, category: str | None = None, pages: int = 3) -> dict:
+async def latest_batch(
+    source: Source, batch: int = 1, category: str | None = None, pages: int = 3
+) -> dict:
     """Several listing pages at once, for sites that show only a handful of books per page."""
     first = (batch - 1) * pages + 1
-    results = await asyncio.gather(*(source.latest(p, category) for p in range(first, first + pages)), return_exceptions=True)
+    results = await asyncio.gather(
+        *(source.latest(p, category) for p in range(first, first + pages)), return_exceptions=True
+    )
     errors = [r for r in results if isinstance(r, BaseException)]
     if errors and len(errors) == len(results):
         raise errors[0]
@@ -242,10 +282,17 @@ async def careful_search(source: Source, query: str, use_suggestions: bool = Tru
                 items += more
                 queries.append(extra[0])
                 did_you_mean = label or extra[0]
-    return {"items": rank(items, queries), "page": 1, "total_pages": 1, "did_you_mean": did_you_mean}
+    return {
+        "items": rank(items, queries),
+        "page": 1,
+        "total_pages": 1,
+        "did_you_mean": did_you_mean,
+    }
 
 
-_RELEASE_NOISE = re.compile(r"\b(unabridged|abridged|audiobook|retail|m4b|mp3|flac|aac|\d{2,3}\s?kbps|(19|20)\d{2})\b", re.I)
+_RELEASE_NOISE = re.compile(
+    r"\b(unabridged|abridged|audiobook|retail|m4b|mp3|flac|aac|\d{2,3}\s?kbps|(19|20)\d{2})\b", re.I
+)
 
 
 async def identify(release: str) -> dict | None:
@@ -286,7 +333,12 @@ def rank(items: list[Listing], queries: list[str]) -> list[dict]:
 
 
 async def brave_smart_search(
-    query: str, api_key: str, base_url: str, batch: int = 1, use_suggestions: bool = True, client=None
+    query: str,
+    api_key: str,
+    base_url: str,
+    batch: int = 1,
+    use_suggestions: bool = True,
+    client=None,
 ) -> dict:
     """Search through Brave. Brave fixes most typos itself; Apple's catalog covers the rest."""
     res = await brave.search(query, api_key, base_url, batch, client)

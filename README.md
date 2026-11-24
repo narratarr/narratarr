@@ -576,6 +576,32 @@ uv run narratarr --port 8484      # the UI reloads its files on refresh; no buil
 uv run pytest                     # ffmpeg enables the chapter tests
 ```
 
+Python uses Ruff for linting, import sorting and formatting. Frontend JavaScript uses ESLint's
+recommended rules with browser globals, and Prettier formats the maintained JavaScript, CSS and HTML.
+Node.js 24+ is needed only for development checks; the app still runs without a frontend build step.
+
+```bash
+npm ci
+
+# Check the same style rules as CI.
+uv run ruff check .
+uv run ruff format --check .
+npm run lint
+npm run format:check
+
+# Apply fixes, then review the diff and run tests.
+uv run ruff check . --fix
+uv run ruff format .
+npm run lint:fix
+npm run format
+uv run pytest -q
+```
+
+Use four spaces and a 100-character formatting target for Python; frontend files use two spaces,
+double quotes and semicolons. Ruff also checks tests, scripts and the community bot. Prettier excludes
+fixtures, bundled fonts and images, and generated files. In your editor, select Ruff as the Python
+formatter and Prettier for frontend files, enable format on save, and enable ESLint diagnostics.
+
 ```
 narratarr/
   api.py            FastAPI routes; serves the UI

@@ -28,7 +28,11 @@ US_GENRES = [
 
 def to_details(b: dict) -> Details:
     series = b["series"][0] if b["series"] else None
-    label = f"{series['title']} #{series['sequence']}" if series and series["sequence"] else (series or {}).get("title", "")
+    label = (
+        f"{series['title']} #{series['sequence']}"
+        if series and series["sequence"]
+        else (series or {}).get("title", "")
+    )
     return Details(
         url=b["url"],
         title=b["title"],
@@ -49,7 +53,9 @@ def to_details(b: dict) -> Details:
 class AudibleCatalog:
     name = "audible"
     label = "Audible catalog"
-    description = "Find any book and add it to Wanted. Narratarr then looks for it on your indexers."
+    description = (
+        "Find any book and add it to Wanted. Narratarr then looks for it on your indexers."
+    )
     default_label = "Bestsellers"
     delivery = "wanted"
 
@@ -62,13 +68,19 @@ class AudibleCatalog:
 
     async def latest(self, page: int = 1, category: str | None = None) -> Page:
         params = {
-            "num_results": 40, "page": page - 1, "response_groups": catalog.GROUPS,  # Audible counts from 0
+            "num_results": 40,
+            "page": page - 1,
+            "response_groups": catalog.GROUPS,  # Audible counts from 0
             "products_sort_by": "-ReleaseDate" if category == "new" else "BestSellers",
         }
-        if category and category != "new" and catalog.region() == "us":  # the genre IDs are the US store's
+        if (
+            category and category != "new" and catalog.region() == "us"
+        ):  # the genre IDs are the US store's
             params["category_id"] = category
         data = await catalog._get(f"{catalog.api_base()}/products", params) or {}
-        books = catalog._keep([catalog.to_book(p) for p in data.get("products") or []], catalog.region())
+        books = catalog._keep(
+            [catalog.to_book(p) for p in data.get("products") or []], catalog.region()
+        )
         return Page(items=[to_details(b) for b in books], page=page, total_pages=10)
 
     async def search(self, query: str, page: int = 1) -> Page:

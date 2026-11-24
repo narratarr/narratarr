@@ -17,6 +17,7 @@ def github(body=None, status=200):
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.host == "api.github.com" and "narratarr" in request.headers["user-agent"]
         return httpx.Response(status, json=body or {})
+
     return httpx.AsyncClient(transport=httpx.MockTransport(handler))
 
 
@@ -27,12 +28,24 @@ def test_versions_compare_as_numbers():
 
 
 async def test_latest_release_is_cached_and_tolerates_outages():
-    release = {"tag_name": "v9.9.9", "body": "## 9.9.9\n- Everything", "html_url": "https://github.com/x", "published_at": "2026-11-01T00:00:00Z"}
+    release = {
+        "tag_name": "v9.9.9",
+        "body": "## 9.9.9\n- Everything",
+        "html_url": "https://github.com/x",
+        "published_at": "2026-11-01T00:00:00Z",
+    }
     got = await updates.latest_release(client=github(release))
-    assert got == {"version": "9.9.9", "notes": "## 9.9.9\n- Everything", "url": "https://github.com/x", "published": "2026-11-01"}
+    assert got == {
+        "version": "9.9.9",
+        "notes": "## 9.9.9\n- Everything",
+        "url": "https://github.com/x",
+        "published": "2026-11-01",
+    }
     assert await updates.latest_release(client=github(status=500)) == got  # served from cache
     updates._cache.clear()
-    assert await updates.latest_release(client=github(status=500)) is None  # outage: no crash, no update badge
+    assert (
+        await updates.latest_release(client=github(status=500)) is None
+    )  # outage: no crash, no update badge
 
 
 async def test_status_respects_the_setting(monkeypatch):

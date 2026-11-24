@@ -22,8 +22,15 @@ def quick(monkeypatch):
 
 
 def make_book(**overrides):
-    book = {"source": "audiobookbay", "source_url": "https://audiobookbay.lu/abss/dune-frank-herbert-2/", "title": "Dune",
-            "author": "Frank Herbert", "info_hash": HASH, "trackers": [], "status": "queued"}
+    book = {
+        "source": "audiobookbay",
+        "source_url": "https://audiobookbay.lu/abss/dune-frank-herbert-2/",
+        "title": "Dune",
+        "author": "Frank Herbert",
+        "info_hash": HASH,
+        "trackers": [],
+        "status": "queued",
+    }
     return db.insert({**book, **overrides})
 
 
@@ -39,8 +46,15 @@ def multipart_field(request: httpx.Request, name: str) -> str:
 
 
 def tb(data=None, error=None, detail="", status=200, success=None):
-    return httpx.Response(status, json={"success": not error if success is None else success, "error": error,
-                                        "detail": detail, "data": data})
+    return httpx.Response(
+        status,
+        json={
+            "success": not error if success is None else success,
+            "error": error,
+            "detail": detail,
+            "data": data,
+        },
+    )
 
 
 class FakeTorBox:
@@ -66,15 +80,38 @@ class FakeTorBox:
         if path == "/v1/api/torrents/mylist":
             if "id" not in request.url.params:  # the whole list
                 return tb([{"id": 5150, "hash": HASH}])
-            assert request.url.params["id"] == "5150" and request.url.params["bypass_cache"] == "true"
+            assert (
+                request.url.params["id"] == "5150" and request.url.params["bypass_cache"] == "true"
+            )
             self.polls += 1
-            files = [{"id": i, "name": f"Dune/{n}", "short_name": n, "size": len(d)} for i, (n, d) in enumerate(self.files.items())]
+            files = [
+                {"id": i, "name": f"Dune/{n}", "short_name": n, "size": len(d)}
+                for i, (n, d) in enumerate(self.files.items())
+            ]
             if self.polls == 1:
-                return tb({"id": 5150, "download_state": "downloading", "progress": 0.25, "download_speed": 1200, "seeds": 4,
-                           "download_finished": False, "download_present": False, "files": []})
+                return tb(
+                    {
+                        "id": 5150,
+                        "download_state": "downloading",
+                        "progress": 0.25,
+                        "download_speed": 1200,
+                        "seeds": 4,
+                        "download_finished": False,
+                        "download_present": False,
+                        "files": [],
+                    }
+                )
             done = self.final_state == "completed"
-            return tb({"id": 5150, "download_state": self.final_state, "progress": 1 if done else 0.3,
-                       "download_finished": done, "download_present": done, "files": files})
+            return tb(
+                {
+                    "id": 5150,
+                    "download_state": self.final_state,
+                    "progress": 1 if done else 0.3,
+                    "download_finished": done,
+                    "download_present": done,
+                    "files": files,
+                }
+            )
         if path == "/v1/api/torrents/controltorrent":
             assert json.loads(request.content) == {"torrent_id": 5150, "operation": "delete"}
             self.deleted = True
@@ -93,7 +130,9 @@ async def test_full_pipeline_through_torbox(isolated_data, use_torbox):
     await Worker(transport=httpx.MockTransport(fake)).process(book["id"])
     done = db.get(book["id"])
     assert done["status"] == "completed", done["error"]
-    assert (Path(done["path"]) / "01.mp3").read_bytes() == b"one" * 50  # the torrent's own folder is dropped
+    assert (
+        Path(done["path"]) / "01.mp3"
+    ).read_bytes() == b"one" * 50  # the torrent's own folder is dropped
     assert HASH in fake.magnet and fake.deleted and fake.tokens == ["tb-key", "tb-key"]
     assert done["rd_torrent_id"] == ""
 
@@ -108,16 +147,22 @@ async def test_torbox_keeps_its_job_when_asked(isolated_data, use_torbox):
 
 async def test_torbox_errors_are_readable(isolated_data, use_torbox):
     book = make_book()
-    await Worker(transport=httpx.MockTransport(FakeTorBox({}, create_error="ACTIVE_LIMIT")))._run(book["id"])
+    await Worker(transport=httpx.MockTransport(FakeTorBox({}, create_error="ACTIVE_LIMIT")))._run(
+        book["id"]
+    )
     assert "active downloads" in db.get(book["id"])["error"]
 
     db.update(book["id"], status="queued", rd_torrent_id="")
-    await Worker(transport=httpx.MockTransport(FakeTorBox({"a.mp3": b"x"}, final_state="error")))._run(book["id"])
+    await Worker(
+        transport=httpx.MockTransport(FakeTorBox({"a.mp3": b"x"}, final_state="error"))
+    )._run(book["id"])
     assert db.get(book["id"])["error"].startswith("TorBox couldn't fetch this torrent")
 
 
 async def test_torbox_already_has_it(isolated_data):
-    async with TorBox("tb-key", transport=httpx.MockTransport(FakeTorBox({}, create_error="DUPLICATE_ITEM"))) as t:
+    async with TorBox(
+        "tb-key", transport=httpx.MockTransport(FakeTorBox({}, create_error="DUPLICATE_ITEM"))
+    ) as t:
         assert await t.add("magnet", f"magnet:?xt=urn:btih:{HASH.upper()}&dn=Dune") == "5150"
 
 
@@ -136,8 +181,15 @@ async def test_torbox_sign_in_with_a_code():
     def handler(request):
         if request.url.path.endswith("/device/start"):
             assert request.url.params["app"] == "Narratarr"
-            return tb({"device_code": "DEV", "code": "123456", "verification_url": "https://torbox.app/oauth/device",
-                       "friendly_verification_url": "https://tor.box.evil.example/x", "interval": 5})
+            return tb(
+                {
+                    "device_code": "DEV",
+                    "code": "123456",
+                    "verification_url": "https://torbox.app/oauth/device",
+                    "friendly_verification_url": "https://tor.box.evil.example/x",
+                    "interval": 5,
+                }
+            )
         asked.append(json.loads(request.content)["device_code"])
         if len(asked) == 1:
             return tb(error="DEVICE_CODE_NOT_USED", status=400)
@@ -145,7 +197,9 @@ async def test_torbox_sign_in_with_a_code():
 
     t = httpx.MockTransport(handler)
     code = await torbox.device_start(t)
-    assert code["code"] == "123456" and code["url"] == "https://torbox.app/oauth/device"  # the look-alike was skipped
+    assert (
+        code["code"] == "123456" and code["url"] == "https://torbox.app/oauth/device"
+    )  # the look-alike was skipped
     assert await torbox.device_check("DEV", t) == ""
     assert await torbox.device_check("DEV", t) == "new-key" and asked == ["DEV", "DEV"]
 
@@ -158,7 +212,9 @@ def pm(**data):
 
 
 def pm_error(code, message="nope"):
-    return httpx.Response(200, json={"status": "error", "code": code, "message": message})  # errors come with a 200
+    return httpx.Response(
+        200, json={"status": "error", "code": code, "message": message}
+    )  # errors come with a 200
 
 
 class FakePremiumize:
@@ -178,22 +234,64 @@ class FakePremiumize:
         if path == "/api/transfer/list":
             self.lists += 1
             if self.lists == 1:
-                return pm(transfers=[{"id": "other", "status": "running", "progress": 0.9},
-                                     {"id": "T1", "name": "Dune", "status": "running", "progress": 0.4, "message": "12 MB/s"}])
-            t = {"id": "T1", "name": "Dune", "status": self.final, "progress": 1.0, "message": "",
-                 "folder_id": "ROOT" if self.single else "F1", "file_id": "FILE1" if self.single else None}
+                return pm(
+                    transfers=[
+                        {"id": "other", "status": "running", "progress": 0.9},
+                        {
+                            "id": "T1",
+                            "name": "Dune",
+                            "status": "running",
+                            "progress": 0.4,
+                            "message": "12 MB/s",
+                        },
+                    ]
+                )
+            t = {
+                "id": "T1",
+                "name": "Dune",
+                "status": self.final,
+                "progress": 1.0,
+                "message": "",
+                "folder_id": "ROOT" if self.single else "F1",
+                "file_id": "FILE1" if self.single else None,
+            }
             return pm(transfers=[t])
         if path == "/api/folder/list":
             fid = request.url.params["id"]
             if fid == "F1":
-                return pm(name=self.folder_name, parent_id="ROOT", folder_id="F1", content=[
-                    {"id": "F2", "name": "CD1", "type": "folder"},
-                    *[{"id": n, "name": n, "type": "file", "size": len(d), "link": f"https://cdn.pm.example/{n}"}
-                      for n, d in list(self.files.items())[1:]]])
+                return pm(
+                    name=self.folder_name,
+                    parent_id="ROOT",
+                    folder_id="F1",
+                    content=[
+                        {"id": "F2", "name": "CD1", "type": "folder"},
+                        *[
+                            {
+                                "id": n,
+                                "name": n,
+                                "type": "file",
+                                "size": len(d),
+                                "link": f"https://cdn.pm.example/{n}",
+                            }
+                            for n, d in list(self.files.items())[1:]
+                        ],
+                    ],
+                )
             if fid == "F2":
                 n, d = next(iter(self.files.items()))
-                return pm(name="CD1", parent_id="F1", content=[
-                    {"id": n, "name": n, "type": "file", "size": len(d), "link": f"https://cdn.pm.example/{n}"}])
+                return pm(
+                    name="CD1",
+                    parent_id="F1",
+                    content=[
+                        {
+                            "id": n,
+                            "name": n,
+                            "type": "file",
+                            "size": len(d),
+                            "link": f"https://cdn.pm.example/{n}",
+                        }
+                    ],
+                )
             return pm(name="My Files", content=[{"id": "F1", "name": "Not Dune", "type": "folder"}])
         if path == "/api/item/details":
             n, d = next(iter(self.files.items()))
@@ -218,12 +316,19 @@ async def test_full_pipeline_through_premiumize(isolated_data, use_premiumize):
     done = db.get(book["id"])
     assert done["status"] == "completed", done["error"]
     dest = Path(done["path"])
-    assert (dest / "CD1 - 01.mp3").read_bytes() == b"one" * 40 and (dest / "02.mp3").read_bytes() == b"two" * 40
+    assert (dest / "CD1 - 01.mp3").read_bytes() == b"one" * 40 and (
+        dest / "02.mp3"
+    ).read_bytes() == b"two" * 40
     assert HASH in fake.src
-    assert fake.deleted == [("folder", "F1"), ("transfer", "T1")]  # its own folder, and nothing else
+    assert fake.deleted == [
+        ("folder", "F1"),
+        ("transfer", "T1"),
+    ]  # its own folder, and nothing else
 
 
-async def test_premiumize_single_file_never_touches_the_folder_its_in(isolated_data, use_premiumize):
+async def test_premiumize_single_file_never_touches_the_folder_its_in(
+    isolated_data, use_premiumize
+):
     fake = FakePremiumize({"Dune.m4b": b"audio"}, single=True)
     book = make_book()
     await Worker(transport=httpx.MockTransport(fake)).process(book["id"])
@@ -252,7 +357,9 @@ async def test_premiumize_errors_come_with_a_200():
 
 async def test_premiumize_failed_transfer(isolated_data, use_premiumize):
     book = make_book()
-    await Worker(transport=httpx.MockTransport(FakePremiumize({"a": b""}, final="error")))._run(book["id"])
+    await Worker(transport=httpx.MockTransport(FakePremiumize({"a": b""}, final="error")))._run(
+        book["id"]
+    )
     assert db.get(book["id"])["error"].startswith("Premiumize couldn't fetch this torrent")
 
 
@@ -260,16 +367,28 @@ async def test_premiumize_failed_transfer(isolated_data, use_premiumize):
 
 
 def test_new_services_are_choices_with_secret_keys(isolated_data):
-    s = config.update({"torrent_client": "torbox", "tb_api_key": "tb-secret-1234", "pm_api_key": "pm-secret-5678"})
+    s = config.update(
+        {"torrent_client": "torbox", "tb_api_key": "tb-secret-1234", "pm_api_key": "pm-secret-5678"}
+    )
     shown = s.public()
-    assert shown["torrent_client"] == "torbox" and shown["torrent_configured"] and shown["tb_configured"]
+    assert (
+        shown["torrent_client"] == "torbox"
+        and shown["torrent_configured"]
+        and shown["tb_configured"]
+    )
     assert "tb-secret" not in json.dumps(shown) and "pm-secret" not in json.dumps(shown)
     assert config.update({"torrent_client": "premiumize"}).public()["torrent_configured"]
 
 
 def test_torbox_code_check_keeps_the_device_code_server_side(monkeypatch):
     async def start(transport=None):
-        return {"code": "123456", "device_code": "SECRET-DEVICE", "url": "https://torbox.app/x", "interval": 5, "expires_in": 600}
+        return {
+            "code": "123456",
+            "device_code": "SECRET-DEVICE",
+            "url": "https://torbox.app/x",
+            "interval": 5,
+            "expires_in": 600,
+        }
 
     async def check(device_code, transport=None):
         assert device_code == "SECRET-DEVICE"

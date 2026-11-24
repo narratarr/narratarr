@@ -1,6 +1,5 @@
 """Tidy library: moving the books already in the library into the folder layout from Settings."""
 
-import os
 import time
 from pathlib import Path
 
@@ -30,10 +29,22 @@ def put(root: Path, rel: str, files=("01.mp3",), content=b"audio") -> Path:
     return folder
 
 
-def book(path: Path, title="Dune", author="Frank Herbert", kind="audiobook", status="completed", **extra) -> dict:
-    row = {"source": "local", "source_url": f"file://{path}#{time.time_ns()}", "title": title, "author": author,
-           "narrators": ["Scott Brick"], "series": [{"asin": "", "title": "Dune Chronicles", "sequence": "1"}],
-           "released": "1965-08-01", "status": status, "path": str(path), "kind": kind, **extra}
+def book(
+    path: Path, title="Dune", author="Frank Herbert", kind="audiobook", status="completed", **extra
+) -> dict:
+    row = {
+        "source": "local",
+        "source_url": f"file://{path}#{time.time_ns()}",
+        "title": title,
+        "author": author,
+        "narrators": ["Scott Brick"],
+        "series": [{"asin": "", "title": "Dune Chronicles", "sequence": "1"}],
+        "released": "1965-08-01",
+        "status": status,
+        "path": str(path),
+        "kind": kind,
+        **extra,
+    }
     return db.insert(row)
 
 
@@ -55,7 +66,9 @@ def test_a_messy_folder_moves_into_the_audiobookshelf_layout_and_back(lib):
     assert job.moved == 1 and not job.failed
     assert db.get(b["id"])["path"] == str(new)
     assert (new / "01.mp3").read_bytes() == b"audio" and not old.exists()
-    assert new.stat().st_ino == inode  # a rename, not a copy: Audiobookshelf knows it's the same book
+    assert (
+        new.stat().st_ino == inode
+    )  # a rename, not a copy: Audiobookshelf knows it's the same book
     assert rows()[b["id"]]["state"] == "tidy"
 
     assert tidy.undo(config.load()) == {"back": 1, "failed": []}
@@ -90,9 +103,14 @@ def test_an_ebook_in_its_own_folder_moves_with_its_cover(lib):
 
 def test_an_ebook_joins_its_audiobooks_new_folder(lib):
     audio = book(put(lib, "Dune audio"))
-    ebook = book(put(lib, "Books/Herbert", files=("Dune.epub", "Other.pdf")) / "Dune.epub", kind="ebook")
+    ebook = book(
+        put(lib, "Books/Herbert", files=("Dune.epub", "Other.pdf")) / "Dune.epub", kind="ebook"
+    )
     r = rows()
-    assert r[ebook["id"]]["to"] == r[audio["id"]]["to"] + "/Dune.epub" and r[ebook["id"]]["state"] == "move"
+    assert (
+        r[ebook["id"]]["to"] == r[audio["id"]]["to"] + "/Dune.epub"
+        and r[ebook["id"]]["state"] == "move"
+    )
     job = tidy.apply(config.load(), [audio["id"], ebook["id"]])
     assert job.moved == 2 and not job.failed
     assert Path(db.get(ebook["id"])["path"]).parent == Path(db.get(audio["id"])["path"])
@@ -107,7 +125,9 @@ def test_an_ebook_without_its_audiobook_stays_put(lib):
     ebook = book(put(lib, "Books", files=("Dune.epub", "x.pdf")) / "Dune.epub", kind="ebook")
     job = tidy.apply(config.load(), [ebook["id"]])
     assert job.moved == 0 and "audiobook" in job.failed[0]["error"]
-    assert (lib / "Books/Dune.epub").exists() and db.get(audio["id"])["path"] == str(lib / "Dune audio")
+    assert (lib / "Books/Dune.epub").exists() and db.get(audio["id"])["path"] == str(
+        lib / "Dune audio"
+    )
 
 
 def test_books_that_cant_move_safely_are_held_back(lib, monkeypatch):
@@ -141,8 +161,11 @@ def test_books_that_cant_move_safely_are_held_back(lib, monkeypatch):
     # And the plan is worked out again when applying: asking for held books moves nothing.
     job = tidy.apply(config.load(), [twin_a["id"], outer["id"], nobody["id"]])
     assert job.total == 0 and (lib / "a/01.mp3").exists()
-    assert {f["error"] for f in job.failed} == {"Another book would go to the same folder",
-                                                 "It has no author", "Another book is inside its folder"}
+    assert {f["error"] for f in job.failed} == {
+        "Another book would go to the same folder",
+        "It has no author",
+        "Another book is inside its folder",
+    }
 
 
 def test_a_name_that_only_changes_case(lib):
@@ -190,8 +213,13 @@ def tagged(path: Path, **frames) -> Path:
 
 def test_the_files_own_tags_can_name_the_folder(lib):
     folder = lib / "messy"
-    tagged(folder / "01.mp3", album=TALB(encoding=3, text=["Children of Dune"]), artist=TPE1(encoding=3, text=["Frank Herbert"]),
-           series=TXXX(encoding=3, desc="SERIES", text=["Dune Chronicles"]), part=TXXX(encoding=3, desc="SERIES-PART", text=["3"]))
+    tagged(
+        folder / "01.mp3",
+        album=TALB(encoding=3, text=["Children of Dune"]),
+        artist=TPE1(encoding=3, text=["Frank Herbert"]),
+        series=TXXX(encoding=3, desc="SERIES", text=["Dune Chronicles"]),
+        part=TXXX(encoding=3, desc="SERIES-PART", text=["3"]),
+    )
     b = book(folder, title="childrenofdune", author="", narrators=[], series=[], released="")
     assert rows()[b["id"]]["state"] == "look"
     r = rows("tags")[b["id"]]
@@ -201,23 +229,41 @@ def test_the_files_own_tags_can_name_the_folder(lib):
 
 def test_writing_the_details_into_the_tags(lib):
     folder = lib / "book"
-    f = tagged(folder / "01.mp3", artist=TPE1(encoding=3, text=["Scott Brick"]), year=TDRC(encoding=3, text=["1965-08-01"]))
-    d = {"title": "Dune", "author": "Frank Herbert", "narrators": ["Scott Brick"],
-         "series": [{"title": "Dune Chronicles", "sequence": "1"}], "released": "2019-01-01"}
+    f = tagged(
+        folder / "01.mp3",
+        artist=TPE1(encoding=3, text=["Scott Brick"]),
+        year=TDRC(encoding=3, text=["1965-08-01"]),
+    )
+    d = {
+        "title": "Dune",
+        "author": "Frank Herbert",
+        "narrators": ["Scott Brick"],
+        "series": [{"title": "Dune Chronicles", "sequence": "1"}],
+        "released": "2019-01-01",
+    }
     assert tidy.write_tags(folder, d) == 1
     tags = ID3(f)
-    assert str(tags["TALB"]) == "Dune" and str(tags["TPE1"]) == "Frank Herbert" and str(tags["TPE2"]) == "Frank Herbert"
+    assert (
+        str(tags["TALB"]) == "Dune"
+        and str(tags["TPE1"]) == "Frank Herbert"
+        and str(tags["TPE2"]) == "Frank Herbert"
+    )
     assert str(tags["TCOM"]) == "Scott Brick" and str(tags["TXXX:SERIES"]) == "Dune Chronicles"
     assert str(tags["TXXX:SERIES-PART"]) == "1"
     assert str(tags["TDRC"]) == "1965-08-01"  # a date already there is left alone
     assert tidy.write_tags(folder, d) == 0  # nothing left to change, so the file isn't rewritten
-    assert tidy.file_tags(folder)["series"][0]["title"] == "Dune Chronicles"  # and Narratarr reads them back
+    assert (
+        tidy.file_tags(folder)["series"][0]["title"] == "Dune Chronicles"
+    )  # and Narratarr reads them back
 
 
 def test_side_files_are_added_only_where_missing(lib):
     folder = put(lib, "Dune", files=("01.mp3", "desc.txt"))
     (folder / "desc.txt").write_text("mine")
-    tidy.side_files(folder, {"title": "Dune", "description": "theirs", "narrators": ["Scott Brick"], "cover_url": ""})
+    tidy.side_files(
+        folder,
+        {"title": "Dune", "description": "theirs", "narrators": ["Scott Brick"], "cover_url": ""},
+    )
     assert (folder / "desc.txt").read_text() == "mine"
     assert (folder / "reader.txt").read_text() == "Scott Brick"
 
@@ -263,8 +309,12 @@ def test_the_api_previews_applies_and_undoes(lib):
 
 
 def test_only_admins_can_tidy():
-    for method, path in [("POST", "/api/tidy/preview"), ("POST", "/api/tidy/apply"), ("GET", "/api/tidy/status"),
-                         ("POST", "/api/tidy/undo")]:
+    for method, path in [
+        ("POST", "/api/tidy/preview"),
+        ("POST", "/api/tidy/apply"),
+        ("GET", "/api/tidy/status"),
+        ("POST", "/api/tidy/undo"),
+    ]:
         assert auth.admin_only(method, path)
 
 
@@ -276,12 +326,38 @@ def test_writing_tags_into_m4b_flac_and_opus(lib, ext):
     folder = lib / ext
     folder.mkdir()
     f = folder / f"01.{ext}"
-    subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=mono", "-t", "1",
-                    *(["-c:a", "aac", "-f", "mp4"] if ext == "m4b" else []), str(f)], check=True)
-    d = {"title": "Dune", "author": "Frank Herbert", "narrators": ["Scott Brick"],
-         "series": [{"title": "Dune Chronicles", "sequence": "1"}], "released": "1965"}
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "anullsrc=r=48000:cl=mono",
+            "-t",
+            "1",
+            *(["-c:a", "aac", "-f", "mp4"] if ext == "m4b" else []),
+            str(f),
+        ],
+        check=True,
+    )
+    d = {
+        "title": "Dune",
+        "author": "Frank Herbert",
+        "narrators": ["Scott Brick"],
+        "series": [{"title": "Dune Chronicles", "sequence": "1"}],
+        "released": "1965",
+    }
     assert tidy.write_tags(folder, d) == 1
     found = tidy.file_tags(folder)
-    assert found["title"] == "Dune" and found["author"] == "Frank Herbert" and found["narrators"] == ["Scott Brick"]
-    assert found["series"] == [{"asin": "", "title": "Dune Chronicles", "sequence": "1"}] and found["released"] == "1965"
+    assert (
+        found["title"] == "Dune"
+        and found["author"] == "Frank Herbert"
+        and found["narrators"] == ["Scott Brick"]
+    )
+    assert (
+        found["series"] == [{"asin": "", "title": "Dune Chronicles", "sequence": "1"}]
+        and found["released"] == "1965"
+    )
     assert tidy.write_tags(folder, d) == 0

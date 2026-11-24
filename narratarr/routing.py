@@ -34,8 +34,10 @@ class Decision:
     label: str = ""
     save_path: str = ""
     rule: int | None = None  # the index of the matching rule, 0-based
-    reason: str = ""         # one line, written to the log
-    problems: list[str] = field(default_factory=list)  # a rule naming something that no longer exists
+    reason: str = ""  # one line, written to the log
+    problems: list[str] = field(
+        default_factory=list
+    )  # a rule naming something that no longer exists
 
     @property
     def matched(self) -> bool:
@@ -63,18 +65,26 @@ def _kind_words(kind: str) -> set[str]:
 def matches(rule: dict, indexer: str, kind: str) -> bool:
     """A rule matches when every part it names agrees. A part it leaves empty does not restrict."""
     match = rule.get("match") or {}
-    wanted_indexers = [str(i).strip().lower() for i in (match.get("indexers") or []) if str(i).strip()]
-    wanted_categories = [str(c).strip().lower() for c in (match.get("categories") or []) if str(c).strip()]
+    wanted_indexers = [
+        str(i).strip().lower() for i in (match.get("indexers") or []) if str(i).strip()
+    ]
+    wanted_categories = [
+        str(c).strip().lower() for c in (match.get("categories") or []) if str(c).strip()
+    ]
     if not wanted_indexers and not wanted_categories:
         return False  # an empty rule would swallow every release; refuse it rather than surprise
 
     have_indexer = (indexer or "").strip().lower()
     if wanted_indexers:
-        if not have_indexer or not any(have_indexer == w or have_indexer.startswith(w + " ") for w in wanted_indexers):
+        if not have_indexer or not any(
+            have_indexer == w or have_indexer.startswith(w + " ") for w in wanted_indexers
+        ):
             return False
     if wanted_categories:
         kinds = _kind_words(kind)
-        if not any(c in kinds or c.rstrip("s") in {k.rstrip("s") for k in kinds} for c in wanted_categories):
+        if not any(
+            c in kinds or c.rstrip("s") in {k.rstrip("s") for k in kinds} for c in wanted_categories
+        ):
             return False
     return True
 
@@ -124,14 +134,18 @@ def resolve(settings: config.Settings, indexer: str, kind: str, protocol: str = 
         decision.label = str(rule.get("label") or "")
         decision.save_path = str(rule.get("save_path") or "")
         decision.rule = i
-        decision.reason = (f"rule {i + 1} matched ({_describe(rule)}, kind {kind or 'any'}) "
-                           f"-> {client_id or 'default client'}")
+        decision.reason = (
+            f"rule {i + 1} matched ({_describe(rule)}, kind {kind or 'any'}) "
+            f"-> {client_id or 'default client'}"
+        )
         return decision
 
     # Nothing matched: fall through, which is what every grab did before routing existed.
     decision.client_id = default_for(settings, proto)
-    decision.reason = (f"no rule matched ({indexer or 'unknown indexer'}, kind {kind or 'any'}) "
-                       f"-> default client {decision.client_id or 'none configured'}")
+    decision.reason = (
+        f"no rule matched ({indexer or 'unknown indexer'}, kind {kind or 'any'}) "
+        f"-> default client {decision.client_id or 'none configured'}"
+    )
     return decision
 
 
@@ -152,7 +166,9 @@ def default_for(settings: config.Settings, protocol: str) -> str:
     # release to one makes the worker build e.g. Deluge("") and fail with a connection error instead
     # of saying there is nothing to download with.
     capable = [e for e in entries(settings) if e.delivery == protocol and e.configured]
-    flat = str(getattr(settings, "usenet_client" if protocol == "usenet" else "torrent_client", "") or "")
+    flat = str(
+        getattr(settings, "usenet_client" if protocol == "usenet" else "torrent_client", "") or ""
+    )
     chosen = str(getattr(settings, "default_client", "") or "")
     by_id = {e.id: e for e in capable}
     if chosen in by_id and by_id[chosen].type == flat:
@@ -192,7 +208,9 @@ def coverage(settings: config.Settings | None = None, indexers: list[str] | None
     for name in indexers or []:
         hit = None
         for i, rule in enumerate(rules):
-            wanted = [str(x).strip().lower() for x in ((rule.get("match") or {}).get("indexers") or [])]
+            wanted = [
+                str(x).strip().lower() for x in ((rule.get("match") or {}).get("indexers") or [])
+            ]
             if wanted and (name or "").strip().lower() in wanted:
                 hit = i
                 break
@@ -214,7 +232,6 @@ def validate(value, settings: config.Settings) -> dict:
     `settings` is passed in rather than loaded, because this runs inside `config.update()` while the
     settings lock is held.
     """
-    from .downloaders import entries
 
     if isinstance(value, str):  # the settings form posts hidden inputs as text
         try:
@@ -230,7 +247,6 @@ def validate(value, settings: config.Settings) -> dict:
     rules_in = value.get("rules") or []
     if not isinstance(rules_in, list):
         raise ValueError("routes.rules has to be a list")
-    known = {e.id for e in entries(settings)}
     out = []
     for raw in rules_in:
         if not isinstance(raw, dict):
@@ -243,10 +259,12 @@ def validate(value, settings: config.Settings) -> dict:
         client_id = str(raw.get("client") or "").strip().lower()
         if not client_id:
             raise ValueError("a route has to name a client")
-        out.append({
-            "match": {"indexers": indexers, "categories": categories},
-            "client": client_id,
-            "label": str(raw.get("label") or ""),
-            "save_path": str(raw.get("save_path") or ""),
-        })
+        out.append(
+            {
+                "match": {"indexers": indexers, "categories": categories},
+                "client": client_id,
+                "label": str(raw.get("label") or ""),
+                "save_path": str(raw.get("save_path") or ""),
+            }
+        )
     return {"version": int(value.get("version") or VERSION), "rules": out}

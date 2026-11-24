@@ -45,11 +45,17 @@ def test_find_books_and_guess_names(tmp_path):
     make_tree(tmp_path)
     found = {Path(b["path"]).name: b for b in importer.scan(tmp_path)}
     assert set(found) == {"Dune", "Andy Weir - Project Hail Mary", "The Hobbit.m4b"}
-    assert (found["Dune"]["title"], found["Dune"]["author"], found["Dune"]["files"]) == ("Dune", "Frank Herbert", 2)
+    assert (found["Dune"]["title"], found["Dune"]["author"], found["Dune"]["files"]) == (
+        "Dune",
+        "Frank Herbert",
+        2,
+    )
     assert found["Dune"]["description"] == "Arrakis."
     phm = found["Andy Weir - Project Hail Mary"]
     assert (phm["title"], phm["author"], phm["files"]) == ("Project Hail Mary", "Andy Weir", 2)
-    assert found["The Hobbit.m4b"]["single_file"] and found["The Hobbit.m4b"]["title"] == "The Hobbit"
+    assert (
+        found["The Hobbit.m4b"]["single_file"] and found["The Hobbit.m4b"]["title"] == "The Hobbit"
+    )
 
 
 @pytest.fixture
@@ -66,21 +72,39 @@ def test_import_in_place_copy_and_move(client, isolated_data):
     assert len(paths) == 3 and not any(b["in_library"] for b in scan["books"])
 
     # In place: nothing moves, the book is ready right away.
-    r = client.post("/api/import", json={"folder": str(src), "mode": "inplace", "books": [{"path": paths["Dune"]}]})
+    r = client.post(
+        "/api/import",
+        json={"folder": str(src), "mode": "inplace", "books": [{"path": paths["Dune"]}]},
+    )
     assert r.json()["added"] == 1
     dune = next(b for b in db.list_books() if b["title"] == "Dune")
     assert dune["status"] == "completed" and dune["path"] == paths["Dune"]
-    assert client.get(f"/api/library/{dune['id']}/media").status_code in (200, 404)  # fake audio, but reachable
+    assert client.get(f"/api/library/{dune['id']}/media").status_code in (
+        200,
+        404,
+    )  # fake audio, but reachable
 
     # Scanning again knows it's there.
     again = client.post("/api/import/scan", json={"folder": str(src)}).json()["books"]
     assert next(b for b in again if b["path"] == paths["Dune"])["in_library"]
 
     # Copy and move go through the worker.
-    client.post("/api/import", json={"folder": str(src), "mode": "copy", "books": [
-        {"path": paths["Andy Weir - Project Hail Mary"]}]})
-    client.post("/api/import", json={"folder": str(src), "mode": "inplace", "books": [
-        {"path": paths["The Hobbit.m4b"], "author": "J.R.R. Tolkien"}]})  # a loose file can't stay in place: copied
+    client.post(
+        "/api/import",
+        json={
+            "folder": str(src),
+            "mode": "copy",
+            "books": [{"path": paths["Andy Weir - Project Hail Mary"]}],
+        },
+    )
+    client.post(
+        "/api/import",
+        json={
+            "folder": str(src),
+            "mode": "inplace",
+            "books": [{"path": paths["The Hobbit.m4b"], "author": "J.R.R. Tolkien"}],
+        },
+    )  # a loose file can't stay in place: copied
     for _ in range(100):  # the app's own worker picks them up
         if all(b["status"] == "completed" for b in db.list_books()):
             break
@@ -120,20 +144,36 @@ async def test_watch_folder_moves_finished_books(isolated_data):
 
 PROWLARR = "http://prowlarr:9696"
 AUDIBLE_BOOK = {
-    "asin": "B002V0QCYU", "url": "https://www.audible.com/pd/B002V0QCYU", "title": "The Final Empire",
-    "subtitle": "Mistborn, Book 1", "author": "Brandon Sanderson", "author_asins": ["B001IGFHW6"],
-    "narrators": ["Michael Kramer"], "cover_url": "https://img.example/fe.jpg", "description": "A heist.",
-    "released": "2008-12-28", "length": "24 hours and 39 minutes", "language": "English",
+    "asin": "B002V0QCYU",
+    "url": "https://www.audible.com/pd/B002V0QCYU",
+    "title": "The Final Empire",
+    "subtitle": "Mistborn, Book 1",
+    "author": "Brandon Sanderson",
+    "author_asins": ["B001IGFHW6"],
+    "narrators": ["Michael Kramer"],
+    "cover_url": "https://img.example/fe.jpg",
+    "description": "A heist.",
+    "released": "2008-12-28",
+    "length": "24 hours and 39 minutes",
+    "language": "English",
     "series": [{"asin": "B006K1P698", "title": "The Mistborn Saga", "sequence": "1"}],
-    "kind": "SinglePartBook", "abridged": False,
+    "kind": "SinglePartBook",
+    "abridged": False,
 }
 
 
 def test_match_scores():
     book = {"title": "The Final Empire", "author": "Brandon Sanderson"}
-    assert wanted.match(book, {"release": "Brandon Sanderson - Mistborn 01 - The Final Empire (2008) [M4B]"}) >= 90
+    assert (
+        wanted.match(
+            book, {"release": "Brandon Sanderson - Mistborn 01 - The Final Empire (2008) [M4B]"}
+        )
+        >= 90
+    )
     assert wanted.match(book, {"release": "Brandon Sanderson - The Well of Ascension [M4B]"}) < 60
-    assert wanted.match(book, {"release": "The Final Empire by Some Other Person"}) < wanted.AUTO_MATCH
+    assert (
+        wanted.match(book, {"release": "The Final Empire by Some Other Person"}) < wanted.AUTO_MATCH
+    )
     assert wanted.match(book, {"title": "The Final Empire", "author": "Brandon Sanderson"}) == 100
 
 
@@ -144,6 +184,7 @@ def fake_prowlarr(releases):
         if "archive.org" in request.url.host:
             return httpx.Response(200, json={"response": {"numFound": 0, "docs": []}})
         return httpx.Response(404)
+
     return handler
 
 
@@ -154,17 +195,38 @@ def prowlarr_net(monkeypatch):
     transport = httpx.MockTransport(fake_prowlarr(releases))
     real = httpx.AsyncClient
 
-    monkeypatch.setattr(httpx, "AsyncClient", lambda *a, **kw: real(*a, **{**kw, "transport": transport}))
-    config.update({"prowlarr_url": PROWLARR, "prowlarr_api_key": "K", "sabnzbd_url": "http://sab", "sabnzbd_api_key": "S"})
+    monkeypatch.setattr(
+        httpx, "AsyncClient", lambda *a, **kw: real(*a, **{**kw, "transport": transport})
+    )
+    config.update(
+        {
+            "prowlarr_url": PROWLARR,
+            "prowlarr_api_key": "K",
+            "sabnzbd_url": "http://sab",
+            "sabnzbd_api_key": "S",
+        }
+    )
     return releases
 
 
 async def test_auto_search_grabs_the_right_release(prowlarr_net):
     prowlarr_net += [
-        {"guid": "https://n.example/1", "title": "Brandon Sanderson - The Well of Ascension [M4B]", "protocol": "usenet",
-         "indexer": "N", "downloadUrl": f"{PROWLARR}/1/download?apikey=K&link=1", "size": 1},
-        {"guid": "https://n.example/2", "title": "Brandon.Sanderson-Mistborn.01.The.Final.Empire.2008.M4B",
-         "protocol": "usenet", "indexer": "N", "downloadUrl": f"{PROWLARR}/1/download?apikey=K&link=2", "size": 1},
+        {
+            "guid": "https://n.example/1",
+            "title": "Brandon Sanderson - The Well of Ascension [M4B]",
+            "protocol": "usenet",
+            "indexer": "N",
+            "downloadUrl": f"{PROWLARR}/1/download?apikey=K&link=1",
+            "size": 1,
+        },
+        {
+            "guid": "https://n.example/2",
+            "title": "Brandon.Sanderson-Mistborn.01.The.Final.Empire.2008.M4B",
+            "protocol": "usenet",
+            "indexer": "N",
+            "downloadUrl": f"{PROWLARR}/1/download?apikey=K&link=2",
+            "size": 1,
+        },
     ]
     book = wanted.add_wanted(AUDIBLE_BOOK)
     assert wanted.add_wanted(AUDIBLE_BOOK) is None  # no duplicates
@@ -173,7 +235,9 @@ async def test_auto_search_grabs_the_right_release(prowlarr_net):
     got = db.get(book["id"])
     assert got["status"] == "queued" and got["source"] == "prowlarr" and got["protocol"] == "usenet"
     assert "link=2" in got["download_url"] and "apikey" not in got["download_url"]
-    assert got["title"] == "The Final Empire" and got["cover_url"] == "https://img.example/fe.jpg"  # our metadata kept
+    assert (
+        got["title"] == "The Final Empire" and got["cover_url"] == "https://img.example/fe.jpg"
+    )  # our metadata kept
     assert got["release_url"] == "https://n.example/2"
 
 
@@ -184,16 +248,28 @@ async def test_auto_search_waits_politely(prowlarr_net):
     assert after["status"] == "wanted" and after["search_note"] == "Nothing found yet."
     assert wanted.due_for_search() == []  # not searched again until the interval passes
 
-    future = {**AUDIBLE_BOOK, "asin": "B0FUTURE01", "url": "https://www.audible.com/pd/B0FUTURE01",
-              "title": "Wind and Truth", "released": "2999-01-01"}
+    future = {
+        **AUDIBLE_BOOK,
+        "asin": "B0FUTURE01",
+        "url": "https://www.audible.com/pd/B0FUTURE01",
+        "title": "Wind and Truth",
+        "released": "2999-01-01",
+    }
     wanted.add_wanted(future)
     assert all(b["title"] != "Wind and Truth" for b in wanted.due_for_search())  # not out yet
 
 
 async def test_releases_need_a_client(prowlarr_net):
     config.update({"sabnzbd_api_key": ""})
-    prowlarr_net.append({"guid": "https://n.example/2", "title": "Brandon Sanderson - The Final Empire [M4B]",
-                         "protocol": "usenet", "indexer": "N", "downloadUrl": f"{PROWLARR}/1/download?link=2"})
+    prowlarr_net.append(
+        {
+            "guid": "https://n.example/2",
+            "title": "Brandon Sanderson - The Final Empire [M4B]",
+            "protocol": "usenet",
+            "indexer": "N",
+            "downloadUrl": f"{PROWLARR}/1/download?link=2",
+        }
+    )
     book = wanted.add_wanted(AUDIBLE_BOOK)
     assert await wanted.search_and_grab(book) is None
     assert "download clients" in db.get(book["id"])["search_note"]
@@ -201,12 +277,23 @@ async def test_releases_need_a_client(prowlarr_net):
 
 async def test_follow_author_adds_only_upcoming_books(monkeypatch):
     old = AUDIBLE_BOOK
-    upcoming = {**AUDIBLE_BOOK, "asin": "B0NEW00001", "url": "https://www.audible.com/pd/B0NEW00001",
-                "title": "Isles of the Emberdark", "released": "2999-03-01", "series": []}
+    upcoming = {
+        **AUDIBLE_BOOK,
+        "asin": "B0NEW00001",
+        "url": "https://www.audible.com/pd/B0NEW00001",
+        "title": "Isles of the Emberdark",
+        "released": "2999-03-01",
+        "series": [],
+    }
     catalog = [old, upcoming]
 
     async def author(asin, client=None):
-        return {"asin": asin, "name": "Brandon Sanderson", "image": "https://img.example/bs.jpg", "description": ""}
+        return {
+            "asin": asin,
+            "name": "Brandon Sanderson",
+            "image": "https://img.example/bs.jpg",
+            "description": "",
+        }
 
     async def author_books(asin, name, client=None, pages=4):
         return list(catalog)
@@ -217,13 +304,23 @@ async def test_follow_author_adds_only_upcoming_books(monkeypatch):
     f, added = await wanted.follow("author", "B001IGFHW6")
     assert added == 1 and [b["title"] for b in db.list_books()] == ["Isles of the Emberdark"]
 
-    newer = {**upcoming, "asin": "B0NEW00002", "url": "https://www.audible.com/pd/B0NEW00002", "title": "Mistborn 4"}
+    newer = {
+        **upcoming,
+        "asin": "B0NEW00002",
+        "url": "https://www.audible.com/pd/B0NEW00002",
+        "title": "Mistborn 4",
+    }
     catalog.append(newer)
     assert await wanted.refresh(db.get_follow(f["id"])) == 1
     assert await wanted.refresh(db.get_follow(f["id"])) == 0
     counts = wanted.follow_counts(db.get_follow(f["id"]), db.list_books())
     assert {k: counts[k] for k in ("in_library", "wanted", "downloading", "requested", "new")} == {
-        "in_library": 0, "wanted": 2, "downloading": 0, "requested": 0, "new": True}
+        "in_library": 0,
+        "wanted": 2,
+        "downloading": 0,
+        "requested": 0,
+        "new": True,
+    }
     assert len(counts["covers"]) == 2
 
 
@@ -234,11 +331,20 @@ async def test_audible_pages_count_from_zero():
     seen = []
 
     def handler(request):
-        seen.append((request.url.params.get("page"), request.url.params.get("keywords") or request.url.params.get("author")))
+        seen.append(
+            (
+                request.url.params.get("page"),
+                request.url.params.get("keywords") or request.url.params.get("author"),
+            )
+        )
         return httpx.Response(200, json={"products": [], "total_results": 0})
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         await audible.search_books("zero-based paging check", 1, client)
         await audible.search_books("zero-based paging check", 2, client)
         await audible.author_books("B000AQ0842", "Zero Based Author", client, pages=1)
-    assert seen == [("0", "zero-based paging check"), ("1", "zero-based paging check"), ("0", "Zero Based Author")]
+    assert seen == [
+        ("0", "zero-based paging check"),
+        ("1", "zero-based paging check"),
+        ("0", "Zero Based Author"),
+    ]

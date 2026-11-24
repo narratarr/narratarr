@@ -19,6 +19,8 @@ def separates_kinds(template: str) -> bool:
     """A layout with {kind} files audiobooks and ebooks in different folders, so the two formats of
     one book no longer share a folder."""
     return "{kind}" in (template or "")
+
+
 _FIELD = re.compile(r"\{([^{}]*)\}")
 _UNSAFE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 

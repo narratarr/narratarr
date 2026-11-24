@@ -2,6 +2,8 @@
 .git
 .github
 .pytest_cache
+.ruff_cache
+node_modules
 **/__pycache__
 tests
 docs

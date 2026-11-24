@@ -45,11 +45,17 @@ def _data(resp: httpx.Response) -> dict:
     if not isinstance(body, dict):
         if resp.status_code in (429, 502, 503, 504):
             raise PremiumizeError(ERRORS["rate_limit_reached"], str(resp.status_code))
-        raise PremiumizeError(f"Premiumize answered with an error ({resp.status_code}).", str(resp.status_code))
+        raise PremiumizeError(
+            f"Premiumize answered with an error ({resp.status_code}).", str(resp.status_code)
+        )
     if body.get("status") == "error" or resp.status_code >= 400:
         code = str(body.get("code") or resp.status_code)
         message = str(body.get("message") or "").strip()
-        raise PremiumizeError(ERRORS.get(code) or (f"Premiumize: {message}" if message else f"Premiumize error: {code}"), code)
+        raise PremiumizeError(
+            ERRORS.get(code)
+            or (f"Premiumize: {message}" if message else f"Premiumize error: {code}"),
+            code,
+        )
     return body
 
 
@@ -60,7 +66,9 @@ class Premiumize:
 
     def __init__(self, api_key: str, transport: httpx.AsyncBaseTransport | None = None):
         if not api_key:
-            raise PremiumizeError("Add your Premiumize API key in Settings first.", "authentication_failed")
+            raise PremiumizeError(
+                "Add your Premiumize API key in Settings first.", "authentication_failed"
+            )
         self._client = httpx.AsyncClient(
             base_url=API,
             headers={"Authorization": f"Bearer {api_key}"},
@@ -81,15 +89,22 @@ class Premiumize:
         info = await self._call("GET", "/account/info")
         until = info.get("premium_until")
         premium = isinstance(until, (int, float)) and until > time.time()
-        return {"customer_id": info.get("customer_id"), "premium": premium,
-                "premium_until": int(until) if premium else None, "limit_used": info.get("limit_used")}
+        return {
+            "customer_id": info.get("customer_id"),
+            "premium": premium,
+            "premium_until": int(until) if premium else None,
+            "limit_used": info.get("limit_used"),
+        }
 
     # ---- the steps a download goes through (the same ones RealDebrid has) ----
 
     async def add(self, kind: str, payload: str | bytes) -> str:
         if kind == "torrent":
-            data = await self._call("POST", "/transfer/create",
-                                    files={"src": ("release.torrent", payload, "application/x-bittorrent")})
+            data = await self._call(
+                "POST",
+                "/transfer/create",
+                files={"src": ("release.torrent", payload, "application/x-bittorrent")},
+            )
         else:
             data = await self._call("POST", "/transfer/create", data={"src": payload})
         if data.get("id") in (None, ""):
@@ -117,30 +132,46 @@ class Premiumize:
             return {"done": True, "progress": 100.0, "speed": 0, "detail": "Premiumize has it"}
         if status in ("error", "deleted", "banned", "timeout"):
             why = str(t.get("message") or "").strip()
-            e = PremiumizeError(f"Premiumize couldn't fetch this torrent{f': {why}' if why else '.'}")
-            raise e if status == "deleted" else bad_release(e)  # deleted is someone's choice, not a bad torrent
+            e = PremiumizeError(
+                f"Premiumize couldn't fetch this torrent{f': {why}' if why else '.'}"
+            )
+            raise (
+                e if status == "deleted" else bad_release(e)
+            )  # deleted is someone's choice, not a bad torrent
         try:
             progress = max(0.0, min(100.0, float(t.get("progress") or 0) * 100))
         except (TypeError, ValueError):
             progress = 0.0
         message = str(t.get("message") or "").strip()
         detail = "Queued on Premiumize" if status == "queued" else "Premiumize is downloading"
-        return {"done": False, "progress": progress, "speed": 0, "detail": f"{detail} · {message}"[:200] if message else detail}
+        return {
+            "done": False,
+            "progress": progress,
+            "speed": 0,
+            "detail": f"{detail} · {message}"[:200] if message else detail,
+        }
 
     async def direct_files(self, transfer_id: str) -> list[dict]:
         """The finished transfer's files as direct downloads: [{'filename', 'filesize', 'download'}]."""
         t = await self._transfer(transfer_id)
         entries: list[tuple[tuple[str, ...], int, str]] = []
-        if t.get("file_id"):  # one file (its folder_id is just where it was put, maybe the top of the cloud)
+        if t.get(
+            "file_id"
+        ):  # one file (its folder_id is just where it was put, maybe the top of the cloud)
             item = await self._call("GET", "/item/details", params={"id": t["file_id"]})
             if isinstance(item.get("link"), str) and item["link"].startswith("https://"):
-                entries = [((str(item.get("name") or "file"),), int(item.get("size") or 0), item["link"])]
+                entries = [
+                    ((str(item.get("name") or "file"),), int(item.get("size") or 0), item["link"])
+                ]
         elif t.get("folder_id"):
             entries = await self._walk(await self._own_folder(t), (), 0)
         if not entries:
             raise PremiumizeError("Premiumize finished but returned no files.")
         names = file_names([path for path, _, _ in entries])
-        return [{"filename": name, "filesize": size, "download": link} for name, (_, size, link) in zip(names, entries)]
+        return [
+            {"filename": name, "filesize": size, "download": link}
+            for name, (_, size, link) in zip(names, entries)
+        ]
 
     async def _own_folder(self, t: dict) -> str:
         """The folder this transfer made: its folder_id, or the folder of the same name inside it.
@@ -151,11 +182,21 @@ class Premiumize:
         if name and listing.get("name") == name and listing.get("parent_id"):
             return str(t["folder_id"])
         for item in listing.get("content") or []:
-            if isinstance(item, dict) and item.get("type") == "folder" and name and item.get("name") == name and item.get("id"):
+            if (
+                isinstance(item, dict)
+                and item.get("type") == "folder"
+                and name
+                and item.get("name") == name
+                and item.get("id")
+            ):
                 return str(item["id"])
-        raise PremiumizeError("Premiumize finished, but Narratarr couldn't tell which folder holds this book's files.")
+        raise PremiumizeError(
+            "Premiumize finished, but Narratarr couldn't tell which folder holds this book's files."
+        )
 
-    async def _walk(self, folder_id: str, parents: tuple[str, ...], depth: int) -> list[tuple[tuple[str, ...], int, str]]:
+    async def _walk(
+        self, folder_id: str, parents: tuple[str, ...], depth: int
+    ) -> list[tuple[tuple[str, ...], int, str]]:
         content = (await self._call("GET", "/folder/list", params={"id": folder_id})).get("content")
         out = []
         for item in content if isinstance(content, list) else []:
@@ -164,7 +205,11 @@ class Premiumize:
             path = (*parents, str(item["name"]))
             if item.get("type") == "folder" and item.get("id") and depth < MAX_DEPTH:
                 out += await self._walk(str(item["id"]), path, depth + 1)
-            elif item.get("type") == "file" and isinstance(item.get("link"), str) and item["link"].startswith("https://"):
+            elif (
+                item.get("type") == "file"
+                and isinstance(item.get("link"), str)
+                and item["link"].startswith("https://")
+            ):
                 out.append((path, int(item.get("size") or 0), item["link"]))
         return out
 

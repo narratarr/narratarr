@@ -3,6 +3,7 @@
 No network: the provider clients are driven through httpx.MockTransport, and the worker
 decision is tested against a stub cloud so the only thing under test is the routing.
 """
+
 import httpx
 import pytest
 
@@ -61,7 +62,10 @@ async def test_a_provider_without_a_cache_check_is_unavailable():
     assert "doesn't say whether" in reason
 
 
-@pytest.mark.parametrize("answer,expected", [(True, cachecheck.CACHED), (False, cachecheck.UNCACHED), (None, cachecheck.UNKNOWN)])
+@pytest.mark.parametrize(
+    "answer,expected",
+    [(True, cachecheck.CACHED), (False, cachecheck.UNCACHED), (None, cachecheck.UNKNOWN)],
+)
 async def test_answers_map_to_states(answer, expected):
     state, _ = await cachecheck.torrent_state(_Cloud(answer), HEX)
     assert state == expected
@@ -83,28 +87,47 @@ async def test_torbox_reports_cached_when_it_lists_files():
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path.endswith("/v1/api/torrents/checkcached")
         assert request.url.params["hash"] == HEX
-        return httpx.Response(200, json={
-            "success": True, "error": None, "detail": "",
-            "data": {HEX: {"hash": HEX, "files": [{"id": 1, "name": "book.m4b", "size": 10}], "size": 10}},
-        })
+        return httpx.Response(
+            200,
+            json={
+                "success": True,
+                "error": None,
+                "detail": "",
+                "data": {
+                    HEX: {
+                        "hash": HEX,
+                        "files": [{"id": 1, "name": "book.m4b", "size": 10}],
+                        "size": 10,
+                    }
+                },
+            },
+        )
 
     assert await _torbox(handler).cached(HEX) is True
 
 
 async def test_torbox_empty_answer_is_a_miss():
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"success": True, "error": None, "detail": "", "data": None})
+        return httpx.Response(
+            200, json={"success": True, "error": None, "detail": "", "data": None}
+        )
 
     assert await _torbox(handler).cached(HEX) is False
 
 
 async def test_torbox_entry_with_no_files_is_unknown_not_a_miss():
     """A listed hash without files isn't a clear "no": it stays on TorBox (review of #16)."""
+
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={
-            "success": True, "error": None, "detail": "",
-            "data": {HEX: {"hash": HEX, "files": [], "size": 0}},
-        })
+        return httpx.Response(
+            200,
+            json={
+                "success": True,
+                "error": None,
+                "detail": "",
+                "data": {HEX: {"hash": HEX, "files": [], "size": 0}},
+            },
+        )
 
     assert await _torbox(handler).cached(HEX) is None
 
@@ -124,6 +147,7 @@ async def test_realdebrid_positive_answer_is_cached():
 @pytest.mark.parametrize("body", [{}, {HEX: {}}])
 async def test_realdebrid_anything_else_is_unknown_never_a_miss(body):
     """Real-Debrid may have switched this endpoint off. An empty body proves nothing."""
+
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=body)
 
@@ -135,7 +159,13 @@ class _Settings:
         self.debrid_fallback_client = fallback
         self.clients = [
             {"id": "torbox", "type": "torbox", "api_key": "k"},
-            {"id": "qb", "type": "qbittorrent", "url": "http://qb:8080", "username": "u", "password": "p"},
+            {
+                "id": "qb",
+                "type": "qbittorrent",
+                "url": "http://qb:8080",
+                "username": "u",
+                "password": "p",
+            },
         ]
 
 
@@ -169,8 +199,14 @@ async def _run(w, monkeypatch, answer, settings, fallback_id="qb"):
     monkeypatch.setattr(w, "_process_torrent_client", fake_local)
     settings.debrid_fallback_client = fallback_id
     return await w._fall_back_if_uncached(
-        BOOK, None, ClientEntry(id="torbox", type="torbox"), ClientEntry(id="qb", type="qbittorrent"),
-        _Cloud(answer), "magnet", MAGNET, settings,
+        BOOK,
+        None,
+        ClientEntry(id="torbox", type="torbox"),
+        ClientEntry(id="qb", type="qbittorrent"),
+        _Cloud(answer),
+        "magnet",
+        MAGNET,
+        settings,
     ), diverted
 
 
@@ -184,7 +220,9 @@ async def test_uncached_diverts_to_the_local_client(w, monkeypatch):
     decided, diverted = await _run(w, monkeypatch, False, _Settings())
     assert decided is True
     assert diverted["entry"] == "qb"
-    assert diverted["fetched"] == ("magnet", MAGNET), "the payload in hand goes along; the indexer isn't asked twice"
+    assert diverted["fetched"] == ("magnet", MAGNET), (
+        "the payload in hand goes along; the indexer isn't asked twice"
+    )
     assert any("downloads from the swarm" in f.get("detail", "") for _, f in worker.db.updates)
 
 
@@ -211,8 +249,10 @@ async def test_a_fallback_that_is_not_a_torrent_client_does_not_divert(w, monkey
 
 # ── the routes a user can end up on, one test each ──────────────────────────────────────
 
+
 async def test_a_busy_torbox_is_unknown_and_does_not_divert(w, monkeypatch):
     """429 must not read as 'not cached'. A rate limit is not knowledge about a torrent."""
+
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(429, json={"success": False, "error": "RATE_LIMIT"})
 
@@ -250,8 +290,11 @@ async def test_a_plan_restriction_is_unknown_and_does_not_divert(w, monkeypatch)
 
 async def test_a_json_body_that_is_not_an_object_is_unknown(w, monkeypatch):
     """TorBox answers with a list in `format=list`; we ask for object, so be defensive."""
+
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"success": True, "error": None, "detail": "", "data": [HEX]})
+        return httpx.Response(
+            200, json={"success": True, "error": None, "detail": "", "data": [HEX]}
+        )
 
     monkeypatch.setattr(worker, "db", _Db())
     decision, _ = await _run_with(_torbox(handler), w, monkeypatch, _Settings())
@@ -280,8 +323,14 @@ async def test_qbittorrent_being_down_fails_loudly_rather_than_going_to_the_clou
     monkeypatch.setattr(w, "_process_torrent_client", broken_local)
     with pytest.raises(ClientError):
         await w._fall_back_if_uncached(
-            BOOK, None, ClientEntry(id="torbox", type="torbox"), ClientEntry(id="qb", type="qbittorrent"),
-            _Cloud(False), "magnet", MAGNET, settings,
+            BOOK,
+            None,
+            ClientEntry(id="torbox", type="torbox"),
+            ClientEntry(id="qb", type="qbittorrent"),
+            _Cloud(False),
+            "magnet",
+            MAGNET,
+            settings,
         )
 
 
@@ -301,8 +350,14 @@ async def test_a_diverted_grab_never_removes_the_torrent_from_the_client(w, monk
     monkeypatch.setattr(w, "_process_torrent_client", fake_local)
     settings = _Settings("qb")
     decision = await w._fall_back_if_uncached(
-        BOOK, None, ClientEntry(id="torbox", type="torbox"), ClientEntry(id="qb", type="qbittorrent"),
-        Cloud(False), "magnet", MAGNET, settings,
+        BOOK,
+        None,
+        ClientEntry(id="torbox", type="torbox"),
+        ClientEntry(id="qb", type="qbittorrent"),
+        Cloud(False),
+        "magnet",
+        MAGNET,
+        settings,
     )
     assert decision is True
     assert removed == []
@@ -327,8 +382,14 @@ async def test_the_same_hash_is_checked_once_per_grab_and_not_remembered(w, monk
     settings = _Settings("qb")
     for _ in range(2):
         await w._fall_back_if_uncached(
-            BOOK, None, ClientEntry(id="torbox", type="torbox"), ClientEntry(id="qb", type="qbittorrent"),
-            Cloud(False), "magnet", MAGNET, settings,
+            BOOK,
+            None,
+            ClientEntry(id="torbox", type="torbox"),
+            ClientEntry(id="qb", type="qbittorrent"),
+            Cloud(False),
+            "magnet",
+            MAGNET,
+            settings,
         )
     assert calls == [HEX, HEX]
 
@@ -348,8 +409,14 @@ async def test_no_secret_from_the_payload_reaches_the_book_or_the_logs(w, monkey
 
     monkeypatch.setattr(w, "_process_torrent_client", fake_local)
     await w._fall_back_if_uncached(
-        BOOK, None, ClientEntry(id="torbox", type="torbox"), ClientEntry(id="qb", type="qbittorrent"),
-        _Cloud(False), "magnet", secret_magnet, _Settings("qb"),
+        BOOK,
+        None,
+        ClientEntry(id="torbox", type="torbox"),
+        ClientEntry(id="qb", type="qbittorrent"),
+        _Cloud(False),
+        "magnet",
+        secret_magnet,
+        _Settings("qb"),
     )
     written = " ".join(f.get("detail", "") for _, f in worker.db.updates)
     assert passkey not in written
@@ -368,8 +435,14 @@ async def test_a_torrent_file_without_a_hash_goes_to_the_cloud_with_a_reason(w, 
     monkeypatch.setattr(w, "_process_torrent_client", fake_local)
     book = {**BOOK, "info_hash": ""}
     decision = await w._fall_back_if_uncached(
-        book, None, ClientEntry(id="torbox", type="torbox"), ClientEntry(id="qb", type="qbittorrent"),
-        _Cloud(False), "torrent", b"d8:announce0:", _Settings("qb"),
+        book,
+        None,
+        ClientEntry(id="torbox", type="torbox"),
+        ClientEntry(id="qb", type="qbittorrent"),
+        _Cloud(False),
+        "torrent",
+        b"d8:announce0:",
+        _Settings("qb"),
     )
     assert decision is False
     assert "called" not in diverted
@@ -385,6 +458,12 @@ async def _run_with(cloud, w, monkeypatch, settings, fallback_id="qb"):
     monkeypatch.setattr(w, "_process_torrent_client", fake_local)
     settings.debrid_fallback_client = fallback_id
     return await w._fall_back_if_uncached(
-        BOOK, None, ClientEntry(id="torbox", type="torbox"), ClientEntry(id="qb", type="qbittorrent"),
-        cloud, "magnet", MAGNET, settings,
+        BOOK,
+        None,
+        ClientEntry(id="torbox", type="torbox"),
+        ClientEntry(id="qb", type="qbittorrent"),
+        cloud,
+        "magnet",
+        MAGNET,
+        settings,
     ), {}

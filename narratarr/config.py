@@ -51,7 +51,9 @@ class Settings:
     hardcover_token_expires: float = 0.0
     hardcover_user: str = ""  # the username it's connected as, to show in Settings
     hardcover_sync: bool = True  # look at the shelf now and then while connected
-    hardcover_format: str = "audiobook"  # what a book from the shelf is wanted as: audiobook, ebook or both
+    hardcover_format: str = (
+        "audiobook"  # what a book from the shelf is wanted as: audiobook, ebook or both
+    )
     prowlarr_url: str = ""
     prowlarr_api_key: str = ""
     prowlarr_categories: str = "3030"  # Newznab/Torznab "Audio/Audiobook"
@@ -99,7 +101,9 @@ class Settings:
     # it), look for another release of the book and take that instead, like Sonarr and Radarr do.
     retry_failed_downloads: bool = True
     audible_region: str = "us"
-    audible_extra_regions: list[str] = field(default_factory=list)  # more Audible stores people can search
+    audible_extra_regions: list[str] = field(
+        default_factory=list
+    )  # more Audible stores people can search
     check_updates: bool = True  # one request a day to GitHub's releases API
     # On by default, and on for an existing settings file that predates the key: `load()` starts
     # from the dataclass defaults and only overwrites keys it finds, so an absent key means True.
@@ -107,8 +111,12 @@ class Settings:
     # Audible storefronts Audnex serves, in the order they are tried. `br` is not here: the API
     # rejects it as an unsupported code, and a code that can only fail should not be offered.
     audnex_regions: list[str] = field(default_factory=lambda: ["uk"])
-    auth_local_bypass: bool = False  # skip sign-in for requests from this machine and the home network
-    listener_approval: bool = True  # a listener's request waits for an admin before anything is searched or downloaded
+    auth_local_bypass: bool = (
+        False  # skip sign-in for requests from this machine and the home network
+    )
+    listener_approval: bool = (
+        True  # a listener's request waits for an admin before anything is searched or downloaded
+    )
     languages: str = ""  # the languages books should be in, e.g. "German, English" (blank: any)
 
     # Download clients, as a list. Empty means "not migrated yet": `load()` builds it from the flat
@@ -134,17 +142,19 @@ class Settings:
         from .downloaders import entry_from_dict
 
         d["clients"] = []
-        for c in (asdict(self).get("clients") or []):
+        for c in asdict(self).get("clients") or []:
             if not isinstance(c, dict):
                 continue
             parsed = entry_from_dict(c)
-            d["clients"].append({
-                **c,
-                "label": parsed.label if parsed else c.get("type", ""),
-                "configured": bool(parsed and parsed.configured),
-                "password": _mask(c.get("password", ""), "x_password"),
-                "api_key": _mask(c.get("api_key", ""), "x_api_key"),
-            })
+            d["clients"].append(
+                {
+                    **c,
+                    "label": parsed.label if parsed else c.get("type", ""),
+                    "configured": bool(parsed and parsed.configured),
+                    "password": _mask(c.get("password", ""), "x_password"),
+                    "api_key": _mask(c.get("api_key", ""), "x_api_key"),
+                }
+            )
         d["rd_configured"] = bool(self.rd_api_key)
         d["ad_configured"] = bool(self.ad_api_key)
         d["tb_configured"] = bool(self.tb_api_key)
@@ -163,12 +173,17 @@ class Settings:
         from .downloaders import entries
 
         listed = entries(self)
-        d["usenet_configured"] = any(e.delivery == "usenet" and e.configured for e in listed) \
+        d["usenet_configured"] = (
+            any(e.delivery == "usenet" and e.configured for e in listed)
             or d[f"{self.usenet_client}_configured"]
-        short = {"realdebrid": "rd", "alldebrid": "ad", "torbox": "tb", "premiumize": "pm"}.get(self.torrent_client,
-                                                                                                 self.torrent_client)
-        d["torrent_configured"] = any(e.delivery == "torrent" and e.configured for e in listed) \
+        )
+        short = {"realdebrid": "rd", "alldebrid": "ad", "torbox": "tb", "premiumize": "pm"}.get(
+            self.torrent_client, self.torrent_client
+        )
+        d["torrent_configured"] = (
+            any(e.delivery == "torrent" and e.configured for e in listed)
             or d[f"{short}_configured"]
+        )
         return d
 
 
@@ -176,14 +191,33 @@ class Settings:
 # user's own account elsewhere. Only the code that connects and disconnects that account writes them.
 SERVER_ONLY = ("hardcover_access_token", "hardcover_refresh_token", "hardcover_token_expires")
 SECRETS = (
-    "rd_api_key", "ad_api_key", "tb_api_key", "pm_api_key", "audiobookshelf_token", "brave_api_key", "prowlarr_api_key", "sabnzbd_api_key",
-    "nzbget_password", "qbittorrent_password", "transmission_password", "deluge_password", "torznab_api_key",
+    "rd_api_key",
+    "ad_api_key",
+    "tb_api_key",
+    "pm_api_key",
+    "audiobookshelf_token",
+    "brave_api_key",
+    "prowlarr_api_key",
+    "sabnzbd_api_key",
+    "nzbget_password",
+    "qbittorrent_password",
+    "transmission_password",
+    "deluge_password",
+    "torznab_api_key",
 )
 CHOICES = {
     "hardcover_format": ("audiobook", "ebook", "both"),
     "search_provider": ("audiobookbay", "brave"),
     "usenet_client": ("sabnzbd", "nzbget"),
-    "torrent_client": ("realdebrid", "alldebrid", "torbox", "premiumize", "qbittorrent", "transmission", "deluge"),
+    "torrent_client": (
+        "realdebrid",
+        "alldebrid",
+        "torbox",
+        "premiumize",
+        "qbittorrent",
+        "transmission",
+        "deluge",
+    ),
     "audible_region": ("us", "uk", "ca", "au", "in", "de", "fr", "it", "es", "jp"),
 }
 # Each service's secrets. Changing the service's address to a different host clears them, so a
@@ -227,7 +261,9 @@ def load() -> Settings:
                 known = {f.name: f for f in fields(Settings)}
                 for k, v in raw.items():
                     if k in known:
-                        setattr(_settings, k, as_bool(v) if isinstance(known[k].default, bool) else v)
+                        setattr(
+                            _settings, k, as_bool(v) if isinstance(known[k].default, bool) else v
+                        )
             migrate_clients(_settings)
         return _settings
 
@@ -244,10 +280,16 @@ def update(changes: dict) -> Settings:
     s = load()
     list_given = "clients" in changes
     prev_default = s.default_client
-    touched_flat = any(k in _FLAT_PROTOCOL_FIELDS[p] for k in changes for p in _FLAT_PROTOCOL_FIELDS)
+    touched_flat = any(
+        k in _FLAT_PROTOCOL_FIELDS[p] for k in changes for p in _FLAT_PROTOCOL_FIELDS
+    )
     with _lock:
         known = {f.name: f for f in fields(Settings)}
-        fresh = {k for k, v in changes.items() if k in SECRETS and isinstance(v, str) and v and not v.startswith("•")}
+        fresh = {
+            k
+            for k, v in changes.items()
+            if k in SECRETS and isinstance(v, str) and v and not v.startswith("•")
+        }
         for k, v in changes.items():
             if k not in known:
                 continue
@@ -258,7 +300,9 @@ def update(changes: dict) -> Settings:
             if k in SERVICE_SECRETS and isinstance(v, str):
                 v = v.strip().rstrip("/")
                 if v and not v.startswith(("http://", "https://")):
-                    raise ValueError(f"The {k.split('_')[0]} address must start with http:// or https://")
+                    raise ValueError(
+                        f"The {k.split('_')[0]} address must start with http:// or https://"
+                    )
                 if _host(v) != _host(getattr(s, k)):
                     for secret in SERVICE_SECRETS[k]:
                         if secret not in fresh:
@@ -296,7 +340,9 @@ def update(changes: dict) -> Settings:
                 v = v.strip("/") or "{author}/{title}"
                 if bad := layout.unknown(v):
                     names = ", ".join("{" + n + "}" for n in layout.VARIABLES)
-                    raise ValueError(f"The folder layout can't use {{{bad[0]}}}. You can use {names}.")
+                    raise ValueError(
+                        f"The folder layout can't use {{{bad[0]}}}. You can use {names}."
+                    )
                 if ".." in v.split("/"):
                     raise ValueError("The folder layout has to stay inside the library folder.")
             setattr(s, k, v)
@@ -306,12 +352,16 @@ def update(changes: dict) -> Settings:
         ids = [c["id"] for c in s.clients]
         if s.default_client not in ids:
             s.default_client = ids[0] if ids else ""
-        from .downloaders import DEBRID as DEBRID_TYPES, DELIVERY
+        from .downloaders import DEBRID as DEBRID_TYPES
+        from .downloaders import DELIVERY
 
         # The uncached fallback may only name a local torrent client that exists. Anything else
         # (a removed client, a cloud service, a Usenet client) turns it off rather than misroutes.
-        local_torrent = {c["id"] for c in s.clients
-                         if DELIVERY.get(c["type"]) == "torrent" and c["type"] not in DEBRID_TYPES}
+        local_torrent = {
+            c["id"]
+            for c in s.clients
+            if DELIVERY.get(c["type"]) == "torrent" and c["type"] not in DEBRID_TYPES
+        }
         if s.debrid_fallback_client not in local_torrent:
             s.debrid_fallback_client = ""
 
@@ -335,9 +385,14 @@ def update(changes: dict) -> Settings:
                     if pick:
                         s.default_client = pick
         if s.import_folder:
-            lib, imp = Path(s.library_dir).expanduser().resolve(), Path(s.import_folder).expanduser().resolve()
+            lib, imp = (
+                Path(s.library_dir).expanduser().resolve(),
+                Path(s.import_folder).expanduser().resolve(),
+            )
             if lib == imp or lib in imp.parents or imp in lib.parents:
-                raise ValueError("The import folder can't be inside the library folder, or contain it.")
+                raise ValueError(
+                    "The import folder can't be inside the library folder, or contain it."
+                )
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         _write_private(SETTINGS_FILE, json.dumps(asdict(s), indent=2))
     return s
@@ -355,7 +410,9 @@ def parse_audible_stores(value) -> list[str]:
     for code in raw:
         code = code.lower()
         if code not in CHOICES["audible_region"]:
-            raise ValueError(f"'{code}' isn't an Audible store. Use one of: {', '.join(CHOICES['audible_region'])}.")
+            raise ValueError(
+                f"'{code}' isn't an Audible store. Use one of: {', '.join(CHOICES['audible_region'])}."
+            )
         if code not in out:
             out.append(code)
     return out
@@ -381,7 +438,8 @@ def parse_regions(value) -> list[str]:
         code = code.lower()
         if code not in AUDNEX_REGIONS:
             raise ValueError(
-                f"'{code}' isn't an Audible storefront Audnex serves. Use one of: {', '.join(AUDNEX_REGIONS)}.")
+                f"'{code}' isn't an Audible storefront Audnex serves. Use one of: {', '.join(AUDNEX_REGIONS)}."
+            )
         if code not in out:
             out.append(code)
     return out or ["uk"]
@@ -392,11 +450,26 @@ def parse_regions(value) -> list[str]:
 _FLAT = {
     "sabnzbd": ("sabnzbd_url", "sabnzbd_api_key", "sabnzbd_category", ""),
     "nzbget": ("nzbget_url", "nzbget_password", "nzbget_category", ""),
-    "qbittorrent": ("qbittorrent_url", "qbittorrent_password", "qbittorrent_category", "qbittorrent_folder"),
-    "transmission": ("transmission_url", "transmission_password", "transmission_label", "transmission_folder"),
+    "qbittorrent": (
+        "qbittorrent_url",
+        "qbittorrent_password",
+        "qbittorrent_category",
+        "qbittorrent_folder",
+    ),
+    "transmission": (
+        "transmission_url",
+        "transmission_password",
+        "transmission_label",
+        "transmission_folder",
+    ),
     "deluge": ("deluge_url", "deluge_password", "", "deluge_folder"),
 }
-_DEBRID_KEYS = {"realdebrid": "rd_api_key", "alldebrid": "ad_api_key", "torbox": "tb_api_key", "premiumize": "pm_api_key"}
+_DEBRID_KEYS = {
+    "realdebrid": "rd_api_key",
+    "alldebrid": "ad_api_key",
+    "torbox": "tb_api_key",
+    "premiumize": "pm_api_key",
+}
 
 
 def _flat_entry(kind: str, s: Settings) -> dict:
@@ -458,14 +531,36 @@ def migrate_clients(s: Settings) -> None:
 # teach the migration to read the old file's keys directly, and move the callers over.
 
 _FLAT_PROTOCOL_FIELDS = {
-    "usenet": ("usenet_client", "sabnzbd_url", "sabnzbd_api_key", "sabnzbd_category",
-               "nzbget_url", "nzbget_username", "nzbget_password", "nzbget_category"),
-    "torrent": ("torrent_client", "rd_api_key", "ad_api_key", "tb_api_key", "pm_api_key",
-                "qbittorrent_url", "qbittorrent_username", "qbittorrent_password",
-                "qbittorrent_category", "qbittorrent_folder",
-                "transmission_url", "transmission_username", "transmission_password",
-                "transmission_label", "transmission_folder",
-                "deluge_url", "deluge_password", "deluge_folder"),
+    "usenet": (
+        "usenet_client",
+        "sabnzbd_url",
+        "sabnzbd_api_key",
+        "sabnzbd_category",
+        "nzbget_url",
+        "nzbget_username",
+        "nzbget_password",
+        "nzbget_category",
+    ),
+    "torrent": (
+        "torrent_client",
+        "rd_api_key",
+        "ad_api_key",
+        "tb_api_key",
+        "pm_api_key",
+        "qbittorrent_url",
+        "qbittorrent_username",
+        "qbittorrent_password",
+        "qbittorrent_category",
+        "qbittorrent_folder",
+        "transmission_url",
+        "transmission_username",
+        "transmission_password",
+        "transmission_label",
+        "transmission_folder",
+        "deluge_url",
+        "deluge_password",
+        "deluge_folder",
+    ),
 }
 
 
@@ -509,7 +604,9 @@ def validate_clients(value) -> list:
             raise ValueError("each download client has to be an object")
         kind = str(raw.get("type") or "").strip().lower()
         if kind not in DELIVERY:
-            raise ValueError(f"'{kind or 'no type'}' isn't a download client Narratarr can talk to.")
+            raise ValueError(
+                f"'{kind or 'no type'}' isn't a download client Narratarr can talk to."
+            )
         cid = str(raw.get("id") or kind).strip().lower() or kind
         if cid in seen:
             raise ValueError(f"two clients share the id '{cid}'")
@@ -538,7 +635,9 @@ def _merge_client_secrets(new: list, old: list) -> list:
     by_id = {c.get("id"): c for c in old if isinstance(c, dict)}
     for entry in new:
         prev = by_id.get(entry["id"]) or {}
-        same_place = prev.get("type") == entry.get("type") and _host(prev.get("url", "")) == _host(entry.get("url", ""))
+        same_place = prev.get("type") == entry.get("type") and _host(prev.get("url", "")) == _host(
+            entry.get("url", "")
+        )
         for key in ("password", "api_key"):
             if str(entry.get(key) or "").startswith("•"):
                 entry[key] = prev.get(key, "") if same_place else ""

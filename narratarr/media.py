@@ -99,7 +99,9 @@ def _track(data: bytes, start: int, end: int) -> dict:
             elif kind == b"chap":
                 t["chap"] = list(struct.unpack(f">{len(body) // 4}I", body[: len(body) // 4 * 4]))
             elif kind == b"mdhd":
-                t["timescale"] = struct.unpack(">I", body[12:16] if body[0] == 0 else body[20:24])[0]
+                t["timescale"] = struct.unpack(">I", body[12:16] if body[0] == 0 else body[20:24])[
+                    0
+                ]
             elif kind == b"hdlr":
                 t["handler"] = body[8:12]
             elif kind == b"stts":
@@ -107,10 +109,14 @@ def _track(data: bytes, start: int, end: int) -> dict:
                 t["stts"] = [struct.unpack(">II", body[8 + i * 8 : 16 + i * 8]) for i in range(n)]
             elif kind == b"stsz":
                 fixed, n = struct.unpack(">II", body[4:12])
-                t["stsz"] = [fixed] * n if fixed else list(struct.unpack(f">{n}I", body[12 : 12 + n * 4]))
+                t["stsz"] = (
+                    [fixed] * n if fixed else list(struct.unpack(f">{n}I", body[12 : 12 + n * 4]))
+                )
             elif kind == b"stsc":
                 n = struct.unpack(">I", body[4:8])[0]
-                t["stsc"] = [struct.unpack(">III", body[8 + i * 12 : 20 + i * 12]) for i in range(n)]
+                t["stsc"] = [
+                    struct.unpack(">III", body[8 + i * 12 : 20 + i * 12]) for i in range(n)
+                ]
             elif kind == b"stco":
                 n = struct.unpack(">I", body[4:8])[0]
                 t["stco"] = list(struct.unpack(f">{n}I", body[8 : 8 + n * 4]))
@@ -132,9 +138,12 @@ def qt_chapters(path: Path) -> list[tuple[float, str]]:
             tracks = [_track(moov, a, b) for kind, a, b in _boxes(moov, 8) if kind == b"trak"]
             wanted = {i for t in tracks for i in t["chap"]}
             chap = next((t for t in tracks if t.get("id") in wanted), None) or next(
-                (t for t in tracks if t.get("handler") in (b"text", b"sbtl") and t.get("stco")), None
+                (t for t in tracks if t.get("handler") in (b"text", b"sbtl") and t.get("stco")),
+                None,
             )
-            if not chap or not all(k in chap for k in ("timescale", "stts", "stsz", "stsc", "stco")):
+            if not chap or not all(
+                k in chap for k in ("timescale", "stts", "stsz", "stsc", "stco")
+            ):
                 return []
 
             # Sample start times.
@@ -167,7 +176,11 @@ def qt_chapters(path: Path) -> list[tuple[float, str]]:
                     continue
                 n = struct.unpack(">H", raw[:2])[0]
                 text = raw[2 : 2 + n]
-                title = text.decode("utf-16") if text[:2] in (b"\xfe\xff", b"\xff\xfe") else text.decode("utf-8", "replace")
+                title = (
+                    text.decode("utf-16")
+                    if text[:2] in (b"\xfe\xff", b"\xff\xfe")
+                    else text.decode("utf-8", "replace")
+                )
                 chapters.append((start / chap["timescale"], title.strip()))
             return chapters
     except (OSError, struct.error, ValueError, IndexError, ZeroDivisionError):
@@ -215,7 +228,9 @@ def _describe(book_dir: str, signature: tuple) -> dict:
         )
         if embedded:
             for i, (start, title) in enumerate(embedded):
-                chapters.append({"title": title or f"Chapter {len(chapters) + 1}", "start": offset + start})
+                chapters.append(
+                    {"title": title or f"Chapter {len(chapters) + 1}", "start": offset + start}
+                )
         elif len(paths) > 1:
             chapters.append({"title": tag_title or path.stem, "start": offset})
         offset += duration

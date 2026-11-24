@@ -6,6 +6,7 @@ Docs: https://api.real-debrid.com/
 from __future__ import annotations
 
 import httpx
+
 from .downloaders import bad_release
 
 API = "https://api.real-debrid.com/rest/1.0"
@@ -130,7 +131,9 @@ class RealDebrid:
         if status == "downloaded":
             return {"done": True, "progress": 100.0, "speed": 0, "detail": "Real-Debrid has it"}
         if status in DEAD:
-            raise bad_release(RealDebridError(f"Real-Debrid couldn't fetch this torrent ({status})."))
+            raise bad_release(
+                RealDebridError(f"Real-Debrid couldn't fetch this torrent ({status}).")
+            )
         if status == "waiting_files_selection":
             await self.select_all_files(torrent_id)
         detail = {
@@ -141,7 +144,12 @@ class RealDebrid:
             "compressing": "Real-Debrid is packaging files…",
             "uploading": "Real-Debrid is finishing up…",
         }.get(status, f"Real-Debrid: {status}")
-        return {"done": False, "progress": float(info.get("progress") or 0), "speed": int(info.get("speed") or 0), "detail": detail}
+        return {
+            "done": False,
+            "progress": float(info.get("progress") or 0),
+            "speed": int(info.get("speed") or 0),
+            "detail": detail,
+        }
 
     async def direct_files(self, torrent_id: str) -> list[dict]:
         """The finished torrent's files as direct downloads: [{'filename', 'filesize', 'download'}]."""

@@ -30,7 +30,9 @@ def test_discover_marks_library_books(client):
     assert len(data["items"]) == 9
     assert all(i["library"] is None for i in data["items"])
 
-    db.insert({"source": "audiobookbay", "source_url": BOOK_URL, "title": "Dune", "status": "wanted"})
+    db.insert(
+        {"source": "audiobookbay", "source_url": BOOK_URL, "title": "Dune", "status": "wanted"}
+    )
     data = client.get("/api/discover", params={"q": "dune", "source": "audiobookbay"}).json()
     dune = next(i for i in data["items"] if i["url"] == BOOK_URL)
     assert dune["library"]["status"] == "wanted"
@@ -48,8 +50,13 @@ def test_add_book_scrapes_details_and_queues(client):
 
 
 def test_rejects_urls_from_other_hosts(client):
-    assert client.get("/api/details", params={"url": "http://169.254.169.254/abss/x"}).status_code == 400
-    assert client.post("/api/library", json={"url": "https://evil.example/abss/x/"}).status_code == 400
+    assert (
+        client.get("/api/details", params={"url": "http://169.254.169.254/abss/x"}).status_code
+        == 400
+    )
+    assert (
+        client.post("/api/library", json={"url": "https://evil.example/abss/x/"}).status_code == 400
+    )
 
 
 def test_settings_mask_secrets(client):

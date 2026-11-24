@@ -58,13 +58,19 @@ def load_books(path: Path) -> list[dict]:
     if path.suffix.lower() == ".csv":
         with path.open(newline="", encoding="utf-8") as fh:
             rows = list(csv.DictReader(fh))
-        return [{"title": (r.get("title") or "").strip(), "author": (r.get("author") or "").strip()}
-                for r in rows if (r.get("title") or "").strip()]
+        return [
+            {"title": (r.get("title") or "").strip(), "author": (r.get("author") or "").strip()}
+            for r in rows
+            if (r.get("title") or "").strip()
+        ]
     data = json.loads(path.read_text(encoding="utf-8"))
     if isinstance(data, dict):
         data = data.get("books") or []
-    return [{"title": (b.get("title") or "").strip(), "author": (b.get("author") or "").strip()}
-            for b in data if (b.get("title") or "").strip()]
+    return [
+        {"title": (b.get("title") or "").strip(), "author": (b.get("author") or "").strip()}
+        for b in data
+        if (b.get("title") or "").strip()
+    ]
 
 
 def strip_byline(title: str, author: str) -> str:
@@ -125,35 +131,53 @@ async def run(books: list[dict], regions: list[str], reset: bool) -> int:
             continue
 
         rating = provider._rating(score, asin)
-        store.put(asin, provider.name, state="rated", score=float(rating.score),
-                  url=rating.url if rating else "")
+        store.put(
+            asin,
+            provider.name,
+            state="rated",
+            score=float(rating.score),
+            url=rating.url if rating else "",
+        )
         tally["rated"] += 1
         _report(n, len(books), title, f"rated {rating.score} ({asin})", tally)
 
-    print("\nDone."
-          f"\n  matched  {tally['matched']}"
-          f"\n  rated    {tally['rated']}"
-          f"\n  unrated  {tally['unrated']}"
-          f"\n  refused  {tally['refused']}"
-          f"\n  failed   {tally['failed']}"
-          f"\n  skipped  {tally['skipped']}  (already cached)")
+    print(
+        "\nDone."
+        f"\n  matched  {tally['matched']}"
+        f"\n  rated    {tally['rated']}"
+        f"\n  unrated  {tally['unrated']}"
+        f"\n  refused  {tally['refused']}"
+        f"\n  failed   {tally['failed']}"
+        f"\n  skipped  {tally['skipped']}  (already cached)"
+    )
     print(f"Cache: {store.path}  (ratings refresh after {RATING_TTL // 86400} days)")
     return 0
 
 
 def _report(n: int, total: int, title: str, outcome: str, tally: dict) -> None:
-    print(f"[{n}/{total}] {title[:52]:52s} {outcome}   "
-          f"(rated {tally['rated']} · unrated {tally['unrated']} · "
-          f"refused {tally['refused']} · failed {tally['failed']})")
+    print(
+        f"[{n}/{total}] {title[:52]:52s} {outcome}   "
+        f"(rated {tally['rated']} · unrated {tally['unrated']} · "
+        f"refused {tally['refused']} · failed {tally['failed']})"
+    )
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Fill the ratings cache before you browse.")
-    ap.add_argument("books", type=Path, help="a JSON list of {title, author}, or a csv with those columns")
-    ap.add_argument("--region", action="append", default=None,
-                    help="an Audible storefront to try, in order; defaults to the ones in Settings")
-    ap.add_argument("--reset", action="store_true",
-                    help="re-fetch books that are already cached, e.g. after scores have drifted")
+    ap.add_argument(
+        "books", type=Path, help="a JSON list of {title, author}, or a csv with those columns"
+    )
+    ap.add_argument(
+        "--region",
+        action="append",
+        default=None,
+        help="an Audible storefront to try, in order; defaults to the ones in Settings",
+    )
+    ap.add_argument(
+        "--reset",
+        action="store_true",
+        help="re-fetch books that are already cached, e.g. after scores have drifted",
+    )
     args = ap.parse_args()
 
     if not args.books.exists():

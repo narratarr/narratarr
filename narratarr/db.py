@@ -14,7 +14,17 @@ from . import config
 # Lifecycle of a book:
 #   wanted -> queued -> resolving -> caching -> downloading -> organizing -> completed
 #                                     any step can land in -> failed
-STATUSES = ("requested", "wanted", "queued", "resolving", "caching", "downloading", "organizing", "completed", "failed")
+STATUSES = (
+    "requested",
+    "wanted",
+    "queued",
+    "resolving",
+    "caching",
+    "downloading",
+    "organizing",
+    "completed",
+    "failed",
+)
 ACTIVE = ("queued", "resolving", "caching", "downloading", "organizing")
 
 SCHEMA = """
@@ -80,7 +90,15 @@ MIGRATIONS = {
 
 KINDS = ("audiobook", "ebook")
 
-JSON_COLUMNS = ("narrators", "categories", "trackers", "files", "series", "skipped_releases", "failed_releases")
+JSON_COLUMNS = (
+    "narrators",
+    "categories",
+    "trackers",
+    "files",
+    "series",
+    "skipped_releases",
+    "failed_releases",
+)
 
 FOLLOWS = """
 CREATE TABLE IF NOT EXISTS follows (
@@ -192,7 +210,9 @@ def connect():
 def init() -> None:
     with connect() as conn:
         conn.executescript(SCHEMA + FOLLOWS + ACCOUNTS)
-        if "superseded" not in {r["name"] for r in conn.execute("PRAGMA table_info(app_tokens)")}:  # pre-release 0.6.0
+        if "superseded" not in {
+            r["name"] for r in conn.execute("PRAGMA table_info(app_tokens)")
+        }:  # pre-release 0.6.0
             conn.execute("ALTER TABLE app_tokens ADD COLUMN superseded INTEGER NOT NULL DEFAULT 0")
         existing = {r["name"] for r in conn.execute("PRAGMA table_info(books)")}
         for col, ddl in MIGRATIONS.items():
@@ -226,7 +246,9 @@ def _books(conn: sqlite3.Connection, sql: str, args: tuple = ()) -> list[dict]:
     user_id = viewer.get()
     if user_id is None or not books:
         return books
-    mine = {r["book_id"]: r for r in conn.execute("SELECT * FROM progress WHERE user_id=?", (user_id,))}
+    mine = {
+        r["book_id"]: r for r in conn.execute("SELECT * FROM progress WHERE user_id=?", (user_id,))
+    }
     for b in books:
         p = mine.get(b["id"])
         b["listen_position"] = p["position"] if p else 0.0
@@ -259,19 +281,29 @@ def get_by_path(path: str) -> dict | None:
     return _one("SELECT * FROM books WHERE path=?", (path,))
 
 
-def save_progress(user_id: int, book_id: int, position: float | None = None, duration: float | None = None,
-                  finished: bool | None = None) -> None:
+def save_progress(
+    user_id: int,
+    book_id: int,
+    position: float | None = None,
+    duration: float | None = None,
+    finished: bool | None = None,
+) -> None:
     """Record where someone is in a book. Finishing it puts them back at the start for next time."""
     if finished:
         position = 0.0
     with connect() as conn:
-        conn.execute("INSERT OR IGNORE INTO progress (user_id, book_id) VALUES (?, ?)", (user_id, book_id))
+        conn.execute(
+            "INSERT OR IGNORE INTO progress (user_id, book_id) VALUES (?, ?)", (user_id, book_id)
+        )
         sets, args = ["listened_at=?"], [time.time()]
         for col, v in (("position", position), ("duration", duration), ("finished", finished)):
             if v is not None:
                 sets.append(f"{col}=?")
                 args.append(int(v) if col == "finished" else v)
-        conn.execute(f"UPDATE progress SET {', '.join(sets)} WHERE user_id=? AND book_id=?", (*args, user_id, book_id))
+        conn.execute(
+            f"UPDATE progress SET {', '.join(sets)} WHERE user_id=? AND book_id=?",
+            (*args, user_id, book_id),
+        )
 
 
 def insert(book: dict) -> dict:
@@ -306,7 +338,9 @@ def delete(book_id: int) -> None:
 
 def next_queued(exclude: set[int]) -> dict | None:
     with connect() as conn:
-        rows = conn.execute("SELECT * FROM books WHERE status='queued' ORDER BY updated_at ASC").fetchall()
+        rows = conn.execute(
+            "SELECT * FROM books WHERE status='queued' ORDER BY updated_at ASC"
+        ).fetchall()
     for r in rows:
         if r["id"] not in exclude:
             return _row(r)
@@ -342,7 +376,10 @@ def _follow(row: sqlite3.Row | None) -> dict | None:
 
 def list_follows() -> list[dict]:
     with connect() as conn:
-        return [_follow(r) for r in conn.execute("SELECT * FROM follows ORDER BY name COLLATE NOCASE").fetchall()]
+        return [
+            _follow(r)
+            for r in conn.execute("SELECT * FROM follows ORDER BY name COLLATE NOCASE").fetchall()
+        ]
 
 
 def get_follow(follow_id: int) -> dict | None:
@@ -357,9 +394,12 @@ def add_follow(kind: str, asin: str, name: str, image: str, known: list[str]) ->
             "ON CONFLICT(kind, asin) DO UPDATE SET name=excluded.name, image=excluded.image",
             (kind, asin, name, image, json.dumps(known), time.time(), time.time()),
         )
-        follow_id = cur.lastrowid or conn.execute(
-            "SELECT id FROM follows WHERE kind=? AND asin=?", (kind, asin)
-        ).fetchone()["id"]
+        follow_id = (
+            cur.lastrowid
+            or conn.execute(
+                "SELECT id FROM follows WHERE kind=? AND asin=?", (kind, asin)
+            ).fetchone()["id"]
+        )
     return get_follow(follow_id)
 
 
@@ -376,13 +416,14 @@ def delete_follow(follow_id: int) -> None:
         conn.execute("DELETE FROM follows WHERE id=?", (follow_id,))
 
 
-
 # ---- the event log ------------------------------------------------------------------------
 
 EVENTS_KEPT = 500
 
 
-def add_event(at: float, event: str, book_id: int | None, message: str, line: str, deliveries: list[dict]) -> int:
+def add_event(
+    at: float, event: str, book_id: int | None, message: str, line: str, deliveries: list[dict]
+) -> int:
     with connect() as conn:
         cur = conn.execute(
             "INSERT INTO events (at, event, book_id, message, line, deliveries) VALUES (?,?,?,?,?,?)",
@@ -405,7 +446,9 @@ def update_delivery(event_id: int, dest_id: int, **changes) -> None:
         conn.execute("UPDATE events SET deliveries=? WHERE id=?", (json.dumps(items), event_id))
 
 
-def list_events(event: str = "", query: str = "", before: int | None = None, limit: int = 50) -> list[dict]:
+def list_events(
+    event: str = "", query: str = "", before: int | None = None, limit: int = 50
+) -> list[dict]:
     """Newest first. `query` matches the message (a book or a person), case-insensitively."""
     sql, args = "SELECT * FROM events WHERE 1=1", []
     if event:
@@ -426,7 +469,10 @@ def list_events(event: str = "", query: str = "", before: int | None = None, lim
 
 def event_counts() -> dict[str, int]:
     with connect() as conn:
-        return {r["event"]: r["n"] for r in conn.execute("SELECT event, COUNT(*) AS n FROM events GROUP BY event")}
+        return {
+            r["event"]: r["n"]
+            for r in conn.execute("SELECT event, COUNT(*) AS n FROM events GROUP BY event")
+        }
 
 
 # ---- Tidy library ---------------------------------------------------------------------------
@@ -436,18 +482,24 @@ TIDY_KEPT = 5000
 
 def add_tidy_move(batch: str, src: str, dst: str, paths: list) -> None:
     with connect() as conn:
-        cur = conn.execute("INSERT INTO tidy_moves (batch, at, src, dst, paths) VALUES (?,?,?,?,?)",
-                           (batch, time.time(), src, dst, json.dumps(paths)))
+        cur = conn.execute(
+            "INSERT INTO tidy_moves (batch, at, src, dst, paths) VALUES (?,?,?,?,?)",
+            (batch, time.time(), src, dst, json.dumps(paths)),
+        )
         conn.execute("DELETE FROM tidy_moves WHERE id <= ?", (cur.lastrowid - TIDY_KEPT,))
 
 
 def last_tidy_batch() -> tuple[str, list[dict]]:
     """The most recent batch of moves that hasn't been undone, oldest move first."""
     with connect() as conn:
-        row = conn.execute("SELECT batch FROM tidy_moves WHERE undone=0 ORDER BY id DESC LIMIT 1").fetchone()
+        row = conn.execute(
+            "SELECT batch FROM tidy_moves WHERE undone=0 ORDER BY id DESC LIMIT 1"
+        ).fetchone()
         if not row:
             return "", []
-        rows = conn.execute("SELECT * FROM tidy_moves WHERE batch=? AND undone=0 ORDER BY id", (row["batch"],)).fetchall()
+        rows = conn.execute(
+            "SELECT * FROM tidy_moves WHERE batch=? AND undone=0 ORDER BY id", (row["batch"],)
+        ).fetchall()
     return row["batch"], [{**dict(r), "paths": json.loads(r["paths"] or "[]")} for r in rows]
 
 
@@ -456,15 +508,22 @@ def hardcover_seen_ids() -> set[int]:
         return {r[0] for r in conn.execute("SELECT user_book_id FROM hardcover_seen")}
 
 
-def hardcover_record(user_book_id: int, title: str, author: str, outcome: str, book_id: int | None) -> None:
+def hardcover_record(
+    user_book_id: int, title: str, author: str, outcome: str, book_id: int | None
+) -> None:
     with connect() as conn:
-        conn.execute("INSERT OR REPLACE INTO hardcover_seen (user_book_id, title, author, outcome, book_id, at) "
-                     "VALUES (?, ?, ?, ?, ?, ?)", (user_book_id, title, author, outcome, book_id, time.time()))
+        conn.execute(
+            "INSERT OR REPLACE INTO hardcover_seen (user_book_id, title, author, outcome, book_id, at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (user_book_id, title, author, outcome, book_id, time.time()),
+        )
 
 
 def hardcover_recent(limit: int = 30) -> list[dict]:
     with connect() as conn:
-        rows = conn.execute("SELECT * FROM hardcover_seen ORDER BY at DESC, user_book_id DESC LIMIT ?", (limit,))
+        rows = conn.execute(
+            "SELECT * FROM hardcover_seen ORDER BY at DESC, user_book_id DESC LIMIT ?", (limit,)
+        )
         return [dict(r) for r in rows]
 
 

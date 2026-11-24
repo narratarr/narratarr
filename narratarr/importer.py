@@ -41,7 +41,9 @@ def _is_audio(p: Path) -> bool:
 
 
 def _hidden(f: Path, root: Path) -> bool:
-    return any(part in _SKIP_DIRS or part.startswith(".") for part in f.relative_to(root).parts[:-1])
+    return any(
+        part in _SKIP_DIRS or part.startswith(".") for part in f.relative_to(root).parts[:-1]
+    )
 
 
 def find_books(root: Path) -> list[Path]:
@@ -90,11 +92,18 @@ def read_ebook_meta(book: Path, root: Path) -> dict:
     if " - " in book.stem:
         guess_author, guess_title = (x.strip() for x in book.stem.split(" - ", 1))
     elif folder != root and _stem(folder) == _stem(book):  # Author/Title/Title.epub
-        guess_author = folder.parent.name if folder.parent != root and root in folder.parents else ""
+        guess_author = (
+            folder.parent.name if folder.parent != root and root in folder.parents else ""
+        )
     elif folder != root:  # Author/Title.epub
         guess_author = folder.name
     description = meta.get("description", "")
-    if not description and folder != root and (folder / "desc.txt").is_file() and _stem(folder) == _stem(book):
+    if (
+        not description
+        and folder != root
+        and (folder / "desc.txt").is_file()
+        and _stem(folder) == _stem(book)
+    ):
         description = (folder / "desc.txt").read_text(errors="ignore").strip()
     return {
         "path": str(book),
@@ -114,7 +123,13 @@ def read_ebook_meta(book: Path, root: Path) -> dict:
 _NARRATOR_KEYS = ("©nrt", "----:com.apple.iTunes:NARRATOR", "TXXX:NARRATOR", "narrator")
 # Where Audiobookshelf and the common taggers keep the series and the book's number in it.
 _SERIES_KEYS = ("----:com.apple.iTunes:SERIES", "TXXX:SERIES", "series", "©mvn", "MVNM")
-_SERIES_PART_KEYS = ("----:com.apple.iTunes:SERIES-PART", "TXXX:SERIES-PART", "series-part", "©mvi", "MVIN")
+_SERIES_PART_KEYS = (
+    "----:com.apple.iTunes:SERIES-PART",
+    "TXXX:SERIES-PART",
+    "series-part",
+    "©mvi",
+    "MVIN",
+)
 
 
 def _raw_tags(f: Path, *key_sets: tuple[str, ...]) -> list[str]:
@@ -170,7 +185,9 @@ def _tags(f: Path) -> dict:
     }
 
 
-_READ_BY = re.compile(r"\s*(?:[,;(\[-]\s*)?\b(?:read|narrated|performed)\s+by\b\s*(.+?)[)\]]?\s*$", re.I)
+_READ_BY = re.compile(
+    r"\s*(?:[,;(\[-]\s*)?\b(?:read|narrated|performed)\s+by\b\s*(.+?)[)\]]?\s*$", re.I
+)
 
 
 def _names(value: str) -> list[str]:
@@ -196,7 +213,10 @@ def pick_people(artist: str, albumartist: str, narrator: str) -> tuple[str, str]
         kept = [n for n in names if n.lower() not in readers]
         if kept:
             return (value if len(kept) == len(names) else ", ".join(kept)), narrator
-    return artist or albumartist, narrator  # only the narrator's name anywhere: a book read by its author
+    return (
+        artist or albumartist,
+        narrator,
+    )  # only the narrator's name anywhere: a book read by its author
 
 
 def _readable(tag: str) -> str:
@@ -211,7 +231,9 @@ def read_meta(book: Path, root: Path) -> dict:
     name = book.stem if book.is_file() else book.name
     title = tags.get("album") or (tags.get("title") if len(files) == 1 else "") or ""
     author, narrator = pick_people(
-        tags.get("artist", ""), tags.get("albumartist", ""), tags.get("narrator") or tags.get("composer") or ""
+        tags.get("artist", ""),
+        tags.get("albumartist", ""),
+        tags.get("narrator") or tags.get("composer") or "",
     )
     if not title or not author:
         guess_author, guess_title = "", name
@@ -239,7 +261,9 @@ def read_meta(book: Path, root: Path) -> dict:
         "format": (files[0].suffix.lstrip(".").upper() if files else ""),
         "single_file": book.is_file(),
         "kind": "audiobook",
-        "series": [{"asin": "", "title": raw["series"], "sequence": raw.get("series_part", "")}] if raw.get("series") else [],
+        "series": [{"asin": "", "title": raw["series"], "sequence": raw.get("series_part", "")}]
+        if raw.get("series")
+        else [],
         "released": raw.get("date", "")[:10],
     }
 
@@ -247,7 +271,9 @@ def read_meta(book: Path, root: Path) -> dict:
 def scan(root: Path) -> list[dict]:
     root = root.resolve()
     audiobooks = find_books(root)
-    found = [read_meta(b, root) for b in audiobooks] + [read_ebook_meta(e, root) for e in find_ebooks(root, audiobooks)]
+    found = [read_meta(b, root) for b in audiobooks] + [
+        read_ebook_meta(e, root) for e in find_ebooks(root, audiobooks)
+    ]
     return sorted(found, key=lambda f: f["path"].lower())
 
 
@@ -295,7 +321,11 @@ def bring_in(src: Path, into: Path, move: bool, report=None, stop=None) -> None:
     Safe to run again after an interruption: files already brought in are skipped.
     `stop` is a threading.Event; set it to stop between files.
     """
-    files = [src] if src.is_file() else [p for p in src.rglob("*") if p.is_file() and not p.name.startswith(".")]
+    files = (
+        [src]
+        if src.is_file()
+        else [p for p in src.rglob("*") if p.is_file() and not p.name.startswith(".")]
+    )
     total = sum(f.stat().st_size for f in files) or 1
     done = 0
     for f in files:
@@ -331,7 +361,9 @@ def embedded_cover(book_dir: Path) -> tuple[bytes, str] | None:
         if "covr" in audio.tags:  # MP4 / M4B
             art = audio.tags["covr"][0]
             return bytes(art), "image/png" if getattr(art, "imageformat", 0) == 14 else "image/jpeg"
-        pics = getattr(audio, "pictures", None) or [v for k, v in audio.tags.items() if k.startswith("APIC")]
+        pics = getattr(audio, "pictures", None) or [
+            v for k, v in audio.tags.items() if k.startswith("APIC")
+        ]
         if pics:
             return pics[0].data, getattr(pics[0], "mime", "") or "image/jpeg"
     return None

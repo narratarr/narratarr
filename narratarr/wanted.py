@@ -22,7 +22,14 @@ from rapidfuzz import fuzz
 
 from . import audible, config, db, downloaders, ebooks, languages, notify
 from .search import clean_title, normalize
-from .sources import CATALOGS, ProwlarrError, TorznabError, ebook_indexers, ebook_torznab, get_source
+from .sources import (
+    CATALOGS,
+    ProwlarrError,
+    TorznabError,
+    ebook_indexers,
+    ebook_torznab,
+    get_source,
+)
 
 log = logging.getLogger("narratarr.wanted")
 
@@ -62,13 +69,25 @@ def match(book: dict, item: dict) -> int:
         a = fuzz.token_set_ratio(author, normalize(item["author"])) if author else 50
     else:  # Prowlarr releases are just a name: "Author - Title (Year) [M4B]"
         text = normalize(item.get("release") or item.get("title") or "")
-        t = fuzz.partial_ratio(title, text) if len(title) >= 4 else fuzz.token_set_ratio(title, text)
+        t = (
+            fuzz.partial_ratio(title, text)
+            if len(title) >= 4
+            else fuzz.token_set_ratio(title, text)
+        )
         surname = author.split()[-1] if author else ""
-        a = 100 if surname and surname in text.split() else fuzz.partial_ratio(author, text) if author else 50
+        a = (
+            100
+            if surname and surname in text.split()
+            else fuzz.partial_ratio(author, text)
+            if author
+            else 50
+        )
     if t < 70:
         return round(t * 0.6)
     score = round(0.7 * t + 0.3 * a)
-    return min(score, 75) if author and a < 75 else score  # the right title by someone else isn't a match
+    return (
+        min(score, 75) if author and a < 75 else score
+    )  # the right title by someone else isn't a match
 
 
 def usable(item: dict, s: config.Settings) -> bool:
@@ -99,16 +118,24 @@ async def find_releases(book: dict) -> list[dict]:
     if kind == "audiobook":
         jobs["librivox"] = get_source("librivox").find(title, author)
     if s.prowlarr_url and s.prowlarr_api_key:
-        jobs["prowlarr"] = (ebook_indexers() if kind == "ebook" else get_source("prowlarr")).search(query)
+        jobs["prowlarr"] = (ebook_indexers() if kind == "ebook" else get_source("prowlarr")).search(
+            query
+        )
     if s.torznab_url and s.torznab_api_key:
-        jobs["torznab"] = (ebook_torznab() if kind == "ebook" else get_source("torznab")).search(query)
+        jobs["torznab"] = (ebook_torznab() if kind == "ebook" else get_source("torznab")).search(
+            query
+        )
     if not jobs:
         return []
     results = await asyncio.gather(*jobs.values(), return_exceptions=True)
     found, errors = [], []
     for name, res in zip(jobs, results):
         if isinstance(res, BaseException):
-            errors.append(str(res) if isinstance(res, (ProwlarrError, TorznabError)) else f"Couldn't search {name}.")
+            errors.append(
+                str(res)
+                if isinstance(res, (ProwlarrError, TorznabError))
+                else f"Couldn't search {name}."
+            )
             continue
         for listing in res.items:
             item = {**listing.to_dict(), "source": name}
@@ -118,7 +145,9 @@ async def find_releases(book: dict) -> list[dict]:
             item["usable"] = usable(item, s)
             # What language it's in, from the source or the release name (the book's own words don't count).
             item["language"] = languages.name(item.get("language")) or languages.detect(
-                item.get("release") or item.get("title") or "", ignore=f"{book['title']} {book['author']}")
+                item.get("release") or item.get("title") or "",
+                ignore=f"{book['title']} {book['author']}",
+            )
             item["language_ok"] = languages.allowed(item["language"], wanted_languages)
             if item["match"] >= 60:
                 found.append(item)
@@ -128,11 +157,17 @@ async def find_releases(book: dict) -> list[dict]:
     return found
 
 
-MAX_FAILED_RETRIES = 2  # releases tried in place of failed ones, per book, before it's left to a person
+MAX_FAILED_RETRIES = (
+    2  # releases tried in place of failed ones, per book, before it's left to a person
+)
 
 
 def info_hash_of(item: dict) -> str:
-    return str(item.get("info_hash") or item.get("infohash") or item.get("infoHash") or "").strip().lower()
+    return (
+        str(item.get("info_hash") or item.get("infohash") or item.get("infoHash") or "")
+        .strip()
+        .lower()
+    )
 
 
 def avoid(book: dict) -> tuple[set[str], set[str]]:
@@ -148,18 +183,27 @@ def failed_release(book: dict, item: dict) -> str | None:
     """Why this release failed for this book before, or None if it didn't."""
     h = info_hash_of(item)
     for f in book.get("failed_releases") or []:
-        if (f.get("url") and f["url"] == item.get("url")) or (h and str(f.get("info_hash") or "").lower() == h):
+        if (f.get("url") and f["url"] == item.get("url")) or (
+            h and str(f.get("info_hash") or "").lower() == h
+        ):
             return f.get("error") or "It failed to download before."
     return None
 
 
-def best(found: list[dict], skip: list[str] | set[str] | tuple = (), skip_hashes: set[str] | tuple = ()) -> dict | None:
+def best(
+    found: list[dict], skip: list[str] | set[str] | tuple = (), skip_hashes: set[str] | tuple = ()
+) -> dict | None:
     """The release to take on our own: usable, in a wanted language, a sure match, not turned down or
     failed before."""
     for item in found:
         if item["url"] in skip or (skip_hashes and info_hash_of(item) in skip_hashes):
             continue
-        if item["usable"] and item.get("language_ok", True) and item["match"] >= AUTO_MATCH and item.get("seeders") != 0:
+        if (
+            item["usable"]
+            and item.get("language_ok", True)
+            and item["match"] >= AUTO_MATCH
+            and item.get("seeders") != 0
+        ):
             return item
     return None
 
@@ -171,12 +215,29 @@ async def grab(book_id: int, url: str, source_name: str, status: str = "queued")
     d = await src.details(url)
     db.update(
         book_id,
-        source=src.name, release_url=url, protocol=d.protocol, download_url=d.download_url, info_hash=d.info_hash,
-        trackers=d.trackers, files=d.files, format=d.format or book["format"], bitrate=d.bitrate,
-        size=d.size or book["size"], indexer=d.indexer, release=d.release or d.title,
-        description=book["description"] or d.description, cover_url=book["cover_url"] or d.cover_url,
-        status=status, error="", detail="", progress=0, client_job_id="", download_client="", rd_torrent_id="",
-        search_note="", found_by_search=0,
+        source=src.name,
+        release_url=url,
+        protocol=d.protocol,
+        download_url=d.download_url,
+        info_hash=d.info_hash,
+        trackers=d.trackers,
+        files=d.files,
+        format=d.format or book["format"],
+        bitrate=d.bitrate,
+        size=d.size or book["size"],
+        indexer=d.indexer,
+        release=d.release or d.title,
+        description=book["description"] or d.description,
+        cover_url=book["cover_url"] or d.cover_url,
+        status=status,
+        error="",
+        detail="",
+        progress=0,
+        client_job_id="",
+        download_client="",
+        rd_torrent_id="",
+        search_note="",
+        found_by_search=0,
     )
     return db.get(book_id)
 
@@ -186,12 +247,28 @@ def keep_looking(book: dict) -> dict:
     remembered, so the next search doesn't pick it again."""
     source = next((n for n in CATALOGS if get_source(n).owns(book["source_url"].split("#")[0])), "")
     if not source:
-        raise ValueError("This book didn't come from a catalog, so there's nothing to go back to looking for.")
+        raise ValueError(
+            "This book didn't come from a catalog, so there's nothing to go back to looking for."
+        )
     skipped = list(dict.fromkeys([*(book.get("skipped_releases") or []), book["release_url"]]))
     db.update(
-        book["id"], source=source, status="wanted", release_url="", protocol="", download_url="", info_hash="",
-        trackers=[], files=[], indexer="", release="", found_by_search=0, skipped_releases=[u for u in skipped if u],
-        error="", detail="", search_note="Turned down a release. Still looking.", last_searched=time.time(),
+        book["id"],
+        source=source,
+        status="wanted",
+        release_url="",
+        protocol="",
+        download_url="",
+        info_hash="",
+        trackers=[],
+        files=[],
+        indexer="",
+        release="",
+        found_by_search=0,
+        skipped_releases=[u for u in skipped if u],
+        error="",
+        detail="",
+        search_note="Turned down a release. Still looking.",
+        last_searched=time.time(),
     )
     return db.get(book["id"])
 
@@ -211,14 +288,24 @@ async def search_and_grab(book: dict, hold: bool = False) -> dict | None:
     if not pick:
         close = [f for f in found if f["match"] >= AUTO_MATCH]
         note = (
-            "Found matches, but none your download clients can fetch." if close
-            else f"Nothing that matches yet ({len(found)} near misses)." if found else "Nothing found yet."
+            "Found matches, but none your download clients can fetch."
+            if close
+            else f"Nothing that matches yet ({len(found)} near misses)."
+            if found
+            else "Nothing found yet."
         )
-        if not found and kind_of(book) == "ebook" and (s := config.load()).prowlarr_url and s.prowlarr_api_key:
+        if (
+            not found
+            and kind_of(book) == "ebook"
+            and (s := config.load()).prowlarr_url
+            and s.prowlarr_api_key
+        ):
             indexers = ebook_indexers()
             if await indexers.offering() == []:  # say why, rather than "nothing found" forever
-                note = (f"None of your Prowlarr indexers offer ebooks (category {', '.join(indexers.cats)}). "
-                        "Add one that does in Prowlarr.")
+                note = (
+                    f"None of your Prowlarr indexers offer ebooks (category {', '.join(indexers.cats)}). "
+                    "Add one that does in Prowlarr."
+                )
         db.update(book["id"], search_note=note)
         return None
     if hold:
@@ -241,8 +328,11 @@ def due_for_search() -> list[dict]:
     s = config.load()
     cutoff = time.time() - s.auto_search_hours * 3600
     due = [
-        b for b in db.list_books()
-        if b["status"] == "wanted" and b["source"] in CATALOGS and _released(b)
+        b
+        for b in db.list_books()
+        if b["status"] == "wanted"
+        and b["source"] in CATALOGS
+        and _released(b)
         and (b["last_searched"] or 0) < cutoff
     ]
     due.sort(key=lambda b: b["last_searched"] or 0)
@@ -252,7 +342,10 @@ def due_for_search() -> list[dict]:
 async def auto_search() -> int:
     """One round of automatic searching. Returns how many books were grabbed (or held for approval)."""
     s = config.load()
-    if not (s.auto_search and ((s.prowlarr_url and s.prowlarr_api_key) or (s.torznab_url and s.torznab_api_key))):
+    if not (
+        s.auto_search
+        and ((s.prowlarr_url and s.prowlarr_api_key) or (s.torznab_url and s.torznab_api_key))
+    ):
         return 0
     grabbed = 0
     for b in due_for_search():
@@ -272,7 +365,8 @@ async def auto_search() -> int:
 # title that merely has a number in it ("Catch-22 - A Novel") is never split.
 _SERIES_FIRST = re.compile(
     r"^(?P<series>[^#]+?)\s*(?:#\s*|,?\s+(?:book|bk\.?|vol\.?|volume)\s*)(?P<number>\d+(?:\.\d+)?)\s*[-–—:]\s*(?P<title>\S.*)$",
-    re.I)
+    re.I,
+)
 
 
 def series_first(title: str) -> tuple[str, str, str] | None:
@@ -285,7 +379,10 @@ def series_first(title: str) -> tuple[str, str, str] | None:
 
 def _in_series(match: dict, series: str) -> bool:
     want = normalize(audible.series_name(series))
-    return any(normalize(audible.series_name(s.get("title") or "")) == want for s in match.get("series") or [])
+    return any(
+        normalize(audible.series_name(s.get("title") or "")) == want
+        for s in match.get("series") or []
+    )
 
 
 async def audible_match(book: dict) -> dict | None:
@@ -296,18 +393,30 @@ async def audible_match(book: dict) -> dict | None:
     title alone, and then Audible's book has to be in that series too. The match says so in
     `series_first`, the book's name without the series, which the series fields now hold."""
     if book.get("asin"):
-        return await audible.book(book["asin"], r=audible.region_from_url(book.get("source_url") or "") or None)
+        return await audible.book(
+            book["asin"], r=audible.region_from_url(book.get("source_url") or "") or None
+        )
     title, author = main_title(book.get("title") or ""), first_author(book.get("author") or "")
     if not title or not author:
         return None
     found, _ = await audible.search_books(f"{title} {author}")
-    hit = next((b for b in found if _titles_match(b["title"], b["author"], book["title"], book["author"])), None)
+    hit = next(
+        (b for b in found if _titles_match(b["title"], b["author"], book["title"], book["author"])),
+        None,
+    )
     if hit or not (split := series_first(book.get("title") or "")):
         return hit
     series, _number, alone = split
     found, _ = await audible.search_books(f"{main_title(alone)} {author}")
-    hit = next((b for b in found if _titles_match(b["title"], b["author"], alone, book["author"])
-                and _in_series(b, series)), None)
+    hit = next(
+        (
+            b
+            for b in found
+            if _titles_match(b["title"], b["author"], alone, book["author"])
+            and _in_series(b, series)
+        ),
+        None,
+    )
     return {**hit, "series_first": alone} if hit else None
 
 
@@ -325,8 +434,11 @@ def details_due(book: dict) -> bool:
     if book.get("status") != "completed" or not missing_details(book):
         return False
     checked = book.get("details_checked")
-    return not checked or (checked < SERIES_FIRST_SINCE and not book.get("series")
-                           and series_first(book.get("title") or "") is not None)
+    return not checked or (
+        checked < SERIES_FIRST_SINCE
+        and not book.get("series")
+        and series_first(book.get("title") or "") is not None
+    )
 
 
 def _parts(path: str) -> tuple[str, ...]:
@@ -342,25 +454,34 @@ def abs_match(book: dict, items: list[dict], library_dir: str) -> dict | None:
         if kind_of(book) == "ebook":
             folder = folder[:-1]
         root = _parts(str(Path(library_dir).expanduser()))
-        inside = folder[:len(root)] == root and len(folder) > len(root)
-        rel = folder[len(root):] if inside else folder
+        inside = folder[: len(root)] == root and len(folder) > len(root)
+        rel = folder[len(root) :] if inside else folder
         for item in items:
             theirs = _parts(item.get("rel") or "")
             # Inside the library the whole relative path must agree (less a leading Audiobooks/ or Ebooks/
             # from {kind}, when Audiobookshelf watches that folder); outside it, at least author/title.
             if inside:
-                hit = theirs and (theirs == rel or (len(rel) > 2 and rel[0] in ("Audiobooks", "Ebooks")
-                                                   and theirs == rel[1:]))
+                hit = theirs and (
+                    theirs == rel
+                    or (len(rel) > 2 and rel[0] in ("Audiobooks", "Ebooks") and theirs == rel[1:])
+                )
             else:
-                hit = len(theirs) >= 2 and rel[-len(theirs):] == theirs
+                hit = len(theirs) >= 2 and rel[-len(theirs) :] == theirs
             if hit:
                 return item
     if book.get("asin"):
         hit = next((i for i in items if i.get("asin") == book["asin"]), None)
         if hit:
             return hit
-    return next((i for i in items if i.get("title") and _titles_match(i["title"], i.get("author", ""),
-                                                                  book["title"], book["author"])), None)
+    return next(
+        (
+            i
+            for i in items
+            if i.get("title")
+            and _titles_match(i["title"], i.get("author", ""), book["title"], book["author"])
+        ),
+        None,
+    )
 
 
 def fill_from_audiobookshelf(book: dict, items: list[dict], library_dir: str) -> list[str]:
@@ -392,7 +513,9 @@ async def fill_from_audible(book: dict) -> list[str]:
         return []
     changes: dict = {}
     if not book.get("series") and match.get("series"):
-        changes["series"] = [{**s, "title": audible.series_name(s["title"])} for s in match["series"][:1]]
+        changes["series"] = [
+            {**s, "title": audible.series_name(s["title"])} for s in match["series"][:1]
+        ]
     if not book.get("narrators") and match.get("narrators"):
         changes["narrators"] = match["narrators"][:4]
     if not book.get("released") and match.get("released"):
@@ -400,7 +523,9 @@ async def fill_from_audible(book: dict) -> list[str]:
     if not book.get("asin") and match.get("asin"):
         changes["asin"] = match["asin"]
     if match.get("series_first") and (book.get("series") or changes.get("series")):
-        changes["title"] = match["series_first"]  # the series is in its own fields now, not the title
+        changes["title"] = match[
+            "series_first"
+        ]  # the series is in its own fields now, not the title
     if changes:
         db.update(book["id"], **changes)
     return list(changes)
@@ -418,12 +543,15 @@ def _titles_match(a_title: str, a_author: str, b_title: str, b_author: str) -> b
     return a == b or a == normalize(main_title(b_title)) or normalize(main_title(a_title)) == b
 
 
-def in_library(asin: str, title: str, author: str, books: list[dict] | None = None,
-               kind: str = "audiobook") -> dict | None:
+def in_library(
+    asin: str, title: str, author: str, books: list[dict] | None = None, kind: str = "audiobook"
+) -> dict | None:
     """The library's copy of a book in one format (any edition, from any source), if it has one."""
     for b in books if books is not None else db.list_books():
-        if kind_of(b) == kind and ((asin and b.get("asin") == asin)
-                                   or _titles_match(title, author, b["title"], b["author"])):
+        if kind_of(b) == kind and (
+            (asin and b.get("asin") == asin)
+            or _titles_match(title, author, b["title"], b["author"])
+        ):
             return b
     return None
 
@@ -441,8 +569,10 @@ def in_owned(b: dict, index: tuple[set, dict]) -> bool:
     by_asin, by_author = index
     if b.get("asin") and b["asin"] in by_asin:
         return True
-    return any(_titles_match(b["title"], b["author"], o["title"], o["author"])
-               for o in by_author.get(normalize(first_author(b.get("author") or "")), []))
+    return any(
+        _titles_match(b["title"], b["author"], o["title"], o["author"])
+        for o in by_author.get(normalize(first_author(b.get("author") or "")), [])
+    )
 
 
 # The same book in its other format shares a folder with it, so this is stricter than in_library:
@@ -487,8 +617,11 @@ def companions(books: list[dict]) -> dict[int, dict]:
         other = "ebook" if kind_of(b) == "audiobook" else "audiobook"
         hit = by_asin.get((other, b["asin"])) if b.get("asin") else None
         if hit is None:
-            near = (by_full.get((other, *_full_key(b)), []) + by_main.get((other, *_full_key(b)), [])
-                    + by_full.get((other, *_main_key(b)), []))
+            near = (
+                by_full.get((other, *_full_key(b)), [])
+                + by_main.get((other, *_full_key(b)), [])
+                + by_full.get((other, *_main_key(b)), [])
+            )
             hit = next((c for c in near if same_book(b, c)), None)
         if hit:
             found[b["id"]] = hit
@@ -500,23 +633,38 @@ def url_for(url: str, kind: str) -> str:
     return url if kind == "audiobook" else f"{url}#ebook"
 
 
-def add_wanted(b: dict, kind: str = "audiobook", source: str = "audible", status: str = "wanted") -> dict | None:
+def add_wanted(
+    b: dict, kind: str = "audiobook", source: str = "audible", status: str = "wanted"
+) -> dict | None:
     """Add a catalog book to Wanted in one format, unless the library already has it in that format."""
     url = url_for(b["url"], kind)
     if in_library(b.get("asin") or "", b["title"], b["author"], kind=kind) or db.get_by_url(url):
         return None
     audio = kind == "audiobook"
-    return db.insert({
-        "source": source, "source_url": url, "asin": b.get("asin") or "", "title": b["title"], "author": b["author"],
-        "narrators": b.get("narrators") or [] if audio else [], "cover_url": b.get("cover_url") or "",
-        "description": b.get("description") or "", "language": b.get("language") or "",
-        "series": b.get("series") or [], "released": b.get("released") or "", "status": status, "kind": kind,
-        # Audible's runtime is the audiobook's; Open Library's page count is the book's.
-        "length": b.get("length") or "" if audio == (source == "audible") else "",
-    })
+    return db.insert(
+        {
+            "source": source,
+            "source_url": url,
+            "asin": b.get("asin") or "",
+            "title": b["title"],
+            "author": b["author"],
+            "narrators": b.get("narrators") or [] if audio else [],
+            "cover_url": b.get("cover_url") or "",
+            "description": b.get("description") or "",
+            "language": b.get("language") or "",
+            "series": b.get("series") or [],
+            "released": b.get("released") or "",
+            "status": status,
+            "kind": kind,
+            # Audible's runtime is the audiobook's; Open Library's page count is the book's.
+            "length": b.get("length") or "" if audio == (source == "audible") else "",
+        }
+    )
 
 
-HARDCOVER_PER_SYNC = 25  # new shelf books matched per check, so a big first check goes easy on Audible
+HARDCOVER_PER_SYNC = (
+    25  # new shelf books matched per check, so a big first check goes easy on Audible
+)
 HARDCOVER_RETRY_DAYS = 30  # a shelf book Audible didn't have is looked up again after this long
 
 
@@ -527,8 +675,12 @@ async def _hardcover_match(item: dict) -> dict | None:
     if not (item["title"] and item["author"]):
         return None
     if item["asin"]:
-        hit = await audible_match({"title": item["title"], "author": item["author"], "asin": item["asin"]})
-        if hit and _titles_match(hit.get("title") or "", hit.get("author") or "", item["title"], item["author"]):
+        hit = await audible_match(
+            {"title": item["title"], "author": item["author"], "asin": item["asin"]}
+        )
+        if hit and _titles_match(
+            hit.get("title") or "", hit.get("author") or "", item["title"], item["author"]
+        ):
             return hit
     return await audible_match({"title": item["title"], "author": item["author"], "asin": ""})
 
@@ -547,9 +699,15 @@ async def sync_hardcover(transport=None, most: int = HARDCOVER_PER_SYNC) -> dict
     async with lock:
         # Audible adds books all the time: one it didn't have gets another look after a month.
         db.hardcover_forget("not_found", older_than=time.time() - HARDCOVER_RETRY_DAYS * 86400)
-        new, more = await hardcover.want_to_read(transport, skip=db.hardcover_seen_ids(), enough=most)
+        new, more = await hardcover.want_to_read(
+            transport, skip=db.hardcover_seen_ids(), enough=most
+        )
         fmt = config.load().hardcover_format
-        kinds = ("audiobook", "ebook") if fmt == "both" else (fmt if fmt in ("audiobook", "ebook") else "audiobook",)
+        kinds = (
+            ("audiobook", "ebook")
+            if fmt == "both"
+            else (fmt if fmt in ("audiobook", "ebook") else "audiobook",)
+        )
         counts = {"added": 0, "in_library": 0, "not_found": 0}
         added_ids: list[int] = []
         for item in new:
@@ -564,7 +722,9 @@ async def sync_hardcover(transport=None, most: int = HARDCOVER_PER_SYNC) -> dict
                         added_ids.append(row["id"])
                         book_id = book_id or row["id"]
                     else:
-                        have = in_library(match.get("asin") or "", match["title"], match["author"], kind=kind)
+                        have = in_library(
+                            match.get("asin") or "", match["title"], match["author"], kind=kind
+                        )
                         book_id = book_id or (have or {}).get("id")
             db.hardcover_record(item["id"], item["title"], item["author"], outcome, book_id)
             counts[outcome] += 1
@@ -582,15 +742,25 @@ def want_other_format(book: dict, status: str = "wanted") -> tuple[dict, bool]:
     elif book.get("asin"):
         source, url = "audible", audible.book_url(book["asin"])
     else:  # a book from a release or your own files: Open Library stands in as its catalog
-        source, url = "openlibrary", "https://openlibrary.org/search?" + urlencode(
-            {"title": main_title(book["title"]), "author": first_author(book["author"])})
-    added = add_wanted({**book, "url": url, "length": book["length"] if kind_of(book) == kind else ""}, kind, source,
-                       status)
+        source, url = (
+            "openlibrary",
+            "https://openlibrary.org/search?"
+            + urlencode(
+                {"title": main_title(book["title"]), "author": first_author(book["author"])}
+            ),
+        )
+    added = add_wanted(
+        {**book, "url": url, "length": book["length"] if kind_of(book) == kind else ""},
+        kind,
+        source,
+        status,
+    )
     if added:
         return added, True
     # Already there: under this link, or as the same book in a form in_library recognises.
-    return db.get_by_url(url_for(url, kind)) or in_library(book.get("asin") or "", book["title"], book["author"],
-                                                           kind=kind), False
+    return db.get_by_url(url_for(url, kind)) or in_library(
+        book.get("asin") or "", book["title"], book["author"], kind=kind
+    ), False
 
 
 # ---- following ----------------------------------------------------------------
@@ -605,7 +775,9 @@ async def _books_for(kind: str, asin: str, name: str = "") -> tuple[str, str, li
     return title or name, (books[0]["cover_url"] if books else ""), books
 
 
-async def follow(kind: str, asin: str, name: str = "", add_existing: bool = False) -> tuple[dict, int]:
+async def follow(
+    kind: str, asin: str, name: str = "", add_existing: bool = False
+) -> tuple[dict, int]:
     """Start following. Upcoming books always go to Wanted; existing ones only if asked."""
     name, image, books = await _books_for(kind, asin, name)
     f = db.add_follow(kind, asin, name, image, [b["asin"] for b in books])
@@ -618,8 +790,12 @@ async def refresh(f: dict) -> int:
     _, image, books = await _books_for(f["kind"], f["asin"], f["name"])
     known = set(f["known"])
     added = sum(1 for b in books if b["asin"] not in known and add_wanted(b))
-    db.update_follow(f["id"], known=sorted(known | {b["asin"] for b in books}), checked_at=time.time(),
-                     image=image or f["image"])
+    db.update_follow(
+        f["id"],
+        known=sorted(known | {b["asin"] for b in books}),
+        checked_at=time.time(),
+        image=image or f["image"],
+    )
     return added
 
 
@@ -638,7 +814,11 @@ def follow_counts(f: dict, books: list[dict]) -> dict:
     books = [b for b in books if kind_of(b) == "audiobook"]  # following is for audiobooks
     if f["kind"] == "author":
         name = normalize(f["name"])
-        mine = [b for b in books if name in [normalize(a) for a in re.split(r",|&| and ", b["author"] or "")]]
+        mine = [
+            b
+            for b in books
+            if name in [normalize(a) for a in re.split(r",|&| and ", b["author"] or "")]
+        ]
     else:
         mine = [b for b in books if any(s.get("asin") == f["asin"] for s in b.get("series") or [])]
     newest = sorted(mine, key=lambda b: b.get("added_at") or 0, reverse=True)
@@ -648,7 +828,13 @@ def follow_counts(f: dict, books: list[dict]) -> dict:
         "downloading": sum(b["status"] in db.ACTIVE for b in mine),
         "requested": sum(b["status"] == "requested" for b in mine),
         # A book of theirs that turned up in the last month, for a "New book" tag.
-        "new": any(time.time() - (b.get("added_at") or 0) < 30 * 86400 and b["source"] in CATALOGS for b in mine),
+        "new": any(
+            time.time() - (b.get("added_at") or 0) < 30 * 86400 and b["source"] in CATALOGS
+            for b in mine
+        ),
         # Up to three of their covers, newest first, for the series cards.
-        "covers": [f"/api/library/{b['id']}/cover" if b.get("path") else b.get("cover_url") or "" for b in newest[:3]],
+        "covers": [
+            f"/api/library/{b['id']}/cover" if b.get("path") else b.get("cover_url") or ""
+            for b in newest[:3]
+        ],
     }

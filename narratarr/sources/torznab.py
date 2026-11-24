@@ -29,7 +29,8 @@ import httpx
 from .. import reach
 from ..cache import Cache
 from .base import Category, Details, Page
-from .prowlarr import ProwlarrError, _BITRATE_RE, _FORMAT_RE, _fmt_size, fetch as prowlarr_fetch, parse_magnet, tidy_title
+from .prowlarr import _BITRATE_RE, _FORMAT_RE, ProwlarrError, _fmt_size, parse_magnet, tidy_title
+from .prowlarr import fetch as prowlarr_fetch
 
 NS = "{http://torznab.com/schemas/2015/feed}"
 TIMEOUT = httpx.Timeout(90, connect=8)  # a Jackett "all indexers" search waits for every one
@@ -50,7 +51,11 @@ def strip_key(url: str) -> str:
     if not url or url.startswith("magnet:"):
         return url
     u = urlparse(url)
-    kept = [(k, v) for k, v in parse_qsl(u.query, keep_blank_values=True) if not k.lower().endswith("apikey")]
+    kept = [
+        (k, v)
+        for k, v in parse_qsl(u.query, keep_blank_values=True)
+        if not k.lower().endswith("apikey")
+    ]
     return urlunparse(u._replace(query=urlencode(kept)))
 
 
@@ -66,7 +71,11 @@ def with_key(url: str, base: str, api_key: str) -> str:
     u, b = urlparse(url), urlparse(base)
     if (u.scheme, u.netloc) != (b.scheme, b.netloc):
         return url
-    query = [*parse_qsl(u.query, keep_blank_values=True), ("apikey", api_key), ("jackett_apikey", api_key)]
+    query = [
+        *parse_qsl(u.query, keep_blank_values=True),
+        ("apikey", api_key),
+        ("jackett_apikey", api_key),
+    ]
     return urlunparse(u._replace(query=urlencode(query)))
 
 
@@ -139,7 +148,9 @@ def to_details(r: dict) -> Details:
         posted=r.get("posted") or "",
         indexer=r.get("indexer") or "",
         protocol=r.get("protocol") or "",
-        seeders=int(seeders) if r.get("protocol") == "torrent" and str(seeders or "").isdigit() else None,
+        seeders=int(seeders)
+        if r.get("protocol") == "torrent" and str(seeders or "").isdigit()
+        else None,
         release=release,
         info_hash=r.get("infohash") or "",
         trackers=trackers,
@@ -157,7 +168,9 @@ def remember(r: dict) -> None:
         _releases.popitem(last=False)
 
 
-async def fetch(url: str, base: str, api_key: str, transport: httpx.AsyncBaseTransport | None = None):
+async def fetch(
+    url: str, base: str, api_key: str, transport: httpx.AsyncBaseTransport | None = None
+):
     """Download a release: ("magnet", uri) | ("torrent", bytes) | ("nzb", bytes).
 
     The key is added here, and Prowlarr's fetch does the rest with an empty base so it cannot add a
@@ -166,8 +179,7 @@ async def fetch(url: str, base: str, api_key: str, transport: httpx.AsyncBaseTra
     """
     if url.startswith("magnet:"):
         return "magnet", url
-    return await prowlarr_fetch(with_key(url, base, api_key), "", "", transport,
-                                who="your indexer")
+    return await prowlarr_fetch(with_key(url, base, api_key), "", "", transport, who="your indexer")
 
 
 class Torznab:
@@ -177,8 +189,13 @@ class Torznab:
     default_label = "Latest from your indexers"
     delivery = "indexer"
 
-    def __init__(self, url: str, api_key: str, categories: str = "3030",
-                 client: httpx.AsyncClient | None = None):
+    def __init__(
+        self,
+        url: str,
+        api_key: str,
+        categories: str = "3030",
+        client: httpx.AsyncClient | None = None,
+    ):
         self.base = url.rstrip("/")
         self.api_key = api_key
         self.cats = [c for c in re.split(r"[,\s]+", categories or "") if c.isdigit()] or ["3030"]
@@ -233,9 +250,13 @@ class Torznab:
                 async with httpx.AsyncClient(timeout=TIMEOUT) as client:
                     resp = await client.get(self.base, params=params)
         except httpx.TimeoutException:
-            raise TorznabError("Your indexer took too long to answer. One of its sources may be slow or down.")
+            raise TorznabError(
+                "Your indexer took too long to answer. One of its sources may be slow or down."
+            )
         except httpx.HTTPError as e:
-            raise TorznabError(reach.explain(e, self.base, "the indexer", "http://192.168.1.10:9117")) from e
+            raise TorznabError(
+                reach.explain(e, self.base, "the indexer", "http://192.168.1.10:9117")
+            ) from e
         if resp.status_code in (401, 403):
             raise TorznabError("Your indexer rejected the API key. Check it in Settings.")
         body = resp.content
@@ -244,9 +265,13 @@ class Torznab:
         except ET.ParseError:
             if resp.status_code >= 400:
                 raise TorznabError(f"Your indexer returned an error ({resp.status_code}).")
-            raise TorznabError("That address doesn't look like a Torznab indexer. Check it in Settings.")
+            raise TorznabError(
+                "That address doesn't look like a Torznab indexer. Check it in Settings."
+            )
         if root.tag == "error":  # Torznab reports a bad search as an XML <error>, often on a 200
-            raise TorznabError(f"Your indexer refused the search: {root.get('description') or 'no reason given'}.")
+            raise TorznabError(
+                f"Your indexer refused the search: {root.get('description') or 'no reason given'}."
+            )
         if resp.status_code >= 400:
             raise TorznabError(f"Your indexer returned an error ({resp.status_code}).")
         return root
@@ -260,10 +285,13 @@ class Torznab:
             params.append(("apikey", self.api_key))
             root = await self._get(params)
             found = [
-                r for r in (_parse_item(i) for i in root.findall("./channel/item"))
+                r
+                for r in (_parse_item(i) for i in root.findall("./channel/item"))
                 if r["link"] or r["infohash"]
             ]
-            if found:  # an empty answer may just mean a source was briefly down; ask again next time
+            if (
+                found
+            ):  # an empty answer may just mean a source was briefly down; ask again next time
                 _search_cache.set(key, found)
         for r in found:
             remember(r)

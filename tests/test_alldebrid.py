@@ -18,7 +18,9 @@ def ok(data):
 
 
 def err(code, message="nope", status=200):
-    return httpx.Response(status, json={"status": "error", "error": {"code": code, "message": message}})
+    return httpx.Response(
+        status, json={"status": "error", "error": {"code": code, "message": message}}
+    )
 
 
 def form(request: httpx.Request) -> dict:
@@ -40,23 +42,52 @@ class FakeAD:
     def __call__(self, request: httpx.Request) -> httpx.Response:
         path, host = request.url.path, request.url.host
         if host == "covers.example":
-            return httpx.Response(200, content=b"\xff\xd8jpeg", headers={"content-type": "image/jpeg"})
+            return httpx.Response(
+                200, content=b"\xff\xd8jpeg", headers={"content-type": "image/jpeg"}
+            )
         if host == "dl.example":
             return httpx.Response(200, content=self.files[path.rsplit("/", 1)[-1]])
         assert request.headers["authorization"] == "Bearer ad-key"
         if path == "/v4/magnet/upload":
             if self.upload_error:
-                return ok({"magnets": [{"magnet": "x", "error": {"code": self.upload_error, "message": "no"}}]})
+                return ok(
+                    {
+                        "magnets": [
+                            {"magnet": "x", "error": {"code": self.upload_error, "message": "no"}}
+                        ]
+                    }
+                )
             self.magnet = form(request)["magnets[]"]
-            return ok({"magnets": [{"magnet": self.magnet, "hash": HASH, "id": 77, "ready": False}]})
+            return ok(
+                {"magnets": [{"magnet": self.magnet, "hash": HASH, "id": 77, "ready": False}]}
+            )
         if path == "/v4.1/magnet/status":
             assert form(request)["id"] == "77"
             self.status_calls += 1
             if self.status_calls == 1:
-                return ok({"magnets": {"id": 77, "statusCode": 1, "size": 200, "downloaded": 50, "downloadSpeed": 900, "seeders": 3}})
+                return ok(
+                    {
+                        "magnets": {
+                            "id": 77,
+                            "statusCode": 1,
+                            "size": 200,
+                            "downloaded": 50,
+                            "downloadSpeed": 900,
+                            "seeders": 3,
+                        }
+                    }
+                )
             return ok({"magnets": [{"id": 77, "statusCode": self.final_code, "status": "Ready"}]})
         if path == "/v4/magnet/files":
-            tree = [{"n": "Dune", "e": [{"n": name, "s": len(data), "l": f"https://alldebrid.com/f/{name}"} for name, data in self.files.items()]}]
+            tree = [
+                {
+                    "n": "Dune",
+                    "e": [
+                        {"n": name, "s": len(data), "l": f"https://alldebrid.com/f/{name}"}
+                        for name, data in self.files.items()
+                    ],
+                }
+            ]
             return ok({"magnets": [{"id": "77", "files": tree}]})
         if path == "/v4/link/unlock":
             name = form(request)["link"].rsplit("/", 1)[-1]
@@ -102,7 +133,9 @@ async def test_full_pipeline_through_alldebrid(isolated_data):
     done = db.get(book["id"])
     assert done["status"] == "completed", done["error"]
     dest = Path(done["path"])
-    assert (dest / "01.mp3").read_bytes() == b"one" * 100  # the one folder everything sat in is dropped
+    assert (
+        dest / "01.mp3"
+    ).read_bytes() == b"one" * 100  # the one folder everything sat in is dropped
     assert (dest / "02.mp3").read_bytes() == b"two" * 100
     assert HASH in fake.magnet and fake.deleted
     assert done["rd_torrent_id"] == ""
@@ -125,7 +158,9 @@ async def test_kept_job_is_tagged_and_resumed_only_on_alldebrid(isolated_data):
 
 async def test_failed_magnet_says_why(isolated_data):
     book = make_book()
-    await Worker(transport=httpx.MockTransport(FakeAD({"x.mp3": b""}, final_code=15)))._run(book["id"])
+    await Worker(transport=httpx.MockTransport(FakeAD({"x.mp3": b""}, final_code=15)))._run(
+        book["id"]
+    )
     failed = db.get(book["id"])
     assert failed["status"] == "failed"
     assert "no one is sharing it" in failed["error"]
@@ -133,7 +168,11 @@ async def test_failed_magnet_says_why(isolated_data):
 
 @pytest.mark.parametrize(
     ("code", "words"),
-    [("MAGNET_NO_SERVER", "data centre or VPN"), ("MAGNET_TOO_MANY_ACTIVE", "30 active"), ("MAGNET_MUST_BE_PREMIUM", "premium")],
+    [
+        ("MAGNET_NO_SERVER", "data centre or VPN"),
+        ("MAGNET_TOO_MANY_ACTIVE", "30 active"),
+        ("MAGNET_MUST_BE_PREMIUM", "premium"),
+    ],
 )
 async def test_upload_errors_are_plain_words(isolated_data, code, words):
     book = make_book()
@@ -145,16 +184,23 @@ async def test_delayed_links_are_waited_for():
     fake = FakeAD({"Dune.m4b": b"audio"}, delayed=True)
     async with AllDebrid("ad-key", transport=httpx.MockTransport(fake)) as ad:
         files = await ad.direct_files("77")
-    assert files == [{"filename": "Dune.m4b", "filesize": 5, "download": "https://dl.example/Dune.m4b"}]
+    assert files == [
+        {"filename": "Dune.m4b", "filesize": 5, "download": "https://dl.example/Dune.m4b"}
+    ]
 
 
 async def test_new_location_and_bad_key_messages():
-    for code, words in (("AUTH_BLOCKED", "emailed you a link"), ("AUTH_BAD_APIKEY", "rejected the API key")):
+    for code, words in (
+        ("AUTH_BLOCKED", "emailed you a link"),
+        ("AUTH_BAD_APIKEY", "rejected the API key"),
+    ):
         transport = httpx.MockTransport(lambda r, code=code: err(code))
         async with AllDebrid("ad-key", transport=transport) as ad:
             with pytest.raises(AllDebridError, match=words):
                 await ad.user()
-    async with AllDebrid("ad-key", transport=httpx.MockTransport(lambda r: httpx.Response(429, text="slow down"))) as ad:
+    async with AllDebrid(
+        "ad-key", transport=httpx.MockTransport(lambda r: httpx.Response(429, text="slow down"))
+    ) as ad:
         with pytest.raises(AllDebridError, match="busy"):
             await ad.user()
 
@@ -163,8 +209,12 @@ async def test_missing_key_fails_with_helpful_message(isolated_data):
     # AllDebrid has to be the only candidate, or a configured entry wins the fall-through and this
     # stops testing what it says it tests. The list is set directly for that reason: the flat mirror
     # leaves earlier entries in place, so a stale Real-Debrid could otherwise take the grab.
-    config.update({"clients": [{"id": "alldebrid", "type": "alldebrid", "api_key": ""}],
-                   "default_client": "alldebrid"})
+    config.update(
+        {
+            "clients": [{"id": "alldebrid", "type": "alldebrid", "api_key": ""}],
+            "default_client": "alldebrid",
+        }
+    )
     book = make_book()
     await Worker(transport=httpx.MockTransport(FakeAD({})))._run(book["id"])
     # An unconfigured client is never handed the release any more (issue #12), so the error comes
@@ -174,11 +224,16 @@ async def test_missing_key_fails_with_helpful_message(isolated_data):
 
 
 def test_file_names_keep_sub_folders():
-    tree = [{"n": "Book", "e": [
-        {"n": "CD1", "e": [{"n": "01.mp3", "s": 1, "l": "https://alldebrid.com/f/a"}]},
-        {"n": "CD2", "e": [{"n": "01.mp3", "s": 2, "l": "https://alldebrid.com/f/b"}]},
-        {"n": "empty", "e": []},
-    ]}]
+    tree = [
+        {
+            "n": "Book",
+            "e": [
+                {"n": "CD1", "e": [{"n": "01.mp3", "s": 1, "l": "https://alldebrid.com/f/a"}]},
+                {"n": "CD2", "e": [{"n": "01.mp3", "s": 2, "l": "https://alldebrid.com/f/b"}]},
+                {"n": "empty", "e": []},
+            ],
+        }
+    ]
     entries = flatten(tree)
     assert [size for _, size, _ in entries] == [1, 2]
     assert file_names([p for p, _, _ in entries]) == ["CD1 - 01.mp3", "CD2 - 01.mp3"]
@@ -202,8 +257,15 @@ class FakePin:
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         if request.url.path == "/v4.1/pin/get":
-            return ok({"pin": "K7Q2", "check": "secret-check", "expires_in": 600, "user_url": self.user_url,
-                       "base_url": "https://alldebrid.com/pin/"})
+            return ok(
+                {
+                    "pin": "K7Q2",
+                    "check": "secret-check",
+                    "expires_in": 600,
+                    "user_url": self.user_url,
+                    "base_url": "https://alldebrid.com/pin/",
+                }
+            )
         if request.url.path == "/v4/pin/check":
             assert form(request) == {"pin": "K7Q2", "check": "secret-check"}
             self.checks += 1
@@ -212,7 +274,9 @@ class FakePin:
             return ok({"activated": True, "apikey": "fresh-key", "expires_in": 580})
         if request.url.path == "/v4/user":
             assert request.headers["authorization"] == "Bearer fresh-key"
-            return ok({"user": {"username": "desmond", "isPremium": True, "premiumUntil": 1893456000}})
+            return ok(
+                {"user": {"username": "desmond", "isPremium": True, "premiumUntil": 1893456000}}
+            )
         return err("404", status=404)
 
 
@@ -220,8 +284,12 @@ class FakePin:
 def pin_client(monkeypatch):
     fake = FakePin()
     transport = httpx.MockTransport(fake)
-    monkeypatch.setattr(alldebrid, "pin_start", functools.partial(alldebrid.pin_start, transport=transport))
-    monkeypatch.setattr(alldebrid, "pin_check", functools.partial(alldebrid.pin_check, transport=transport))
+    monkeypatch.setattr(
+        alldebrid, "pin_start", functools.partial(alldebrid.pin_start, transport=transport)
+    )
+    monkeypatch.setattr(
+        alldebrid, "pin_check", functools.partial(alldebrid.pin_check, transport=transport)
+    )
     monkeypatch.setattr(api, "AllDebrid", functools.partial(AllDebrid, transport=transport))
     monkeypatch.setattr(api, "_ad_pin", {})
     config.update({"ad_api_key": "", "torrent_client": "realdebrid"})
@@ -233,10 +301,16 @@ def pin_client(monkeypatch):
 def test_pin_connects_and_chooses_alldebrid(pin_client):
     client, _ = pin_client
     start = client.post("/api/settings/alldebrid/pin").json()
-    assert start == {"pin": "K7Q2", "user_url": "https://alldebrid.com/pin/?pin=K7Q2", "expires_in": 600}
+    assert start == {
+        "pin": "K7Q2",
+        "user_url": "https://alldebrid.com/pin/?pin=K7Q2",
+        "expires_in": 600,
+    }
     assert "secret-check" not in str(start)  # the private half stays on the server
 
-    assert client.post("/api/settings/alldebrid/pin/check", json={"pin": "K7Q2"}).json() == {"connected": False}
+    assert client.post("/api/settings/alldebrid/pin/check", json={"pin": "K7Q2"}).json() == {
+        "connected": False
+    }
     done = client.post("/api/settings/alldebrid/pin/check", json={"pin": "K7Q2"}).json()
     assert done["connected"] and done["username"] == "desmond" and done["premium"]
     assert done["settings"]["ad_api_key"].startswith("•") and "fresh-key" not in str(done)
@@ -257,4 +331,6 @@ def test_pin_check_needs_the_current_code(pin_client):
 
 async def test_pin_link_only_ever_points_at_alldebrid():
     transport = httpx.MockTransport(FakePin(user_url="https://evil.example/pin"))
-    assert (await alldebrid.pin_start(transport=transport))["user_url"] == "https://alldebrid.com/pin/"
+    assert (await alldebrid.pin_start(transport=transport))[
+        "user_url"
+    ] == "https://alldebrid.com/pin/"

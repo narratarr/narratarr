@@ -18,7 +18,9 @@ BASE = "http://10.2.3.144:9117/api/v2.0/indexers/all/results/torznab/api"
 def only_torznab(monkeypatch):
     torznab._releases.clear()
     torznab._search_cache = torznab.Cache(torznab.CACHE_SECONDS, 200)
-    config.update({"torznab_url": BASE, "torznab_api_key": "K", "prowlarr_url": "", "prowlarr_api_key": ""})
+    config.update(
+        {"torznab_url": BASE, "torznab_api_key": "K", "prowlarr_url": "", "prowlarr_api_key": ""}
+    )
     yield
     torznab._releases.clear()
 
@@ -42,6 +44,7 @@ def jackett(monkeypatch):
 
     async def no_librivox(*a, **k):
         from narratarr.sources import Page
+
         return Page(items=[], page=1, total_pages=1)
 
     monkeypatch.setattr("narratarr.sources.archive.ArchiveSource.find", no_librivox)
@@ -49,8 +52,15 @@ def jackett(monkeypatch):
 
 
 async def test_wanted_books_are_looked_for_on_torznab(jackett):
-    book = db.insert({"source": "audible", "source_url": "https://www.audible.com/pd/B08G9PRS1K", "title": "Project Hail Mary",
-                      "author": "Andy Weir", "status": "wanted"})
+    book = db.insert(
+        {
+            "source": "audible",
+            "source_url": "https://www.audible.com/pd/B08G9PRS1K",
+            "title": "Project Hail Mary",
+            "author": "Andy Weir",
+            "status": "wanted",
+        }
+    )
     found = await wanted.find_releases(book)
     assert {f["source"] for f in found} == {"torznab"}
     assert jackett[-1] == ["3030"]
@@ -58,8 +68,16 @@ async def test_wanted_books_are_looked_for_on_torznab(jackett):
 
 async def test_wanted_ebooks_use_the_ebook_categories(jackett):
     config.update({"torznab_ebook_categories": "7020,7050"})
-    book = db.insert({"source": "openlibrary", "source_url": "https://openlibrary.org/works/OL1W#ebook",
-                      "title": "Project Hail Mary", "author": "Andy Weir", "status": "wanted", "kind": "ebook"})
+    book = db.insert(
+        {
+            "source": "openlibrary",
+            "source_url": "https://openlibrary.org/works/OL1W#ebook",
+            "title": "Project Hail Mary",
+            "author": "Andy Weir",
+            "status": "wanted",
+            "kind": "ebook",
+        }
+    )
     await wanted.find_releases(book)
     assert jackett[-1] == ["7020", "7050"]
 

@@ -39,7 +39,9 @@ class NZBGet:
         if not url:
             raise NZBGetError("Add your NZBGet address in Settings first.")
         auth = (username, password) if username or password else None
-        self._client = httpx.AsyncClient(base_url=url.rstrip("/"), auth=auth, timeout=30, transport=transport)
+        self._client = httpx.AsyncClient(
+            base_url=url.rstrip("/"), auth=auth, timeout=30, transport=transport
+        )
 
     async def __aenter__(self) -> NZBGet:
         return self
@@ -49,9 +51,13 @@ class NZBGet:
 
     async def _call(self, method: str, *params):
         try:
-            resp = await self._client.post("/jsonrpc", json={"method": method, "params": list(params), "id": 1})
+            resp = await self._client.post(
+                "/jsonrpc", json={"method": method, "params": list(params), "id": 1}
+            )
         except httpx.HTTPError as e:
-            raise NZBGetError(reach.explain(e, str(self._client.base_url), "NZBGet", "http://192.168.1.10:6789")) from e
+            raise NZBGetError(
+                reach.explain(e, str(self._client.base_url), "NZBGet", "http://192.168.1.10:6789")
+            ) from e
         if resp.status_code in (401, 403):
             raise NZBGetError("NZBGet rejected the username or password. Check them in Settings.")
         if resp.status_code >= 400:
@@ -69,7 +75,9 @@ class NZBGet:
 
     async def add_nzb(self, nzb: bytes, filename: str, name: str, category: str = "") -> str:
         content = base64.b64encode(nzb).decode()
-        nzb_id = await self._call("append", filename, content, category, 0, False, False, "", 0, "SCORE", [])
+        nzb_id = await self._call(
+            "append", filename, content, category, 0, False, False, "", 0, "SCORE", []
+        )
         if not isinstance(nzb_id, int) or nzb_id <= 0:
             raise NZBGetError("NZBGet didn't accept the NZB.")
         return str(nzb_id)
@@ -89,10 +97,17 @@ class NZBGet:
                 info = await self._call("status") or {}
                 if info.get("DownloadPaused"):
                     return Job("paused", progress, detail="NZBGet is paused")
-                return Job("downloading", progress, int(info.get("DownloadRate") or 0), "Downloading in NZBGet")
+                return Job(
+                    "downloading",
+                    progress,
+                    int(info.get("DownloadRate") or 0),
+                    "Downloading in NZBGet",
+                )
             if status in ("QUEUED", "FETCHING"):
                 return Job("queued", progress, detail=QUEUE_LABELS[status])
-            return Job("processing", 100, detail=QUEUE_LABELS.get(status, "NZBGet is finishing up…"))
+            return Job(
+                "processing", 100, detail=QUEUE_LABELS.get(status, "NZBGet is finishing up…")
+            )
         for h in await self._call("history", False) or []:
             if (h.get("NZBID") or h.get("ID")) != nzb_id:
                 continue

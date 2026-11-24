@@ -54,7 +54,9 @@ class SABnzbd:
             else:
                 resp = await self._client.get("/api", params=params)
         except httpx.HTTPError as e:
-            raise SABnzbdError(reach.explain(e, str(self._client.base_url), "SABnzbd", "http://192.168.1.10:8080")) from e
+            raise SABnzbdError(
+                reach.explain(e, str(self._client.base_url), "SABnzbd", "http://192.168.1.10:8080")
+            ) from e
         if resp.status_code == 403 and "hostname" in resp.text.lower():
             # SABnzbd only answers names on its own list, and says so with a 403 that is easy to read
             # as a bad key. It is the address, not the key: the IP always works.
@@ -62,7 +64,8 @@ class SABnzbd:
             raise SABnzbdError(
                 f"SABnzbd refused the name “{host}”: it only answers to names on its own list. Use its IP "
                 f"address instead, or in SABnzbd add {host} under Config → Special → host_whitelist, save, "
-                "and restart SABnzbd.")
+                "and restart SABnzbd."
+            )
         if resp.status_code in (401, 403):
             raise SABnzbdError("SABnzbd rejected the API key. Check it in Settings.")
         if resp.status_code >= 400:
@@ -70,7 +73,10 @@ class SABnzbd:
         try:
             data = resp.json()
         except ValueError:
-            data = {"status": False, "error": resp.text.strip()[:200]}  # e.g. a plain "API Key Incorrect"
+            data = {
+                "status": False,
+                "error": resp.text.strip()[:200],
+            }  # e.g. a plain "API Key Incorrect"
         if not isinstance(data, dict):
             raise SABnzbdError("That address doesn't look like SABnzbd. Check it in Settings.")
         if data.get("status") is False:
@@ -89,7 +95,9 @@ class SABnzbd:
         params = {"nzbname": name}
         if category:
             params["cat"] = category
-        data = await self._call("addfile", files={"name": (filename, nzb, "application/x-nzb")}, **params)
+        data = await self._call(
+            "addfile", files={"name": (filename, nzb, "application/x-nzb")}, **params
+        )
         ids = data.get("nzo_ids") or []
         if not ids:
             raise SABnzbdError("SABnzbd didn't accept the NZB.")
@@ -108,7 +116,11 @@ class SABnzbd:
             if status == "Downloading":
                 speed = int(float(queue.get("kbpersec") or 0) * 1024)
                 left = slot.get("timeleft") or ""
-                detail = f"Downloading in SABnzbd · {left} left" if speed and left else "Downloading in SABnzbd"
+                detail = (
+                    f"Downloading in SABnzbd · {left} left"
+                    if speed and left
+                    else "Downloading in SABnzbd"
+                )
                 return Job("downloading", progress, speed, detail)
             return Job("queued", progress, detail=QUEUE_LABELS.get(status, "Queued in SABnzbd"))
         history = (await self._call("history", nzo_ids=nzo_id)).get("history", {})
@@ -121,7 +133,9 @@ class SABnzbd:
             if status == "Failed":
                 reason = slot.get("fail_message") or "no reason given"
                 return Job("failed", error=f"SABnzbd couldn't finish this download: {reason}")
-            return Job("processing", 100, detail=HISTORY_LABELS.get(status, "SABnzbd is finishing up…"))
+            return Job(
+                "processing", 100, detail=HISTORY_LABELS.get(status, "SABnzbd is finishing up…")
+            )
         return None
 
     async def forget(self, nzo_id: str) -> None:

@@ -38,10 +38,29 @@ FORMAT_PREFERENCE = [
 ]
 
 LANGUAGES = {
-    "eng": "English", "spa": "Spanish", "fre": "French", "fra": "French", "ger": "German", "deu": "German",
-    "ita": "Italian", "por": "Portuguese", "dut": "Dutch", "nld": "Dutch", "rus": "Russian", "chi": "Chinese",
-    "zho": "Chinese", "jpn": "Japanese", "lat": "Latin", "grc": "Ancient Greek", "pol": "Polish",
-    "fin": "Finnish", "swe": "Swedish", "dan": "Danish", "heb": "Hebrew", "hun": "Hungarian", "cze": "Czech",
+    "eng": "English",
+    "spa": "Spanish",
+    "fre": "French",
+    "fra": "French",
+    "ger": "German",
+    "deu": "German",
+    "ita": "Italian",
+    "por": "Portuguese",
+    "dut": "Dutch",
+    "nld": "Dutch",
+    "rus": "Russian",
+    "chi": "Chinese",
+    "zho": "Chinese",
+    "jpn": "Japanese",
+    "lat": "Latin",
+    "grc": "Ancient Greek",
+    "pol": "Polish",
+    "fin": "Finnish",
+    "swe": "Swedish",
+    "dan": "Danish",
+    "heb": "Hebrew",
+    "hun": "Hungarian",
+    "cze": "Czech",
 }
 
 _LUCENE_SPECIAL = re.compile(r'[+\-&|!(){}\[\]^"~*?:\\/]')
@@ -101,8 +120,10 @@ def pick_files(identifier: str, files: list[dict]) -> tuple[list[dict], str]:
     """Choose one consistent set of audio files, plus a format label."""
     for fmt, label in FORMAT_PREFERENCE:
         chosen = [
-            f for f in files
-            if f.get("format") == fmt and (fmt != "Audiobook" or f.get("name", "").lower().endswith(".m4b"))
+            f
+            for f in files
+            if f.get("format") == fmt
+            and (fmt != "Audiobook" or f.get("name", "").lower().endswith(".m4b"))
         ]
         if chosen:
             return [
@@ -143,7 +164,9 @@ class ArchiveSource:
         return u.netloc in ("archive.org", "www.archive.org") and u.path.startswith("/details/")
 
     def categories(self) -> list[Category]:
-        return [Category("new", "Newest")] + [Category(slug, t) for slug, (t, _) in self._categories.items()]
+        return [Category("new", "Newest")] + [
+            Category(slug, t) for slug, (t, _) in self._categories.items()
+        ]
 
     async def latest(self, page: int = 1, category: str | None = None) -> Page:
         q, sort = self.scope, "downloads desc"
@@ -202,7 +225,9 @@ class ArchiveSource:
         if self._client:
             resp = await self._client.get(url, params=params)
         else:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(20, connect=8), follow_redirects=True) as c:
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(20, connect=8), follow_redirects=True
+            ) as c:
                 resp = await c.get(url, params=params)
         resp.raise_for_status()
         data = resp.json()

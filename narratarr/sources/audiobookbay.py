@@ -74,7 +74,10 @@ def split_title(raw: str, hint: str = "") -> tuple[str, str]:
         return raw.strip(), ""
     first, last = (" ".join(x.split()) for x in raw.rsplit(" - ", 1))
     hint = " ".join(hint.replace("\u2019", "'").split()).lower()
-    norm = lambda x: x.replace("\u2019", "'").lower()
+
+    def norm(x):
+        return x.replace("\u2019", "'").lower()
+
     if hint and not hint.startswith(norm(last)) and hint.endswith(norm(first)):
         return last, first
     return first, last
@@ -93,7 +96,9 @@ def _reveal(soup: BeautifulSoup) -> BeautifulSoup:
     for el in soup.select(".re-ab"):
         raw = re.sub(r"[^A-Za-z0-9+/=]", "", el.get_text())
         try:
-            html = base64.b64decode(raw + "=" * (-len(raw) % 4), validate=True).decode("utf-8", "replace")
+            html = base64.b64decode(raw + "=" * (-len(raw) % 4), validate=True).decode(
+                "utf-8", "replace"
+            )
         except (ValueError, binascii.Error):
             continue  # not base64 after all: leave it as it is
         if "<" not in html:
@@ -134,7 +139,9 @@ def parse_listing(html: str, base_url: str, page: int = 1) -> Page:
                 break
         items.append(listing)
 
-    pages = [int(n) for a in soup.select(".wp-pagenavi a") for n in _PAGE_RE.findall(a.get("href", ""))]
+    pages = [
+        int(n) for a in soup.select(".wp-pagenavi a") for n in _PAGE_RE.findall(a.get("href", ""))
+    ]
     total = max([page, *pages])
     return Page(items=items, page=page, total_pages=total)
 
@@ -144,11 +151,15 @@ def parse_details(html: str, url: str) -> Details:
     post = soup.select_one("div.post") or soup
     authors = [_text(a) for a in post.select(".desc span.author")]
     narrators = list(dict.fromkeys(_text(n) for n in post.select(".desc span.narrator")))
-    img = post.select_one('.postContent img[itemprop="image"]') or post.select_one(".postContent img")
+    img = post.select_one('.postContent img[itemprop="image"]') or post.select_one(
+        ".postContent img"
+    )
     lang = post.select_one('[itemprop="inLanguage"]')
     fmt = post.select_one(".desc span.format")
     posted = post.select_one('meta[itemprop="datePublished"]')
-    title, author = split_title(_text(post.select_one(".postTitle h1")), img.get("alt", "") if img else "")
+    title, author = split_title(
+        _text(post.select_one(".postTitle h1")), img.get("alt", "") if img else ""
+    )
 
     desc_parts, bitrate, length = [], "", ""
     for p in post.select(".desc > p"):
@@ -223,7 +234,9 @@ class AudiobookBay:
                         resp = await self._client.get(url)
                     else:
                         async with httpx.AsyncClient(
-                            headers={"User-Agent": USER_AGENT}, follow_redirects=True, timeout=TIMEOUT
+                            headers={"User-Agent": USER_AGENT},
+                            follow_redirects=True,
+                            timeout=TIMEOUT,
                         ) as client:
                             resp = await client.get(url)
                     break
@@ -235,7 +248,11 @@ class AudiobookBay:
         return resp.text
 
     async def latest(self, page: int = 1, category: str | None = None) -> Page:
-        root = f"{self.base_url}/audio-books/type/{quote_plus(category)}" if category else self.base_url
+        root = (
+            f"{self.base_url}/audio-books/type/{quote_plus(category)}"
+            if category
+            else self.base_url
+        )
         url = f"{root}/page/{page}/" if page > 1 else f"{root}/"
         return parse_listing(await self._get(url), self.base_url, page)
 

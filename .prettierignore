@@ -1,0 +1,14 @@
+# Format maintained frontend sources and tooling configuration only.
+**/*
+!narratarr/
+!narratarr/static/
+!narratarr/static/*.js
+!narratarr/static/*.css
+!narratarr/static/*.html
+!site/
+!site/public/
+!site/public/*.html
+!site/wrangler.jsonc
+!*.mjs
+!package.json
+!.prettierrc.json

@@ -12,20 +12,24 @@ import httpx
 import pytest
 
 from narratarr import config
-from narratarr.ratings import audnex as audnex_module
+from narratarr.config import parse_regions
 from narratarr.ratings import Rating, compact_count, enrich, make_rating, provider, sort_items
+from narratarr.ratings import audnex as audnex_module
 from narratarr.ratings.audnex import (
     AudnexProvider,
-    RegionUnavailable,
     audible_url,
     parse_score,
 )
-from narratarr.ratings.match import MIN_COUNT, clean_query_title, normalise, strict_match, title_matches
-from narratarr.config import parse_regions
+from narratarr.ratings.match import (
+    MIN_COUNT,
+    clean_query_title,
+    normalise,
+    strict_match,
+    title_matches,
+)
 from narratarr.ratings.store import Store, key_for
 
 FIXTURES = Path(__file__).parent / "fixtures"
-
 
 
 @pytest.fixture(autouse=True)
@@ -50,7 +54,6 @@ def client(handler):
 # ---- the JSON-LD parser -------------------------------------------------------------------
 
 
-
 # ---- display and sorting -------------------------------------------------------------------
 
 
@@ -64,7 +67,7 @@ def test_compact_count():
 def test_a_dozen_votes_are_refused_and_the_sort_is_the_raw_score():
     """The floor is what stops thin evidence. The sort is the raw score, because the pill prints
     the raw score: anything else shows a column of numbers that does not descend."""
-    assert make_rating(5.0, 12, "u", "audnex") is None       # under the floor
+    assert make_rating(5.0, 12, "u", "audnex") is None  # under the floor
     thin_ok = make_rating(5.0, 60, "u", "audnex").to_dict()
     solid = make_rating(4.3, 2_000_000, "u", "audnex").to_dict()
     assert thin_ok["bayes"] < solid["bayes"], "the weight still exists, it just does not order"
@@ -90,13 +93,16 @@ def test_sorting_keeps_nulls_last():
         {"rating": make_rating(4.9, 500, "u", "audnex").to_dict()},
         {"rating": make_rating(3.5, 500, "u", "audnex").to_dict()},
     ]
-    assert [i["rating"] and i["rating"]["score"] for i in sort_items(items)] == [4.9, 4.1, 3.5, None]
+    assert [i["rating"] and i["rating"]["score"] for i in sort_items(items)] == [
+        4.9,
+        4.1,
+        3.5,
+        None,
+    ]
 
 
 def test_score_text_matches_each_provider():
     assert Rating(4.3, None, source="audnex").to_dict()["score_text"] == "★ 4.3"
-
-
 
 
 def test_enrich_never_blocks_and_always_sets_the_key(monkeypatch, tmp_path):
@@ -104,8 +110,9 @@ def test_enrich_never_blocks_and_always_sets_the_key(monkeypatch, tmp_path):
     monkeypatch.setattr(config, "_settings", None)
     config.update({"ratings_enabled": True})
     called = {"n": 0}
-    monkeypatch.setattr("narratarr.ratings._enqueue",
-                        lambda t, a, asin="": called.__setitem__("n", called["n"] + 1))
+    monkeypatch.setattr(
+        "narratarr.ratings._enqueue", lambda t, a, asin="": called.__setitem__("n", called["n"] + 1)
+    )
 
     item = enrich({"title": "Unknown Book", "author": "Nobody"})
     assert item["rating"] is None
@@ -114,20 +121,28 @@ def test_enrich_never_blocks_and_always_sets_the_key(monkeypatch, tmp_path):
 
 # ---- the strict gate: one place, every refusal ---------------------------------------------
 
+
 def test_near_titles_and_series_neighbours_are_refused():
     """The one test that proves "refuse rather than guess". Each line is a way to be plausibly wrong."""
     # exact, and exact through cosmetic differences
     assert strict_match("Catch 22", "Joseph Heller", "Catch-22", ["Joseph Heller"])
     assert strict_match("Devil's Fjord", "David Hewson", "Devil&apos;s Fjord", ["David Hewson"])
-    assert strict_match("Etna", "Paul Yoon", "Etna: A Novel", ["Paul Yoon"])  # subtitle without a digit
-    assert strict_match("Project Hail Mary", "Weir, Andy", "Project Hail Mary", ["Andy Weir"]), \
+    assert strict_match(
+        "Etna", "Paul Yoon", "Etna: A Novel", ["Paul Yoon"]
+    )  # subtitle without a digit
+    assert strict_match("Project Hail Mary", "Weir, Andy", "Project Hail Mary", ["Andy Weir"]), (
         "an inverted author name is the same author"
+    )
 
     # a different book
     assert not strict_match("Etna", "Paul Yoon", "Etna Rising", ["Paul Yoon"]), "near title"
     assert not strict_match("Etna", "Paul Yoon", "Etna (Book 2)", ["Paul Yoon"]), "series neighbour"
-    assert not strict_match("Etna", "Paul Yoon", "Etna (The Etna Saga, #1)", ["Paul Yoon"]), "series suffix"
-    assert not strict_match("Dune", "Frank Herbert", "Dune Messiah", ["Frank Herbert"]), "next in series"
+    assert not strict_match("Etna", "Paul Yoon", "Etna (The Etna Saga, #1)", ["Paul Yoon"]), (
+        "series suffix"
+    )
+    assert not strict_match("Dune", "Frank Herbert", "Dune Messiah", ["Frank Herbert"]), (
+        "next in series"
+    )
 
     # the right book, the wrong person
     assert not strict_match("Etna", "Paul Yoon", "Etna", ["Yoon"]), "surname only"
@@ -136,6 +151,7 @@ def test_near_titles_and_series_neighbours_are_refused():
 
 
 # ---- the floor lives in one place -----------------------------------------------------------
+
 
 def test_the_vote_floor_is_applied_once():
     assert make_rating(5.0, 12, "u", "audnex") is None, "12 ratings is noise"
@@ -146,18 +162,22 @@ def test_the_vote_floor_is_applied_once():
 def test_a_rating_with_no_count_is_expressible():
     """Audnex publishes a bare average and no count. The contract has to carry that, and the vote
     floor must not throw it away: a floor needs a count to apply to."""
-    r = make_rating(4.9, None, audible_url("B08GB2RLKM", "uk"), "audnex",
-                    label="Audible", tooltip="4.9 average on Audible (ASIN B08GB2RLKM)")
+    r = make_rating(
+        4.9,
+        None,
+        audible_url("B08GB2RLKM", "uk"),
+        "audnex",
+        label="Audible",
+        tooltip="4.9 average on Audible (ASIN B08GB2RLKM)",
+    )
     assert r is not None and r.score == 4.9 and r.count is None
     d = r.to_dict()
     assert d["count"] is None
-    assert d["label"] == "Audible"          # the small source mark beside the score
+    assert d["label"] == "Audible"  # the small source mark beside the score
     assert d["tooltip"] == "4.9 average on Audible (ASIN B08GB2RLKM)"
 
 
-
-
-AUDNEX_ASIN = "B08GB2RLKM"   # Project Hail Mary, the book the live fixture came from
+AUDNEX_ASIN = "B08GB2RLKM"  # Project Hail Mary, the book the live fixture came from
 
 
 def audnex_record() -> dict:
@@ -171,6 +191,7 @@ def audnex_handler(record: dict | None = None, status: int = 200, seen: list | N
         if status != 200:
             return httpx.Response(status)
         return httpx.Response(200, json=record if record is not None else audnex_record())
+
     return handler
 
 
@@ -218,7 +239,7 @@ async def test_a_404_in_the_configured_region_falls_back_to_the_asin_marketplace
         p = AudnexProvider(store, client=c, regions=["uk"])
         rating = await p.fetch_and_store("Project Hail Mary", "Andy Weir", asin=AUDNEX_ASIN)
     assert rating is not None and rating.score == 4.9
-    assert len(seen) == 2, seen          # uk first, then the ASIN's own marketplace
+    assert len(seen) == 2, seen  # uk first, then the ASIN's own marketplace
     assert "region=uk" in seen[0]
 
 
@@ -239,12 +260,22 @@ async def test_an_unrated_book_is_remembered_without_a_score(store):
 
 # ---- title -> ASIN resolution ----------------------------------------------------------------
 
+
 def audible_payload(title: str, author: str, asin: str = AUDNEX_ASIN) -> dict:
     """Shaped as Audible's API answers, because audible._keep filters on kind and language."""
-    return {"total_results": 1, "products": [{
-        "asin": asin, "title": title, "authors": [{"name": author}],
-        "content_delivery_type": "SinglePartBook", "language": "english", "format_type": "unabridged",
-    }]}
+    return {
+        "total_results": 1,
+        "products": [
+            {
+                "asin": asin,
+                "title": title,
+                "authors": [{"name": author}],
+                "content_delivery_type": "SinglePartBook",
+                "language": "english",
+                "format_type": "unabridged",
+            }
+        ],
+    }
 
 
 def audible_search_handler(title: str, author: str, seen: list | None = None):
@@ -254,6 +285,7 @@ def audible_search_handler(title: str, author: str, seen: list | None = None):
         if "api.audible" in str(request.url):
             return httpx.Response(200, json=audible_payload(title, author))
         return httpx.Response(200, json=audnex_record())
+
     return handler
 
 
@@ -266,7 +298,9 @@ async def test_an_exact_match_resolves_to_the_asin(store):
 
 
 async def test_a_near_title_is_refused(store):
-    async with client(audible_search_handler("Project Hail Mary: A Novel of Discovery", "Andy Weir")) as c:
+    async with client(
+        audible_search_handler("Project Hail Mary: A Novel of Discovery", "Andy Weir")
+    ) as c:
         p = AudnexProvider(store, client=c, regions=["uk"])
         assert await p.fetch_and_store("Project Hail Mary", "Andy Weir") is None
 
@@ -287,7 +321,9 @@ async def test_resolution_happens_once_and_then_costs_nothing(store):
         def boom(request):  # neither Audible nor Audnex may be asked again
             raise AssertionError(f"resolution repeated: {request.url}")
 
-        p2 = AudnexProvider(store, client=httpx.AsyncClient(transport=httpx.MockTransport(boom)), regions=["uk"])
+        p2 = AudnexProvider(
+            store, client=httpx.AsyncClient(transport=httpx.MockTransport(boom)), regions=["uk"]
+        )
         assert p2.cached("Project Hail Mary", "Andy Weir").score == 4.9
     assert len(seen) == first
 
@@ -309,8 +345,10 @@ async def test_a_resolved_miss_is_remembered(store):
 
 # ---- the region sweep ------------------------------------------------------------------------
 
+
 def region_map(answers: dict[str, int | dict], seen: list[str] | None = None):
     """One handler for many regions: 404 unless the region is in the map."""
+
     def handler(request: httpx.Request) -> httpx.Response:
         region = request.url.params.get("region", "")
         if seen is not None:
@@ -319,6 +357,7 @@ def region_map(answers: dict[str, int | dict], seen: list[str] | None = None):
         if isinstance(answer, int):
             return httpx.Response(answer)
         return httpx.Response(200, json=answer)
+
     return handler
 
 
@@ -327,7 +366,9 @@ async def test_regions_are_tried_in_order_and_the_first_hit_wins(store):
     record = audnex_record()
     async with client(region_map({"ca": record}, seen=seen)) as c:
         p = AudnexProvider(store, client=c, regions=["uk", "us", "ca", "jp"])
-        assert (await p.fetch_and_store("Project Hail Mary", "Andy Weir", asin=AUDNEX_ASIN)).score == 4.9
+        assert (
+            await p.fetch_and_store("Project Hail Mary", "Andy Weir", asin=AUDNEX_ASIN)
+        ).score == 4.9
     assert seen[:3] == ["uk", "us", "ca"], seen
     assert "jp" not in seen, "the sweep kept going after a hit"
 
@@ -351,8 +392,11 @@ async def test_the_winning_region_is_remembered_for_that_asin(store):
             return httpx.Response(404)
 
         seen.clear()
-        p2 = AudnexProvider(store, client=httpx.AsyncClient(transport=httpx.MockTransport(by_book)),
-                            regions=["uk", "us", "ca"])
+        p2 = AudnexProvider(
+            store,
+            client=httpx.AsyncClient(transport=httpx.MockTransport(by_book)),
+            regions=["uk", "us", "ca"],
+        )
         assert await p2.fetch_and_store("Etna", "Paul Yoon", asin="B0OTHER") is None
         assert seen == ["uk", "us", "ca"], "the other book inherited a region from a different ASIN"
 
@@ -374,7 +418,9 @@ async def test_a_429_is_retried_rather_than_treated_as_a_miss(store, monkeypatch
 
     def handler(request: httpx.Request) -> httpx.Response:
         attempts["n"] += 1
-        return httpx.Response(429) if attempts["n"] == 1 else httpx.Response(200, json=audnex_record())
+        return (
+            httpx.Response(429) if attempts["n"] == 1 else httpx.Response(200, json=audnex_record())
+        )
 
     async def no_sleep(_seconds):
         return None
@@ -392,7 +438,11 @@ async def test_check_region_reports_what_each_storefront_says(store):
     unrated = audnex_record() | {"rating": "0.0"}
     async with client(region_map({"uk": audnex_record(), "de": unrated})) as c:
         p = AudnexProvider(store, client=c, regions=["uk"])
-        assert await p.check_region(AUDNEX_ASIN, "uk") == {"region": "uk", "ok": True, "rating": "4.9"}
+        assert await p.check_region(AUDNEX_ASIN, "uk") == {
+            "region": "uk",
+            "ok": True,
+            "rating": "4.9",
+        }
         assert (await p.check_region(AUDNEX_ASIN, "us"))["reason"] == "region unavailable"
         assert (await p.check_region(AUDNEX_ASIN, "de"))["rating"] is None
         assert (await p.check_region(AUDNEX_ASIN, "jp"))["reason"] == "region unavailable"
@@ -406,6 +456,7 @@ async def test_check_region_names_a_400_as_unsupported_not_as_a_miss(store):
 
 
 # ---- the setting -----------------------------------------------------------------------------
+
 
 def test_a_bad_storefront_code_is_refused_at_save_time():
     """A typo must fail loudly. Saved silently, it would 400 on every request and the provider
@@ -432,10 +483,13 @@ def test_the_list_survives_a_round_trip_through_settings(tmp_path, monkeypatch):
     assert config.load().public()["audnex_regions"] == ["us", "uk", "ca"]
     with pytest.raises(ValueError):
         config.update({"audnex_regions": "uk,mars"})
-    assert config.load().audnex_regions == ["us", "uk", "ca"], "a refused save changed the stored value"
+    assert config.load().audnex_regions == ["us", "uk", "ca"], (
+        "a refused save changed the stored value"
+    )
 
 
 # ---- admin-only, against the real middleware (not assumed from the prefix list) --------------
+
 
 @pytest.mark.real_auth
 def test_a_typo_in_a_region_is_a_400_not_a_silent_disable(accounts):
@@ -447,30 +501,49 @@ def test_a_typo_in_a_region_is_a_400_not_a_silent_disable(accounts):
 
 @pytest.mark.real_auth
 def test_a_listener_cannot_reach_the_region_test_or_change_the_list(accounts):
-    assert accounts.post("/api/auth/login", json={"username": "listener", "password": "listen-pass"}).status_code == 200
-    assert accounts.post("/api/settings/test-audnex-region", json={"region": "uk"}).status_code == 403
+    assert (
+        accounts.post(
+            "/api/auth/login", json={"username": "listener", "password": "listen-pass"}
+        ).status_code
+        == 200
+    )
+    assert (
+        accounts.post("/api/settings/test-audnex-region", json={"region": "uk"}).status_code == 403
+    )
     assert accounts.put("/api/settings", json={"audnex_regions": "uk,us"}).status_code == 403
     assert config.load().audnex_regions == ["uk"]
 
 
 @pytest.mark.real_auth
 def test_an_admin_gets_a_verdict_per_region(accounts, monkeypatch):
-    import narratarr.api as api_module
 
     async def fake_check(self, asin, region):
-        return {"region": region, "ok": region == "uk", "rating": "4.9" if region == "uk" else None,
-                "reason": None if region == "uk" else "region unavailable"}
+        return {
+            "region": region,
+            "ok": region == "uk",
+            "rating": "4.9" if region == "uk" else None,
+            "reason": None if region == "uk" else "region unavailable",
+        }
 
     monkeypatch.setattr("narratarr.ratings.audnex.AudnexProvider.check_region", fake_check)
-    assert accounts.post("/api/auth/login", json={"username": "admin", "password": "admin-pass"}).status_code == 200
+    assert (
+        accounts.post(
+            "/api/auth/login", json={"username": "admin", "password": "admin-pass"}
+        ).status_code
+        == 200
+    )
     good = accounts.post("/api/settings/test-audnex-region", json={"region": "uk"})
     assert good.status_code == 200 and good.json()["rating"] == "4.9"
     nah = accounts.post("/api/settings/test-audnex-region", json={"region": "us"})
     assert nah.status_code == 200 and nah.json()["reason"] == "region unavailable"
-    assert accounts.post("/api/settings/test-audnex-region", json={"region": "mars"}).status_code == 400
+    assert (
+        accounts.post("/api/settings/test-audnex-region", json={"region": "mars"}).status_code
+        == 400
+    )
 
 
 # ---- LibriVox's title formatting -------------------------------------------------------------
+
 
 def test_a_librivox_title_loses_its_by_suffix_and_the_match_stays_strict():
     """Both strings are real LibriVox titles from archive.org's own metadata."""
@@ -478,7 +551,9 @@ def test_a_librivox_title_loses_its_by_suffix_and_the_match_stays_strict():
     assert clean_query_title(raw, "librivox") == "Alice's Adventures in Wonderland"
 
     # the strip fixes the query, not the gate: a different edition still refuses
-    assert normalise(clean_query_title(raw, "librivox")) == normalise("Alice's Adventures in Wonderland")
+    assert normalise(clean_query_title(raw, "librivox")) == normalise(
+        "Alice's Adventures in Wonderland"
+    )
     assert not title_matches(clean_query_title(raw, "librivox"), "Alice's Adventures Underground")
     assert not title_matches(clean_query_title(raw, "librivox"), "Through the Looking-Glass")
 
@@ -488,7 +563,10 @@ def test_a_librivox_title_loses_its_by_suffix_and_the_match_stays_strict():
 
 
 def test_a_by_suffix_only_goes_when_it_is_the_last_thing_in_the_title():
-    assert clean_query_title("The Man, by the River, by Someone Else", "librivox") == "The Man, by the River"
+    assert (
+        clean_query_title("The Man, by the River, by Someone Else", "librivox")
+        == "The Man, by the River"
+    )
     assert clean_query_title("Pride and Prejudice", "librivox") == "Pride and Prejudice"
     assert clean_query_title("", "librivox") == ""
     assert clean_query_title(None, "librivox") == ""
@@ -508,8 +586,11 @@ async def test_enrich_asks_the_provider_with_the_cleaned_title(store, monkeypatc
             return None
 
     monkeypatch.setattr("narratarr.ratings.provider", lambda settings=None: Probe())
-    item = {"title": "Alice's Adventures in Wonderland, by Lewis Carroll", "author": "Lewis Carroll",
-            "source": "librivox"}
+    item = {
+        "title": "Alice's Adventures in Wonderland, by Lewis Carroll",
+        "author": "Lewis Carroll",
+        "source": "librivox",
+    }
     enrich(item)
     assert asked == ["Alice's Adventures in Wonderland"], asked
     assert "rating" in item
@@ -517,10 +598,16 @@ async def test_enrich_asks_the_provider_with_the_cleaned_title(store, monkeypatc
 
 # ---- "nobody rated it" is not "we never found it" -------------------------------------------
 
+
 def test_a_resolved_but_unrated_book_carries_its_own_state(store):
     store.put(AUDNEX_ASIN, "audnex", state="unrated")
     p = AudnexProvider(store, regions=["uk"])
-    item = {"title": "Project Hail Mary", "author": "Andy Weir", "asin": AUDNEX_ASIN, "source": "audible"}
+    item = {
+        "title": "Project Hail Mary",
+        "author": "Andy Weir",
+        "asin": AUDNEX_ASIN,
+        "source": "audible",
+    }
     enrich(item, provider_obj=p)
     assert item["rating"] is None
     assert item["rating_state"] == "unrated", "the source knows the book and nobody has rated it"
@@ -543,19 +630,24 @@ def test_a_stale_unrated_row_stops_claiming_to_know_the_book(store):
     import sqlite3
     import time
 
-    with sqlite3.connect(str(store.path)) as con:   # backdate it past RETRY_AFTER
-        con.execute("UPDATE rating SET checked_at = ? WHERE key = ?", (time.time() - 10**6, AUDNEX_ASIN))
+    with sqlite3.connect(str(store.path)) as con:  # backdate it past RETRY_AFTER
+        con.execute(
+            "UPDATE rating SET checked_at = ? WHERE key = ?", (time.time() - 10**6, AUDNEX_ASIN)
+        )
     assert store.state(AUDNEX_ASIN, "audnex") == "none"
 
 
 def test_the_client_prints_two_different_strings():
     src = (Path(__file__).parent.parent / "narratarr/static/app.js").read_text()
-    line = next(l for l in src.splitlines() if "rating_state" in l and "rating-pill empty" in l)
+    line = next(
+        line for line in src.splitlines() if "rating_state" in line and "rating-pill empty" in line
+    )
     assert '"No Rating Available"' in line, "an unrated-but-known book needs its own words"
     assert ': "No Rating"' in line, "everything else keeps the old ones"
 
 
 # ---- the settings toggle --------------------------------------------------------------------
+
 
 def test_ratings_are_on_by_default_even_for_an_old_settings_file(tmp_path, monkeypatch):
     """David's instance predates this key. The default has to apply at read time, not only in a
@@ -564,7 +656,9 @@ def test_ratings_are_on_by_default_even_for_an_old_settings_file(tmp_path, monke
     monkeypatch.setattr(config, "SETTINGS_FILE", tmp_path / "settings.json")
     monkeypatch.setattr(config, "_settings", None)
     # a settings file from before the toggle existed, still carrying the retired provider key
-    (tmp_path / "settings.json").write_text('{"library_dir": "/audiobooks", "ratings_provider": "audnex"}')
+    (tmp_path / "settings.json").write_text(
+        '{"library_dir": "/audiobooks", "ratings_provider": "audnex"}'
+    )
     assert config.load().ratings_enabled is True
     assert provider() is not None
 
@@ -578,8 +672,9 @@ def test_switching_it_off_constructs_nothing_and_calls_nothing(tmp_path, monkeyp
     assert provider() is None, "no provider object at all when the feature is off"
 
     called = {"n": 0}
-    monkeypatch.setattr("narratarr.ratings._enqueue",
-                        lambda *a, **k: called.__setitem__("n", called["n"] + 1))
+    monkeypatch.setattr(
+        "narratarr.ratings._enqueue", lambda *a, **k: called.__setitem__("n", called["n"] + 1)
+    )
     item = {"title": "Project Hail Mary", "author": "Andy Weir", "source": "audible"}
     enrich(item)
     assert item["rating"] is None

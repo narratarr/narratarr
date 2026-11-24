@@ -3,6 +3,7 @@
 Hardcover is never called: every answer is an httpx.MockTransport handler shaped like their docs
 (docs.hardcover.app: Getting Started, OAuth for native/local clients, User Books, Editions).
 """
+
 import json
 import time
 
@@ -28,8 +29,10 @@ def offline(monkeypatch):
 
     def guarded(transport=None):
         if transport is None:
+
             def refuse(request):
                 raise AssertionError(f"tried to reach the real Hardcover: {request.url}")
+
             transport = httpx.MockTransport(refuse)
         return real(transport)
 
@@ -43,12 +46,19 @@ def form(request: httpx.Request) -> dict:
 
 
 def connected(expires_in=3600):
-    config.update({"hardcover_access_token": "hc_at_old", "hardcover_refresh_token": "hc_rt_old",
-                   "hardcover_token_expires": time.time() + expires_in, "hardcover_user": "reader"})
+    config.update(
+        {
+            "hardcover_access_token": "hc_at_old",
+            "hardcover_refresh_token": "hc_rt_old",
+            "hardcover_token_expires": time.time() + expires_in,
+            "hardcover_user": "reader",
+        }
+    )
 
 
 def gql(handler_data):
     """A GraphQL endpoint answering `me` and the shelf query from handler_data(variables)."""
+
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url == hardcover.GRAPHQL
         assert request.headers["authorization"].startswith("Bearer hc_at_")
@@ -57,6 +67,7 @@ def gql(handler_data):
         if "me {" in body["query"]:
             return httpx.Response(200, json={"data": {"me": [{"id": 42, "username": "reader"}]}})
         return httpx.Response(200, json={"data": handler_data(body["variables"])})
+
     return handler
 
 
@@ -67,19 +78,35 @@ async def test_the_sign_in_code_is_shown_and_the_device_code_stays_on_the_server
     def handler(request):
         assert request.url == hardcover.DEVICE
         assert form(request) == {"client_id": CLIENT, "scope": "read:me:content read:library"}
-        return httpx.Response(200, json={"device_code": "SECRET-DEVICE", "user_code": "ABCD-1234",
-                                         "verification_uri": "https://hardcover.app/link",
-                                         "verification_uri_complete": "https://hardcover.app/link?code=ABCD-1234",
-                                         "expires_in": 600, "interval": 5})
+        return httpx.Response(
+            200,
+            json={
+                "device_code": "SECRET-DEVICE",
+                "user_code": "ABCD-1234",
+                "verification_uri": "https://hardcover.app/link",
+                "verification_uri_complete": "https://hardcover.app/link?code=ABCD-1234",
+                "expires_in": 600,
+                "interval": 5,
+            },
+        )
 
     shown = await hardcover.start(httpx.MockTransport(handler))
-    assert shown["user_code"] == "ABCD-1234" and shown["verification_uri_complete"].endswith("ABCD-1234")
+    assert shown["user_code"] == "ABCD-1234" and shown["verification_uri_complete"].endswith(
+        "ABCD-1234"
+    )
     assert "SECRET-DEVICE" not in json.dumps(shown)
 
 
 async def test_a_sign_in_page_anywhere_but_hardcover_is_refused():
     def handler(request):
-        return httpx.Response(200, json={"device_code": "d", "user_code": "u", "verification_uri": "https://evil.example/"})
+        return httpx.Response(
+            200,
+            json={
+                "device_code": "d",
+                "user_code": "u",
+                "verification_uri": "https://evil.example/",
+            },
+        )
 
     with pytest.raises(hardcover.HardcoverError):
         await hardcover.start(httpx.MockTransport(handler))
@@ -94,18 +121,26 @@ async def test_without_an_app_id_it_says_so(monkeypatch):
 
 
 async def test_waiting_then_approved_keeps_the_tokens_on_the_server():
-    answers = iter([{"error": "authorization_pending"},
-                    {"access_token": "hc_at_new", "refresh_token": "hc_rt_new", "expires_in": 3600}])
+    answers = iter(
+        [
+            {"error": "authorization_pending"},
+            {"access_token": "hc_at_new", "refresh_token": "hc_rt_new", "expires_in": 3600},
+        ]
+    )
 
     def handler(request):
         if request.url == hardcover.TOKEN:
             assert form(request)["grant_type"] == "urn:ietf:params:oauth:grant-type:device_code"
             assert form(request)["device_code"] == "dev"
-            return httpx.Response(200 if "pending" not in json.dumps(a := next(answers)) else 400, json=a)
+            return httpx.Response(
+                200 if "pending" not in json.dumps(a := next(answers)) else 400, json=a
+            )
         return gql(lambda v: {})(request)
 
     t = httpx.MockTransport(handler)
-    hardcover._pending.update(device_code="dev", interval=0, next_poll=0.0, expires_at=time.time() + 600)
+    hardcover._pending.update(
+        device_code="dev", interval=0, next_poll=0.0, expires_at=time.time() + 600
+    )
     assert (await hardcover.poll(t))["state"] == "pending"
     done = await hardcover.poll(t)
     assert done == {"state": "connected", "user": "reader"}
@@ -113,20 +148,30 @@ async def test_waiting_then_approved_keeps_the_tokens_on_the_server():
     s = config.load()
     assert s.hardcover_refresh_token == "hc_rt_new" and s.hardcover_user == "reader"
     public = json.dumps(s.public())
-    assert "hc_rt_new" not in public and "hc_at_new" not in public and s.public()["hardcover_connected"]
+    assert (
+        "hc_rt_new" not in public
+        and "hc_at_new" not in public
+        and s.public()["hardcover_connected"]
+    )
 
 
 async def test_polling_faster_than_hardcover_asks_doesnt_call_it():
     def handler(request):
         raise AssertionError("polled Hardcover too soon")
 
-    hardcover._pending.update(device_code="dev", interval=5, next_poll=time.time() + 5, expires_at=time.time() + 600)
+    hardcover._pending.update(
+        device_code="dev", interval=5, next_poll=time.time() + 5, expires_at=time.time() + 600
+    )
     assert (await hardcover.poll(httpx.MockTransport(handler)))["state"] == "pending"
 
 
-@pytest.mark.parametrize("error, state", [("access_denied", "denied"), ("expired_token", "expired")])
+@pytest.mark.parametrize(
+    "error, state", [("access_denied", "denied"), ("expired_token", "expired")]
+)
 async def test_a_refused_or_expired_code_ends_the_sign_in(error, state):
-    hardcover._pending.update(device_code="dev", interval=0, next_poll=0.0, expires_at=time.time() + 600)
+    hardcover._pending.update(
+        device_code="dev", interval=0, next_poll=0.0, expires_at=time.time() + 600
+    )
     t = httpx.MockTransport(lambda r: httpx.Response(400, json={"error": error}))
     assert (await hardcover.poll(t))["state"] == state
     assert not hardcover._pending and not config.load().hardcover_refresh_token
@@ -142,12 +187,21 @@ async def test_an_expired_access_token_is_renewed_with_the_refresh_token():
     def handler(request):
         if request.url == hardcover.TOKEN:
             seen.append(form(request))
-            return httpx.Response(200, json={"access_token": "hc_at_fresh", "refresh_token": "hc_rt_fresh", "expires_in": 3600})
+            return httpx.Response(
+                200,
+                json={
+                    "access_token": "hc_at_fresh",
+                    "refresh_token": "hc_rt_fresh",
+                    "expires_in": 3600,
+                },
+            )
         assert request.headers["authorization"] == "Bearer hc_at_fresh"
         return httpx.Response(200, json={"data": {"me": {"id": 1, "username": "r"}}})
 
     await hardcover.query("query Me { me { id username } }", transport=httpx.MockTransport(handler))
-    assert seen == [{"grant_type": "refresh_token", "refresh_token": "hc_rt_old", "client_id": CLIENT}]
+    assert seen == [
+        {"grant_type": "refresh_token", "refresh_token": "hc_rt_old", "client_id": CLIENT}
+    ]
     assert config.load().hardcover_refresh_token == "hc_rt_fresh"
 
 
@@ -178,56 +232,91 @@ async def test_values_go_in_variables_never_in_the_query():
 
 async def test_the_shelf_is_read_in_pages_and_only_audio_editions_give_an_asin():
     connected()
-    rows = [{"id": i, "book": {"title": f"Book {i}", "contributions": [{"author": {"name": "Ann Author"}}]},
-             "edition": {"asin": "B00AUDIO01", "reading_format_id": 2 if i % 2 else 1}} for i in range(150)]
+    rows = [
+        {
+            "id": i,
+            "book": {"title": f"Book {i}", "contributions": [{"author": {"name": "Ann Author"}}]},
+            "edition": {"asin": "B00AUDIO01", "reading_format_id": 2 if i % 2 else 1},
+        }
+        for i in range(150)
+    ]
 
     def page(v):
-        return {"user_books": rows[v["offset"]:v["offset"] + v["limit"]]}
+        return {"user_books": rows[v["offset"] : v["offset"] + v["limit"]]}
 
     got, more = await hardcover.want_to_read(httpx.MockTransport(gql(page)))
-    assert len(got) == 150 and not more and got[0] == {"id": 0, "title": "Book 0", "author": "Ann Author", "asin": ""}
+    assert (
+        len(got) == 150
+        and not more
+        and got[0] == {"id": 0, "title": "Book 0", "author": "Ann Author", "asin": ""}
+    )
     assert got[1]["asin"] == "B00AUDIO01"
 
 
 async def test_reading_stops_once_there_are_enough_new_books():
     connected()
-    rows = [{"id": i, "book": {"title": f"B{i}", "contributions": []}, "edition": None} for i in range(1000)]
+    rows = [
+        {"id": i, "book": {"title": f"B{i}", "contributions": []}, "edition": None}
+        for i in range(1000)
+    ]
     pages = []
 
     def page(v):
         pages.append(v["offset"])
-        return {"user_books": rows[v["offset"]:v["offset"] + v["limit"]]}
+        return {"user_books": rows[v["offset"] : v["offset"] + v["limit"]]}
 
-    got, more = await hardcover.want_to_read(httpx.MockTransport(gql(page)), skip=set(range(150)), enough=25)
+    got, more = await hardcover.want_to_read(
+        httpx.MockTransport(gql(page)), skip=set(range(150)), enough=25
+    )
     assert [b["id"] for b in got] == list(range(150, 175)) and more
     assert pages == [0, 100], "two pages, not ten"
 
 
 async def test_a_busy_hardcover_is_an_error_not_a_crash():
     connected()
-    t = httpx.MockTransport(lambda r: httpx.Response(429, headers={"retry-after": "90"}, json={"error": "Too Many Requests"}))
+    t = httpx.MockTransport(
+        lambda r: httpx.Response(
+            429, headers={"retry-after": "90"}, json={"error": "Too Many Requests"}
+        )
+    )
     with pytest.raises(hardcover.HardcoverError, match="90 seconds"):
         await hardcover.query("query Me { me { id } }", transport=t)
 
 
 async def test_a_short_retry_after_is_waited_out_once(monkeypatch):
     connected()
-    waits, answers = [], iter([httpx.Response(429, headers={"retry-after": "7"}, json={}),
-                               httpx.Response(200, json={"data": {"me": {"id": 1}}})])
+    waits, answers = (
+        [],
+        iter(
+            [
+                httpx.Response(429, headers={"retry-after": "7"}, json={}),
+                httpx.Response(200, json={"data": {"me": {"id": 1}}}),
+            ]
+        ),
+    )
 
     async def no_wait(seconds):
         waits.append(seconds)
 
     monkeypatch.setattr(hardcover.asyncio, "sleep", no_wait)
-    data = await hardcover.query("query Me { me { id } }", transport=httpx.MockTransport(lambda r: next(answers)))
+    data = await hardcover.query(
+        "query Me { me { id } }", transport=httpx.MockTransport(lambda r: next(answers))
+    )
     assert data == {"me": {"id": 1}} and waits == [7]
 
 
 # ---- the sync -------------------------------------------------------------------------------------
 
 
-DUNE = {"asin": "B002V1OF70", "url": "https://www.audible.com/pd/B002V1OF70", "title": "Dune", "author": "Frank Herbert",
-        "narrators": ["Scott Brick"], "series": [], "released": "2007-01-01"}
+DUNE = {
+    "asin": "B002V1OF70",
+    "url": "https://www.audible.com/pd/B002V1OF70",
+    "title": "Dune",
+    "author": "Frank Herbert",
+    "narrators": ["Scott Brick"],
+    "series": [],
+    "released": "2007-01-01",
+}
 
 
 @pytest.fixture
@@ -240,7 +329,11 @@ def shelf(monkeypatch):
 
     async def audible_match(book):
         if book.get("asin") == "B0KINDLE00":
-            return {**DUNE, "title": "Some Other Book", "author": "Someone Else"}  # a wrong ASIN on Hardcover
+            return {
+                **DUNE,
+                "title": "Some Other Book",
+                "author": "Someone Else",
+            }  # a wrong ASIN on Hardcover
         return DUNE if book["title"] == "Dune" else None
 
     monkeypatch.setattr(hardcover, "want_to_read", want_to_read)
@@ -249,12 +342,16 @@ def shelf(monkeypatch):
 
 
 async def test_shelf_books_come_to_wanted_once(shelf):
-    shelf += [{"id": 1, "title": "Dune", "author": "Frank Herbert", "asin": ""},
-              {"id": 2, "title": "Obscure Zine", "author": "Nobody", "asin": ""}]
+    shelf += [
+        {"id": 1, "title": "Dune", "author": "Frank Herbert", "asin": ""},
+        {"id": 2, "title": "Obscure Zine", "author": "Nobody", "asin": ""},
+    ]
     r = await wanted.sync_hardcover()
     assert (r["added"], r["not_found"]) == (1, 1)
     book = db.get(r["added_ids"][0])
-    assert book["status"] == "wanted" and book["kind"] == "audiobook" and book["asin"] == "B002V1OF70"
+    assert (
+        book["status"] == "wanted" and book["kind"] == "audiobook" and book["asin"] == "B002V1OF70"
+    )
 
     db.delete(book["id"])  # taken off Wanted
     again = await wanted.sync_hardcover()
@@ -278,8 +375,16 @@ async def test_a_big_shelf_is_matched_a_few_at_a_time(shelf):
 
 
 async def test_a_book_already_in_the_library_isnt_added_twice(shelf):
-    db.insert({"source": "local", "source_url": "local:dune", "title": "Dune", "author": "Frank Herbert",
-               "status": "completed", "kind": "audiobook"})
+    db.insert(
+        {
+            "source": "local",
+            "source_url": "local:dune",
+            "title": "Dune",
+            "author": "Frank Herbert",
+            "status": "completed",
+            "kind": "audiobook",
+        }
+    )
     shelf.append({"id": 1, "title": "Dune", "author": "Frank Herbert", "asin": ""})
     r = await wanted.sync_hardcover()
     assert r["in_library"] == 1 and r["added"] == 0
@@ -298,9 +403,19 @@ def client():
 def test_the_settings_form_cant_read_or_set_the_tokens(client):
     connected()
     body = client.get("/api/settings").text
-    assert "hc_rt_old" not in body and "hc_at_old" not in body and "hardcover_refresh_token" not in body
-    client.put("/api/settings", json={"hardcover_refresh_token": "attacker", "hardcover_access_token": "x",
-                                      "hardcover_format": "ebook"})
+    assert (
+        "hc_rt_old" not in body
+        and "hc_at_old" not in body
+        and "hardcover_refresh_token" not in body
+    )
+    client.put(
+        "/api/settings",
+        json={
+            "hardcover_refresh_token": "attacker",
+            "hardcover_access_token": "x",
+            "hardcover_format": "ebook",
+        },
+    )
     s = config.load()
     assert s.hardcover_refresh_token == "hc_rt_old" and s.hardcover_format == "ebook"
 
@@ -323,11 +438,17 @@ def test_disconnect_revokes_at_hardcover_and_keeps_the_handled_list(client, monk
         def handler(request):
             revoked.append((str(request.url), form(request)))
             return httpx.Response(200, json={})
+
         return real(httpx.MockTransport(handler))
 
     monkeypatch.setattr(hardcover, "_client", fake_client)
     assert client.post("/api/hardcover/disconnect").status_code == 200
-    assert revoked == [(hardcover.REVOKE, {"token": "hc_rt_old", "client_id": CLIENT, "token_type_hint": "refresh_token"})]
+    assert revoked == [
+        (
+            hardcover.REVOKE,
+            {"token": "hc_rt_old", "client_id": CLIENT, "token_type_hint": "refresh_token"},
+        )
+    ]
     s = config.load()
     assert not s.hardcover_refresh_token and not s.hardcover_access_token and not s.hardcover_user
     assert db.hardcover_seen_ids() == {7}, "reconnecting won't re-add books already handled"
@@ -335,10 +456,19 @@ def test_disconnect_revokes_at_hardcover_and_keeps_the_handled_list(client, monk
 
 def test_a_listener_cant_touch_hardcover(monkeypatch):
     from narratarr import auth
-    monkeypatch.setattr(auth, "current_user", lambda request: {"id": 2, "username": "l", "role": "listener", "created_at": 0})
+
+    monkeypatch.setattr(
+        auth,
+        "current_user",
+        lambda request: {"id": 2, "username": "l", "role": "listener", "created_at": 0},
+    )
     with TestClient(api.app) as c:
-        for method, path in (("get", "/api/hardcover"), ("post", "/api/hardcover/connect"),
-                             ("post", "/api/hardcover/sync"), ("post", "/api/hardcover/disconnect")):
+        for method, path in (
+            ("get", "/api/hardcover"),
+            ("post", "/api/hardcover/connect"),
+            ("post", "/api/hardcover/sync"),
+            ("post", "/api/hardcover/disconnect"),
+        ):
             assert getattr(c, method)(path).status_code == 403
 
 
@@ -359,6 +489,7 @@ async def test_one_check_at_a_time(shelf):
 
 async def test_two_renewals_at_once_use_the_refresh_token_once():
     import asyncio
+
     connected(expires_in=-10)
     renewals = []
 
@@ -367,12 +498,19 @@ async def test_two_renewals_at_once_use_the_refresh_token_once():
             sent = form(request)["refresh_token"]
             renewals.append(sent)
             if sent != "hc_rt_old":
-                return httpx.Response(400, json={"error": "invalid_grant"})  # rotation: the old one is spent
-            return httpx.Response(200, json={"access_token": "hc_at_1", "refresh_token": "hc_rt_1", "expires_in": 3600})
+                return httpx.Response(
+                    400, json={"error": "invalid_grant"}
+                )  # rotation: the old one is spent
+            return httpx.Response(
+                200,
+                json={"access_token": "hc_at_1", "refresh_token": "hc_rt_1", "expires_in": 3600},
+            )
         return httpx.Response(200, json={"data": {"me": {"id": 1, "username": "r"}}})
 
     t = httpx.MockTransport(handler)
-    await asyncio.gather(*(hardcover.query("query Me { me { id } }", transport=t) for _ in range(3)))
+    await asyncio.gather(
+        *(hardcover.query("query Me { me { id } }", transport=t) for _ in range(3))
+    )
     assert renewals == ["hc_rt_old"], "one renewal; the others used the token it stored"
     assert config.load().hardcover_refresh_token == "hc_rt_1"
 
@@ -381,7 +519,9 @@ async def test_a_refused_renewal_of_an_old_token_doesnt_sign_out_a_newer_one():
     connected(expires_in=-10)
 
     def handler(request):
-        config.update({"hardcover_refresh_token": "hc_rt_newer"})  # another renewal stored a newer one meanwhile
+        config.update(
+            {"hardcover_refresh_token": "hc_rt_newer"}
+        )  # another renewal stored a newer one meanwhile
         return httpx.Response(400, json={"error": "invalid_grant"})
 
     with pytest.raises(hardcover.HardcoverError):
@@ -395,7 +535,14 @@ async def test_disconnect_wins_over_a_renewal_under_way():
     def handler(request):
         if request.url == hardcover.TOKEN:
             hardcover._forget_tokens()  # Disconnect pressed while the renewal was out
-            return httpx.Response(200, json={"access_token": "hc_at_late", "refresh_token": "hc_rt_late", "expires_in": 3600})
+            return httpx.Response(
+                200,
+                json={
+                    "access_token": "hc_at_late",
+                    "refresh_token": "hc_rt_late",
+                    "expires_in": 3600,
+                },
+            )
         assert request.url == hardcover.REVOKE, "only revoking may follow Disconnect"
         return httpx.Response(200, json={})
 
@@ -410,19 +557,33 @@ async def test_an_expired_token_reported_as_a_graphql_error_is_renewed():
 
     def handler(request):
         if request.url == hardcover.TOKEN:
-            return httpx.Response(200, json={"access_token": "hc_at_fresh", "refresh_token": "hc_rt_fresh", "expires_in": 3600})
+            return httpx.Response(
+                200,
+                json={
+                    "access_token": "hc_at_fresh",
+                    "refresh_token": "hc_rt_fresh",
+                    "expires_in": 3600,
+                },
+            )
         calls.append(request.headers["authorization"])
         if len(calls) == 1:
-            return httpx.Response(200, json={"errors": [{"message": "JWTExpired", "extensions": {"code": "invalid-jwt"}}]})
+            return httpx.Response(
+                200,
+                json={"errors": [{"message": "JWTExpired", "extensions": {"code": "invalid-jwt"}}]},
+            )
         return httpx.Response(200, json={"data": {"me": {"id": 1, "username": "r"}}})
 
     await hardcover.query("query Me { me { id } }", transport=httpx.MockTransport(handler))
     assert calls == ["Bearer hc_at_old", "Bearer hc_at_fresh"]
 
 
-@pytest.mark.parametrize("status, body", [(503, {}), (500, {"oops": 1}), (429, {"error": "Too Many Requests"})])
+@pytest.mark.parametrize(
+    "status, body", [(503, {}), (500, {"oops": 1}), (429, {"error": "Too Many Requests"})]
+)
 async def test_hardcover_having_a_bad_moment_keeps_the_sign_in_code(status, body):
-    hardcover._pending.update(device_code="dev", interval=5, next_poll=0.0, expires_at=time.time() + 600)
+    hardcover._pending.update(
+        device_code="dev", interval=5, next_poll=0.0, expires_at=time.time() + 600
+    )
     t = httpx.MockTransport(lambda r: httpx.Response(status, json=body))
     assert (await hardcover.poll(t))["state"] == "pending"
     assert hardcover._pending and hardcover._pending["interval"] == 10
@@ -430,8 +591,16 @@ async def test_hardcover_having_a_bad_moment_keeps_the_sign_in_code(status, body
 
 async def test_odd_numbers_from_hardcover_dont_crash_the_sign_in():
     def handler(request):
-        return httpx.Response(200, json={"device_code": "d", "user_code": "u", "verification_uri": "https://hardcover.app/link",
-                                         "expires_in": "soon", "interval": None})
+        return httpx.Response(
+            200,
+            json={
+                "device_code": "d",
+                "user_code": "u",
+                "verification_uri": "https://hardcover.app/link",
+                "expires_in": "soon",
+                "interval": None,
+            },
+        )
 
     shown = await hardcover.start(httpx.MockTransport(handler))
     assert shown["expires_in"] == 600 and shown["interval"] == 5
@@ -449,13 +618,18 @@ def test_check_now_says_when_a_check_is_already_running(client, monkeypatch):
 
 
 async def test_an_answer_for_a_cancelled_sign_in_is_revoked_not_stored():
-    hardcover._pending.update(device_code="old", interval=0, next_poll=0.0, expires_at=time.time() + 600)
+    hardcover._pending.update(
+        device_code="old", interval=0, next_poll=0.0, expires_at=time.time() + 600
+    )
     revoked = []
 
     def handler(request):
         if request.url == hardcover.TOKEN:
             hardcover._pending.clear()  # Cancel (or Disconnect) while the answer was on its way
-            return httpx.Response(200, json={"access_token": "hc_at_x", "refresh_token": "hc_rt_x", "expires_in": 3600})
+            return httpx.Response(
+                200,
+                json={"access_token": "hc_at_x", "refresh_token": "hc_rt_x", "expires_in": 3600},
+            )
         revoked.append(form(request)["token"])
         return httpx.Response(200, json={})
 
@@ -464,7 +638,9 @@ async def test_an_answer_for_a_cancelled_sign_in_is_revoked_not_stored():
 
 
 async def test_an_old_sign_ins_answer_doesnt_end_a_newer_one():
-    hardcover._pending.update(device_code="old", interval=0, next_poll=0.0, expires_at=time.time() + 600)
+    hardcover._pending.update(
+        device_code="old", interval=0, next_poll=0.0, expires_at=time.time() + 600
+    )
 
     def handler(request):
         hardcover._pending.update(device_code="new")  # Connect pressed again meanwhile
@@ -481,7 +657,14 @@ async def test_disconnect_during_a_renewal_revokes_the_new_pair_too():
     def handler(request):
         if request.url == hardcover.TOKEN:
             hardcover._forget_tokens()
-            return httpx.Response(200, json={"access_token": "hc_at_late", "refresh_token": "hc_rt_late", "expires_in": 3600})
+            return httpx.Response(
+                200,
+                json={
+                    "access_token": "hc_at_late",
+                    "refresh_token": "hc_rt_late",
+                    "expires_in": 3600,
+                },
+            )
         revoked.append(form(request)["token"])
         return httpx.Response(200, json={})
 
@@ -492,9 +675,17 @@ async def test_disconnect_during_a_renewal_revokes_the_new_pair_too():
 
 async def test_the_writer_is_the_author_not_the_translator():
     connected()
-    row = {"id": 1, "book": {"title": "The Three-Body Problem", "contributions": [
-        {"contribution": "Translator", "author": {"name": "Ken Liu"}},
-        {"contribution": None, "author": {"name": "Cixin Liu"}}]}, "edition": None}
+    row = {
+        "id": 1,
+        "book": {
+            "title": "The Three-Body Problem",
+            "contributions": [
+                {"contribution": "Translator", "author": {"name": "Ken Liu"}},
+                {"contribution": None, "author": {"name": "Cixin Liu"}},
+            ],
+        },
+        "edition": None,
+    }
     got, _ = await hardcover.want_to_read(httpx.MockTransport(gql(lambda v: {"user_books": [row]})))
     assert got[0]["author"] == "Cixin Liu"
 
@@ -502,7 +693,9 @@ async def test_the_writer_is_the_author_not_the_translator():
 async def test_not_found_gets_another_look_after_a_month(shelf):
     db.hardcover_record(1, "Dune", "Frank Herbert", "not_found", None)
     with db.connect() as conn:
-        conn.execute("UPDATE hardcover_seen SET at=? WHERE user_book_id=1", (time.time() - 31 * 86400,))
+        conn.execute(
+            "UPDATE hardcover_seen SET at=? WHERE user_book_id=1", (time.time() - 31 * 86400,)
+        )
     shelf.append({"id": 1, "title": "Dune", "author": "Frank Herbert", "asin": ""})
     assert (await wanted.sync_hardcover())["added"] == 1
 
@@ -518,7 +711,14 @@ def test_check_now_searches_the_way_automatic_search_does(client, monkeypatch):
     calls = []
 
     async def sync(transport=None, most=25):
-        return {"added": 2, "in_library": 0, "not_found": 0, "checked": 2, "more": False, "added_ids": [1, 2]}
+        return {
+            "added": 2,
+            "in_library": 0,
+            "not_found": 0,
+            "checked": 2,
+            "more": False,
+            "added_ids": [1, 2],
+        }
 
     async def auto_search():
         calls.append("auto")
@@ -546,7 +746,9 @@ async def test_a_check_that_outlives_a_disconnect_doesnt_report_back():
 
 def test_an_unexpected_failure_is_reported_plainly(client, monkeypatch):
     async def sync(transport=None, most=25):
-        raise ValueError("Expecting value: line 1 column 1")  # e.g. Audible sent something that wasn't JSON
+        raise ValueError(
+            "Expecting value: line 1 column 1"
+        )  # e.g. Audible sent something that wasn't JSON
 
     monkeypatch.setattr(wanted, "sync_hardcover", sync)
     r = client.post("/api/hardcover/sync")

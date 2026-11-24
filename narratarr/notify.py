@@ -36,8 +36,21 @@ EVENTS = {
 # What a webhook body can use. The book* names are the ones AudioBookRequest uses, so bodies written
 # for it work here too.
 VARIABLES = (
-    "event", "eventLabel", "message", "title", "author", "narrator", "format", "cover", "username", "error", "release",
-    "bookId", "bookTitle", "bookAuthors", "bookCover",
+    "event",
+    "eventLabel",
+    "message",
+    "title",
+    "author",
+    "narrator",
+    "format",
+    "cover",
+    "username",
+    "error",
+    "release",
+    "bookId",
+    "bookTitle",
+    "bookAuthors",
+    "bookCover",
 )
 DEFAULT_BODY = """{
   "event": "{event}",
@@ -70,7 +83,11 @@ def load() -> list[dict]:
             items = json.loads(_file().read_text())
         except (OSError, ValueError):
             return []
-    return [n for n in items if isinstance(n, dict) and n.get("kind") in KINDS] if isinstance(items, list) else []
+    return (
+        [n for n in items if isinstance(n, dict) and n.get("kind") in KINDS]
+        if isinstance(items, list)
+        else []
+    )
 
 
 def _save(items: list[dict]) -> None:
@@ -106,9 +123,10 @@ def context(event: str, book: dict, username: str = "", error: str = "") -> dict
     what = f"{title}{by}" + (" (ebook)" if ebook else "")
     message = {
         "wanted": f"{username or 'Someone'} wants {what}"
-                  + (". It's waiting for your approval" if book.get("status") == "requested" else ""),
-        "found": f"Found {book.get('release') or 'a release'} for {what}" + (f", wanted by {username}" if username else "")
-                 + ". It's waiting for your approval",
+        + (". It's waiting for your approval" if book.get("status") == "requested" else ""),
+        "found": f"Found {book.get('release') or 'a release'} for {what}"
+        + (f", wanted by {username}" if username else "")
+        + ". It's waiting for your approval",
         "grabbed": f"Downloading {what}" + (f", for {username}" if username else ""),
         "completed": f"{what} is in your library" + (f", for {username}" if username else ""),
         "failed": f"{what} couldn't download: {error or 'unknown error'}",
@@ -132,14 +150,22 @@ def context(event: str, book: dict, username: str = "", error: str = "") -> dict
     return ctx
 
 
-SAMPLE = {"id": 0, "title": "Project Hail Mary", "author": "Andy Weir", "narrators": ["Ray Porter"],
-          "cover_url": "https://m.media-amazon.com/images/I/91vS2L5YfEL.jpg", "kind": "audiobook"}
+SAMPLE = {
+    "id": 0,
+    "title": "Project Hail Mary",
+    "author": "Andy Weir",
+    "narrators": ["Ray Porter"],
+    "cover_url": "https://m.media-amazon.com/images/I/91vS2L5YfEL.jpg",
+    "kind": "audiobook",
+}
 
 
 def render(template: str, ctx: dict) -> str:
     """Fill {placeholders}. Values are JSON-escaped, so a title with quotes can't break the body."""
     return re.sub(
-        r"\{(\w+)\}", lambda m: json.dumps(str(ctx[m.group(1)]))[1:-1] if m.group(1) in ctx else m.group(0), template
+        r"\{(\w+)\}",
+        lambda m: json.dumps(str(ctx[m.group(1)]))[1:-1] if m.group(1) in ctx else m.group(0),
+        template,
     )
 
 
@@ -152,7 +178,9 @@ def _ntfy_parts(url: str) -> tuple[str, str]:
     segments = [s for s in u.path.split("/") if s]
     if not segments:
         raise NotifyError("Add the topic to the ntfy address, like https://ntfy.sh/narratarr.")
-    base = urlunparse(u._replace(path="/" + "/".join(segments[:-1]), query="", fragment="")).rstrip("/")
+    base = urlunparse(u._replace(path="/" + "/".join(segments[:-1]), query="", fragment="")).rstrip(
+        "/"
+    )
     return base, segments[-1]
 
 
@@ -162,7 +190,12 @@ def build(n: dict, ctx: dict) -> tuple[str, dict, bytes]:
     kind, url, token = n["kind"], n["url"], n.get("token") or ""
     if kind == "ntfy":
         base, topic = _ntfy_parts(url)
-        body = {"topic": topic, "title": ctx["eventLabel"], "message": ctx["message"], "tags": ["books"]}
+        body = {
+            "topic": topic,
+            "title": ctx["eventLabel"],
+            "message": ctx["message"],
+            "tags": ["books"],
+        }
         if ctx["cover"]:
             body["attach"] = ctx["cover"]
         if token:
@@ -198,7 +231,9 @@ async def deliver(n: dict, ctx: dict, transport: httpx.AsyncBaseTransport | None
     error = ""
     for attempt in (1, 2):
         try:
-            async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=False, transport=transport) as client:
+            async with httpx.AsyncClient(
+                timeout=TIMEOUT, follow_redirects=False, transport=transport
+            ) as client:
                 resp = await client.post(url, headers=headers, content=body)
             if resp.status_code < 300:
                 return ""
@@ -236,8 +271,13 @@ async def _send_one(n: dict, ctx: dict, event_id: int | None) -> None:
         log.warning("Notification to %s (%s) failed: %s", n["name"], KINDS[n["kind"]], error)
     _record(n["id"], error)
     if event_id:
-        _note_delivery(event_id, n["id"], state="failed" if error else "sent", error=error,
-                       ms=int((time.monotonic() - started) * 1000))
+        _note_delivery(
+            event_id,
+            n["id"],
+            state="failed" if error else "sent",
+            error=error,
+            ms=int((time.monotonic() - started) * 1000),
+        )
 
 
 async def _send_all(targets: list[dict], ctx: dict, event_id: int | None = None) -> None:
@@ -247,16 +287,29 @@ async def _send_all(targets: list[dict], ctx: dict, event_id: int | None = None)
 def _log_line(at: float, ctx: dict) -> str:
     """The line as the log shows it (Narratarr's log format), for the event log in Settings."""
     stamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(at)) + f",{int(at * 1000) % 1000:03d}"
-    return f"{stamp} INFO {log.name}: [{ctx['event']}] {ctx['message']} (book {ctx['bookId'] or '?'})"
+    return (
+        f"{stamp} INFO {log.name}: [{ctx['event']}] {ctx['message']} (book {ctx['bookId'] or '?'})"
+    )
 
 
 def _keep(at: float, ctx: dict, targets: list[dict]) -> int | None:
     """Add the event to the event log. Never lets a database problem get in the way."""
     try:
-        deliveries = [{"id": n["id"], "name": n["name"], "kind": n["kind"], "state": "sending", "error": "", "ms": 0}
-                      for n in targets]
+        deliveries = [
+            {
+                "id": n["id"],
+                "name": n["name"],
+                "kind": n["kind"],
+                "state": "sending",
+                "error": "",
+                "ms": 0,
+            }
+            for n in targets
+        ]
         book_id = int(ctx["bookId"]) if str(ctx["bookId"]).isdigit() else None
-        return db.add_event(at, ctx["event"], book_id, ctx["message"], _log_line(at, ctx), deliveries)
+        return db.add_event(
+            at, ctx["event"], book_id, ctx["message"], _log_line(at, ctx), deliveries
+        )
     except Exception:  # noqa: BLE001
         log.debug("Couldn't add the event to the event log", exc_info=True)
         return None
@@ -287,7 +340,12 @@ def emit(event: str, book: dict, username: str = "", error: str = "") -> None:
     except RuntimeError:  # no event loop (a script, or a test without one): logging was enough
         if event_id:
             for n in targets:
-                _note_delivery(event_id, n["id"], state="not sent", error="Narratarr wasn't running its sender.")
+                _note_delivery(
+                    event_id,
+                    n["id"],
+                    state="not sent",
+                    error="Narratarr wasn't running its sender.",
+                )
         return
     task = loop.create_task(_send_all(targets, ctx, event_id))
     _tasks.add(task)
@@ -309,7 +367,9 @@ def events_log() -> str:
         out.append(r["line"])
         for d in r["deliveries"]:
             if d.get("state") == "failed":
-                out.append(f"    {d.get('name')} ({KINDS.get(d.get('kind'), d.get('kind'))}): {d.get('error')}")
+                out.append(
+                    f"    {d.get('name')} ({KINDS.get(d.get('kind'), d.get('kind'))}): {d.get('error')}"
+                )
     return "\n".join(out) + ("\n" if out else "")
 
 
@@ -333,10 +393,15 @@ def _masked_url(n: dict) -> str:
 def public(n: dict) -> dict:
     """A destination as Settings shows it: secrets masked, like the rest of Settings."""
     return {
-        **{k: n.get(k) for k in ("id", "name", "kind", "events", "enabled", "last_at", "last_error")},
+        **{
+            k: n.get(k)
+            for k in ("id", "name", "kind", "events", "enabled", "last_at", "last_error")
+        },
         "url": _masked_url(n),
         "token": _mask(n.get("token") or ""),
-        "headers": [{"name": h["name"], "value": _mask(h["value"])} for h in n.get("headers") or []],
+        "headers": [
+            {"name": h["name"], "value": _mask(h["value"])} for h in n.get("headers") or []
+        ],
         "body": n.get("body") or "",
     }
 
@@ -374,7 +439,9 @@ def clean(data: dict, old: dict | None = None) -> dict:
     if kind == "ntfy":
         _ntfy_parts(url)
     if kind == "discord" and "/api/webhooks/" not in u.path:
-        raise NotifyError("Use the webhook address from Discord: Server settings → Integrations → Webhooks → Copy URL.")
+        raise NotifyError(
+            "Use the webhook address from Discord: Server settings → Integrations → Webhooks → Copy URL."
+        )
 
     token = data.get("token", old.get("token", ""))
     if masked(token):
@@ -391,11 +458,15 @@ def clean(data: dict, old: dict | None = None) -> dict:
             if not name and not h.get("value"):
                 continue
             if not _HEADER_NAME.match(name):
-                raise NotifyError(f"“{name}” isn't a header name: letters, numbers and dashes only.")
+                raise NotifyError(
+                    f"“{name}” isn't a header name: letters, numbers and dashes only."
+                )
             if name.lower() in _RESERVED:
                 raise NotifyError(f"Narratarr sets {name} itself.")
             value = h.get("value", "")
-            value = saved.get(name.lower(), "") if masked(value) else _line(value, "header value", 2000)
+            value = (
+                saved.get(name.lower(), "") if masked(value) else _line(value, "header value", 2000)
+            )
             headers.append({"name": name, "value": value})
         if len(headers) > 10:
             raise NotifyError("Ten headers at most.")
@@ -406,17 +477,33 @@ def clean(data: dict, old: dict | None = None) -> dict:
         if len(body) > 8000:
             raise NotifyError("The body is too long.")
         try:
-            json.loads(render(body or DEFAULT_BODY, context("failed", SAMPLE, "someone", 'an "example" error')))
+            json.loads(
+                render(
+                    body or DEFAULT_BODY, context("failed", SAMPLE, "someone", 'an "example" error')
+                )
+            )
         except ValueError as e:
-            raise NotifyError(f"The body isn't valid JSON once it's filled in ({e.msg}, line {e.lineno}).")
+            raise NotifyError(
+                f"The body isn't valid JSON once it's filled in ({e.msg}, line {e.lineno})."
+            )
 
-    events = [e for e in (data.get("events") if "events" in data else old.get("events")) or [] if e in EVENTS]
+    events = [
+        e
+        for e in (data.get("events") if "events" in data else old.get("events")) or []
+        if e in EVENTS
+    ]
     if not events:
         raise NotifyError("Choose at least one event to be told about.")
     name = " ".join(str(data.get("name", old.get("name", "")) or "").split())[:60] or KINDS[kind]
     return {
-        "name": name, "kind": kind, "url": url, "token": token, "headers": headers, "body": body,
-        "events": list(dict.fromkeys(events)), "enabled": bool(data.get("enabled", old.get("enabled", True))),
+        "name": name,
+        "kind": kind,
+        "url": url,
+        "token": token,
+        "headers": headers,
+        "body": body,
+        "events": list(dict.fromkeys(events)),
+        "enabled": bool(data.get("enabled", old.get("enabled", True))),
     }
 
 
@@ -424,8 +511,13 @@ def create(data: dict) -> dict:
     items = load()
     if len(items) >= MAX_DESTINATIONS:
         raise NotifyError(f"{MAX_DESTINATIONS} destinations at most.")
-    n = {"id": max((i["id"] for i in items), default=0) + 1, **clean(data), "created_at": time.time(),
-         "last_at": None, "last_error": ""}
+    n = {
+        "id": max((i["id"] for i in items), default=0) + 1,
+        **clean(data),
+        "created_at": time.time(),
+        "last_at": None,
+        "last_error": "",
+    }
     _save([*items, n])
     return n
 
