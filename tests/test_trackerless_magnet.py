@@ -4,6 +4,7 @@ From the Discord: qBittorrent sat on "Downloading metadata" with nothing in its 
 gives most torrents an info hash, and its magnetUrl is usually a link back to Prowlarr rather than a
 magnet, so Narratarr built a magnet from the hash alone. That magnet has no trackers.
 """
+
 import pytest
 
 from narratarr import config, db, worker
@@ -15,21 +16,33 @@ TORRENT = b"d8:announce30:udp://tracker.example:1337/ann4:infod4:name4:Dunee" + 
 
 
 def test_a_prowlarr_release_keeps_its_download_link_when_the_hash_is_known():
-    d = to_details({
-        "title": "Frank Herbert - Dune [M4B]", "protocol": "torrent", "infoHash": HASH.upper(),
-        "magnetUrl": f"{PROWLARR}/1/download?apikey=SECRET&link=abc&file=Dune",
-        "downloadUrl": f"{PROWLARR}/1/download?apikey=SECRET&link=abc&file=Dune",
-        "guid": "https://tracker.example/t/1", "seeders": 22,
-    })
+    d = to_details(
+        {
+            "title": "Frank Herbert - Dune [M4B]",
+            "protocol": "torrent",
+            "infoHash": HASH.upper(),
+            "magnetUrl": f"{PROWLARR}/1/download?apikey=SECRET&link=abc&file=Dune",
+            "downloadUrl": f"{PROWLARR}/1/download?apikey=SECRET&link=abc&file=Dune",
+            "guid": "https://tracker.example/t/1",
+            "seeders": 22,
+        }
+    )
     assert d.info_hash == HASH and d.trackers == []
     assert d.download_url.startswith(PROWLARR)
     assert "SECRET" not in d.download_url and "apikey" not in d.download_url.lower()
 
 
 def _book(**over):
-    row = {"source": "prowlarr", "source_url": "https://tracker.example/t/1", "title": "Dune",
-           "protocol": "torrent", "info_hash": HASH, "trackers": [],
-           "download_url": f"{PROWLARR}/1/download?link=abc", "status": "queued"}
+    row = {
+        "source": "prowlarr",
+        "source_url": "https://tracker.example/t/1",
+        "title": "Dune",
+        "protocol": "torrent",
+        "info_hash": HASH,
+        "trackers": [],
+        "download_url": f"{PROWLARR}/1/download?link=abc",
+        "status": "queued",
+    }
     row.update(over)
     return db.insert(row)
 
@@ -70,7 +83,9 @@ async def test_a_magnet_that_has_trackers_is_still_built_from_the_hash(fetched):
 
 
 async def test_an_indexer_that_fails_falls_back_to_the_hash_and_says_so(fetched):
-    fetched.fake.result = ProwlarrError("The indexer wouldn't hand over this release (410). Try another one.")
+    fetched.fake.result = ProwlarrError(
+        "The indexer wouldn't hand over this release (410). Try another one."
+    )
     book = _book()
     kind, payload = await worker.Worker()._torrent_payload(book, None, config.load())
     assert kind == "magnet" and f"btih:{HASH}" in payload

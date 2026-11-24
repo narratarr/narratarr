@@ -26,14 +26,32 @@ def tagged_mp3(path: Path, **frames) -> Path:
 @pytest.mark.parametrize(
     ("artist", "albumartist", "narrator", "author", "reader"),
     [
-        ("Frank Herbert", "Scott Brick", "Scott Brick", "Frank Herbert", "Scott Brick"),  # the reported case
+        (
+            "Frank Herbert",
+            "Scott Brick",
+            "Scott Brick",
+            "Frank Herbert",
+            "Scott Brick",
+        ),  # the reported case
         ("Scott Brick", "Frank Herbert", "Scott Brick", "Frank Herbert", "Scott Brick"),
         ("Frank Herbert, Scott Brick", "", "Scott Brick", "Frank Herbert", "Scott Brick"),
         ("Douglas Preston & Lincoln Child", "", "", "Douglas Preston & Lincoln Child", ""),
         ("Stephen King, read by Frank Muller", "", "", "Stephen King", "Frank Muller"),
         ("Stephen King (Narrated by Will Patton)", "", "", "Stephen King", "Will Patton"),
-        ("", "Brandon Sanderson", "Michael Kramer; Kate Reading", "Brandon Sanderson", "Michael Kramer; Kate Reading"),
-        ("Trevor Noah", "Trevor Noah", "Trevor Noah", "Trevor Noah", "Trevor Noah"),  # read by its author
+        (
+            "",
+            "Brandon Sanderson",
+            "Michael Kramer; Kate Reading",
+            "Brandon Sanderson",
+            "Michael Kramer; Kate Reading",
+        ),
+        (
+            "Trevor Noah",
+            "Trevor Noah",
+            "Trevor Noah",
+            "Trevor Noah",
+            "Trevor Noah",
+        ),  # read by its author
     ],
 )
 def test_pick_people(artist, albumartist, narrator, author, reader):
@@ -43,8 +61,13 @@ def test_pick_people(artist, albumartist, narrator, author, reader):
 def test_album_artist_narrator_is_not_the_author(tmp_path):
     """Artist first, as Audiobookshelf reads it; the narrator in Album artist used to win."""
     book = tmp_path / "in" / "Dune"
-    tagged_mp3(book / "01.mp3", album=TALB(text="Dune"), artist=TPE1(text="Frank Herbert"),
-               albumartist=TPE2(text="Scott Brick"), composer=TCOM(text="Scott Brick"))
+    tagged_mp3(
+        book / "01.mp3",
+        album=TALB(text="Dune"),
+        artist=TPE1(text="Frank Herbert"),
+        albumartist=TPE2(text="Scott Brick"),
+        composer=TCOM(text="Scott Brick"),
+    )
 
     meta = read_meta(book, tmp_path / "in")
 
@@ -55,8 +78,13 @@ def test_album_artist_narrator_is_not_the_author(tmp_path):
 def test_narrator_tag_is_read(tmp_path):
     """A NARRATOR tag (no composer) still keeps the narrator out of the author."""
     book = tmp_path / "in" / "Project Hail Mary"
-    tagged_mp3(book / "01.mp3", album=TALB(text="Project Hail Mary"), artist=TPE1(text="Ray Porter"),
-               albumartist=TPE2(text="Andy Weir"), narrator=TXXX(desc="NARRATOR", text="Ray Porter"))
+    tagged_mp3(
+        book / "01.mp3",
+        album=TALB(text="Project Hail Mary"),
+        artist=TPE1(text="Ray Porter"),
+        albumartist=TPE2(text="Andy Weir"),
+        narrator=TXXX(desc="NARRATOR", text="Ray Porter"),
+    )
 
     meta = read_meta(book, tmp_path / "in")
 
@@ -75,15 +103,33 @@ def client():
 
 
 def local_book():
-    return db.insert({"source": "local", "source_url": "local:///x", "title": "Dune", "author": "Scott Brick",
-                      "narrators": [], "status": "completed"})
+    return db.insert(
+        {
+            "source": "local",
+            "source_url": "local:///x",
+            "title": "Dune",
+            "author": "Scott Brick",
+            "narrators": [],
+            "status": "completed",
+        }
+    )
 
 
 def test_edit_details(client):
     book = local_book()
-    out = client.patch(f"/api/library/{book['id']}", json={
-        "title": "  Dune  ", "author": "Frank  Herbert", "narrators": ["Scott Brick", " ", "Simon Vance"]}).json()
-    assert (out["title"], out["author"], out["narrators"]) == ("Dune", "Frank Herbert", ["Scott Brick", "Simon Vance"])
+    out = client.patch(
+        f"/api/library/{book['id']}",
+        json={
+            "title": "  Dune  ",
+            "author": "Frank  Herbert",
+            "narrators": ["Scott Brick", " ", "Simon Vance"],
+        },
+    ).json()
+    assert (out["title"], out["author"], out["narrators"]) == (
+        "Dune",
+        "Frank Herbert",
+        ["Scott Brick", "Simon Vance"],
+    )
     assert db.get(book["id"])["author"] == "Frank Herbert"
 
 
@@ -98,6 +144,8 @@ def test_edit_needs_a_title_and_a_book(client):
 
 def test_only_admins_edit():
     assert auth.admin_only("PATCH", "/api/library/3")
-    assert not auth.admin_only("DELETE", "/api/library/3")  # checked in the route: listeners cancel their own
+    assert not auth.admin_only(
+        "DELETE", "/api/library/3"
+    )  # checked in the route: listeners cancel their own
     assert auth.admin_only("POST", "/api/library/3/approve")
     assert not auth.admin_only("PUT", "/api/library/3/progress")

@@ -17,8 +17,16 @@ from . import config
 from .cache import Cache
 
 TLDS = {
-    "us": "com", "uk": "co.uk", "ca": "ca", "au": "com.au", "in": "in",
-    "de": "de", "fr": "fr", "it": "it", "es": "es", "jp": "co.jp",
+    "us": "com",
+    "uk": "co.uk",
+    "ca": "ca",
+    "au": "com.au",
+    "in": "in",
+    "de": "de",
+    "fr": "fr",
+    "it": "it",
+    "es": "es",
+    "jp": "co.jp",
 }
 LANGUAGES = {"de": "german", "fr": "french", "it": "italian", "es": "spanish", "jp": "japanese"}
 GROUPS = "contributors,media,product_attrs,product_desc,product_extended_attrs,series"
@@ -35,8 +43,16 @@ class AudibleError(Exception):
 
 
 NAMES = {
-    "us": "United States", "uk": "United Kingdom", "ca": "Canada", "au": "Australia", "in": "India",
-    "de": "Germany", "fr": "France", "it": "Italy", "es": "Spain", "jp": "Japan",
+    "us": "United States",
+    "uk": "United Kingdom",
+    "ca": "Canada",
+    "au": "Australia",
+    "in": "India",
+    "de": "Germany",
+    "fr": "France",
+    "it": "Italy",
+    "es": "Spain",
+    "jp": "Japan",
 }
 _REGION_OF_TLD = {tld: r for r, tld in TLDS.items()}
 # One search can ask another store than the main one (a listener looking for a French book on audible.fr),
@@ -158,7 +174,8 @@ def _wanted_language(b: dict, r: str) -> bool:
 
 _EDITION = re.compile(
     r"\s*(\([^)]*\)|\[[^\]]*\]|:\s*[^:]*\b(annotated|unabridged|edition|illustrated|classics?|version|"
-    r"retold|abridged)\b.*)$", re.I,
+    r"retold|abridged)\b.*)$",
+    re.I,
 )
 
 
@@ -190,11 +207,17 @@ def _keep(books: list[dict], r: str) -> list[dict]:
 async def search_books(query: str, page: int = 1, client=None) -> tuple[list[dict], int]:
     r = region()
     params = {
-        "keywords": query, "num_results": 40, "page": page - 1, "products_sort_by": "Relevance", "response_groups": GROUPS,
+        "keywords": query,
+        "num_results": 40,
+        "page": page - 1,
+        "products_sort_by": "Relevance",
+        "response_groups": GROUPS,
     }
     data = await _get(f"{api_base(r)}/products", params, client) or {}
     total = int(data.get("total_results") or 0)
-    return _keep([to_book(p, r) for p in data.get("products") or []], r), max(1, min(10, -(-total // 40)))
+    return _keep([to_book(p, r) for p in data.get("products") or []], r), max(
+        1, min(10, -(-total // 40))
+    )
 
 
 async def products(asins: list[str], client=None, r: str | None = None) -> list[dict]:
@@ -202,7 +225,9 @@ async def products(asins: list[str], client=None, r: str | None = None) -> list[
     out = []
     for i in range(0, len(asins), 50):
         chunk = asins[i : i + 50]
-        data = await _get(f"{api_base(r)}/products", {"asins": ",".join(chunk), "response_groups": GROUPS}, client)
+        data = await _get(
+            f"{api_base(r)}/products", {"asins": ",".join(chunk), "response_groups": GROUPS}, client
+        )
         out += [to_book(p, r) for p in (data or {}).get("products") or [] if p.get("title")]
     return out
 
@@ -223,7 +248,9 @@ async def search_authors(name: str, client=None) -> list[dict]:
         except AudibleError:
             info = {}
         return {
-            "asin": a["asin"], "name": info.get("name") or a["name"], "image": info.get("image") or "",
+            "asin": a["asin"],
+            "name": info.get("name") or a["name"],
+            "image": info.get("image") or "",
             "description": _plain(info.get("description") or "")[:600],
         }
 
@@ -238,7 +265,9 @@ async def search_authors(name: str, client=None) -> list[dict]:
 async def author(asin: str, client=None) -> dict:
     info = await _get(f"{AUDNEXUS}/authors/{asin}", {"region": region()}, client) or {}
     return {
-        "asin": asin, "name": info.get("name") or "", "image": info.get("image") or "",
+        "asin": asin,
+        "name": info.get("name") or "",
+        "image": info.get("image") or "",
         "description": _plain(info.get("description") or ""),
     }
 
@@ -249,13 +278,21 @@ async def author_books(asin: str, name: str, client=None, pages: int = 4) -> lis
     found: list[dict] = []
     for page in range(1, pages + 1):
         params = {
-            "author": name, "num_results": 50, "page": page - 1, "products_sort_by": "-ReleaseDate",
+            "author": name,
+            "num_results": 50,
+            "page": page - 1,
+            "products_sort_by": "-ReleaseDate",
             "response_groups": GROUPS,
         }
         data = await _get(f"{api_base(r)}/products", params, client) or {}
         batch = [to_book(p, r) for p in data.get("products") or []]
         # Match the author's ID, or their exact name: classic authors are credited under several IDs.
-        found += [b for b in batch if asin in b["author_asins"] or name.lower() in [a.strip().lower() for a in b["author"].split(",")]]
+        found += [
+            b
+            for b in batch
+            if asin in b["author_asins"]
+            or name.lower() in [a.strip().lower() for a in b["author"].split(",")]
+        ]
         if len(batch) < 50:
             break
     return _keep(found, r)
@@ -271,7 +308,10 @@ def series_name(title: str) -> str:
 
 async def series_members(asin: str, client=None) -> dict[str, str]:
     """The books a series lists as its own, {asin: number in the series}."""
-    data = await _get(f"{api_base()}/products/{asin}", {"response_groups": "relationships"}, client) or {}
+    data = (
+        await _get(f"{api_base()}/products/{asin}", {"response_groups": "relationships"}, client)
+        or {}
+    )
     return {
         rel["asin"]: str(rel.get("sequence") or "")
         for rel in (data.get("product") or {}).get("relationships") or []
@@ -286,15 +326,21 @@ async def tidy_series(books: list[dict], client=None, most: int = 12) -> list[di
     record sometimes leaves out the series it belongs to even though the series lists it. So: series
     names lose their edition note, a book with no series is placed in the series that lists it, and an
     abridged edition is dropped when the unabridged one is there too."""
-    titles = {s["asin"]: series_name(s["title"]) for b in books for s in b["series"] if s.get("asin")}
+    titles = {
+        s["asin"]: series_name(s["title"]) for b in books for s in b["series"] if s.get("asin")
+    }
     asins = list(titles)[:most]
-    found = await asyncio.gather(*(series_members(a, client) for a in asins), return_exceptions=True)
+    found = await asyncio.gather(
+        *(series_members(a, client) for a in asins), return_exceptions=True
+    )
     for sasin, members in zip(asins, found):
         if isinstance(members, BaseException):
             continue
         for b in books:
             if not b["series"] and b["asin"] in members:
-                b["series"] = [{"asin": sasin, "title": titles[sasin], "sequence": members[b["asin"]]}]
+                b["series"] = [
+                    {"asin": sasin, "title": titles[sasin], "sequence": members[b["asin"]]}
+                ]
     for b in books:
         b["series"] = [{**s, "title": series_name(s["title"])} for s in b["series"]]
 
@@ -314,7 +360,8 @@ async def series_books(asin: str, client=None) -> tuple[str, list[dict]]:
     data = await _get(f"{api_base()}/products/{asin}", params, client) or {}
     product = data.get("product") or {}
     children = [
-        rel for rel in product.get("relationships") or []
+        rel
+        for rel in product.get("relationships") or []
         if rel.get("relationship_to_product") == "child" and rel.get("asin")
     ]
     children.sort(key=lambda rel: float(rel.get("sort") or 999))

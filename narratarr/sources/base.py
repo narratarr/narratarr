@@ -40,7 +40,11 @@ class Page:
     total_pages: int
 
     def to_dict(self) -> dict:
-        return {"items": [i.to_dict() for i in self.items], "page": self.page, "total_pages": self.total_pages}
+        return {
+            "items": [i.to_dict() for i in self.items],
+            "page": self.page,
+            "total_pages": self.total_pages,
+        }
 
 
 @dataclass

@@ -27,8 +27,18 @@ PROXY_HEADERS = ("x-forwarded-for", "x-real-ip", "forwarded", "cf-connecting-ip"
 # Paths anyone may use. Everything else under /api/ needs a signed-in user.
 OPEN = {"/api/health", "/api/auth/status", "/api/auth/login", "/api/auth/setup"}
 # Paths only admins may use (any method), and admin-only method/path pairs.
-ADMIN_PREFIXES = ("/api/users", "/api/settings/", "/api/audiobookshelf", "/api/import", "/api/updates/apply", "/api/tidy",
-                  "/api/download-clients", "/api/indexers", "/api/routing", "/api/hardcover")
+ADMIN_PREFIXES = (
+    "/api/users",
+    "/api/settings/",
+    "/api/audiobookshelf",
+    "/api/import",
+    "/api/updates/apply",
+    "/api/tidy",
+    "/api/download-clients",
+    "/api/indexers",
+    "/api/routing",
+    "/api/hardcover",
+)
 LOGIN_TRIES = 8  # per address, every LOGIN_WINDOW seconds
 LOGIN_WINDOW = 10 * 60
 
@@ -62,7 +72,9 @@ def current_user(request) -> dict | None:
 def admin_only(method: str, path: str) -> bool:
     if path.startswith(ADMIN_PREFIXES) or (path == "/api/settings" and method != "GET"):
         return True
-    if path.startswith("/api/library/") and path.endswith(("/approve", "/keep-looking", "/audible-match")):
+    if path.startswith("/api/library/") and path.endswith(
+        ("/approve", "/keep-looking", "/audible-match")
+    ):
         return True
     # Removing a book is checked in the route itself: a listener may cancel their own request.
     return method == "PATCH" and path.startswith("/api/library/")
@@ -87,16 +99,23 @@ def adopt_env_password() -> None:
     try:
         users.create("admin", password, "admin")
     except users.UserError as e:
-        log.warning("Couldn't turn NARRATARR_PASSWORD into an account (%s); create one in the browser instead.", e)
+        log.warning(
+            "Couldn't turn NARRATARR_PASSWORD into an account (%s); create one in the browser instead.",
+            e,
+        )
         return
-    log.warning("Created the admin account 'admin' with your NARRATARR_PASSWORD. Sign in with that, then unset it.")
+    log.warning(
+        "Created the admin account 'admin' with your NARRATARR_PASSWORD. Sign in with that, then unset it."
+    )
 
 
 def announce_setup() -> None:
     if users.count():
         return
-    message = (f"No accounts yet. Open Narratarr to create the admin account. From another network "
-               f"you'll be asked for this setup code: {setup_code()}  (or run: narratarr users add <name>)")
+    message = (
+        f"No accounts yet. Open Narratarr to create the admin account. From another network "
+        f"you'll be asked for this setup code: {setup_code()}  (or run: narratarr users add <name>)"
+    )
     print(f"\n  {message}\n", flush=True)
     log.warning(message)
 
@@ -132,7 +151,7 @@ def _ip(text: str):
     """An address as proxies write it: 1.2.3.4, 1.2.3.4:5678, 2001:db8::1, [2001:db8::1]:443."""
     text = text.strip().strip('"')
     if text.startswith("["):
-        text = text[1:text.find("]")] if "]" in text else text[1:]
+        text = text[1 : text.find("]")] if "]" in text else text[1:]
     elif text.count(":") == 1:
         text = text.split(":", 1)[0]
     try:
@@ -156,10 +175,18 @@ def client_ip(request) -> str:
     if not nets or not _in(host, nets):
         if not _warned_untrusted and "x-forwarded-for" in request.headers:
             _warned_untrusted = True
-            log.warning("Requests arrive through a proxy at %s. Set NARRATARR_TRUSTED_PROXIES to its address so "
-                        "sign-in limits apply to each visitor instead of everyone at once.", host)
+            log.warning(
+                "Requests arrive through a proxy at %s. Set NARRATARR_TRUSTED_PROXIES to its address so "
+                "sign-in limits apply to each visitor instead of everyone at once.",
+                host,
+            )
         return host
-    chain = [h for value in request.headers.getlist("x-forwarded-for") for h in value.split(",") if h.strip()]
+    chain = [
+        h
+        for value in request.headers.getlist("x-forwarded-for")
+        for h in value.split(",")
+        if h.strip()
+    ]
     for hop in reversed(chain):
         ip = _ip(hop)
         if ip is None:
@@ -175,7 +202,11 @@ def _network(addr: str) -> str:
     if ip is None:
         return addr
     if ip.version == 6:
-        return str(ip.ipv4_mapped) if ip.ipv4_mapped else str(ipaddress.ip_network(f"{ip}/64", strict=False))
+        return (
+            str(ip.ipv4_mapped)
+            if ip.ipv4_mapped
+            else str(ipaddress.ip_network(f"{ip}/64", strict=False))
+        )
     return str(ip)
 
 
@@ -196,7 +227,9 @@ def _trim(now: float) -> None:
     for key in [k for k, ts in _failures.items() if not ts or now - ts[-1] >= LOGIN_WINDOW]:
         del _failures[key]
     if len(_failures) > _MAX_KEYS:
-        addresses = sorted((k for k in _failures if k.startswith("ip:")), key=lambda k: _failures[k][-1])
+        addresses = sorted(
+            (k for k in _failures if k.startswith("ip:")), key=lambda k: _failures[k][-1]
+        )
         for key in addresses[: len(addresses) // 2]:
             del _failures[key]
 
@@ -210,7 +243,9 @@ def start_try(request, username: str = ""):
     if len(_recent(keys[0], now)) >= LOGIN_TRIES:
         return None
     name = username.strip().lower()[:64]
-    if name and users.by_name(name):  # only real accounts get a counter, so made-up names can't flood the table
+    if name and users.by_name(
+        name
+    ):  # only real accounts get a counter, so made-up names can't flood the table
         familiar = is_local(request) or network in _known.get(name, ())
         if not familiar and len(_recent(f"user:{name}", now)) >= NAME_TRIES:
             return None
@@ -247,5 +282,7 @@ def failed_try(request) -> None:
 
 
 def cookie_args(request) -> dict:
-    secure = request.url.scheme == "https" or request.headers.get("x-forwarded-proto", "") == "https"
+    secure = (
+        request.url.scheme == "https" or request.headers.get("x-forwarded-proto", "") == "https"
+    )
     return {"key": COOKIE, "httponly": True, "samesite": "lax", "secure": secure, "path": "/"}

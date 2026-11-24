@@ -23,6 +23,7 @@ RETRY_AFTER = 7 * 24 * 3600
 def key_for(title: str, author: str) -> str:
     """The cache key: a title and author normalised just enough that punctuation and case don't
     produce a second row for the same book."""
+
     def norm(s: str) -> str:
         return " ".join((s or "").lower().replace("’", "'").split())
 
@@ -86,9 +87,11 @@ class Store:
         `RETRY_AFTER`, so a book that had no rating is looked at again sooner than one that did.
         """
         self._init()
-        row = self._con().execute(
-            "SELECT * FROM rating WHERE key = ? AND provider = ?", (key, provider)
-        ).fetchone()
+        row = (
+            self._con()
+            .execute("SELECT * FROM rating WHERE key = ? AND provider = ?", (key, provider))
+            .fetchone()
+        )
         if row is None:
             return None
         age = time.time() - row["checked_at"]
@@ -130,9 +133,14 @@ class Store:
 
     def count(self, provider: str) -> dict:
         self._init()
-        rows = self._con().execute(
-            "SELECT state, COUNT(*) AS n FROM rating WHERE provider = ? GROUP BY state", (provider,)
-        ).fetchall()
+        rows = (
+            self._con()
+            .execute(
+                "SELECT state, COUNT(*) AS n FROM rating WHERE provider = ? GROUP BY state",
+                (provider,),
+            )
+            .fetchall()
+        )
         return {r["state"]: r["n"] for r in rows}
 
     # ---- resolver --------------------------------------------------------------------------

@@ -81,11 +81,15 @@ async def search(
     except httpx.HTTPError as e:
         raise BraveError("Couldn't reach Brave Search.") from e
 
-    bad_key = resp.status_code in (401, 403) or (resp.status_code == 422 and "token" in resp.text.lower())
+    bad_key = resp.status_code in (401, 403) or (
+        resp.status_code == 422 and "token" in resp.text.lower()
+    )
     if bad_key:
         raise BraveError("Brave rejected the API key. Check it in Settings.")
     if resp.status_code == 429:
-        raise BraveError("Brave Search rate limit reached. Wait a moment, or check your plan's monthly quota.")
+        raise BraveError(
+            "Brave Search rate limit reached. Wait a moment, or check your plan's monthly quota."
+        )
     if resp.status_code >= 400:
         raise BraveError(f"Brave Search error {resp.status_code}.")
 

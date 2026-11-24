@@ -50,7 +50,9 @@ def best(files: list[Path]) -> Path | None:
     """The one to keep: the preferred format, then the biggest (a full edition beats a sample)."""
     if not files:
         return None
-    return min(files, key=lambda p: (PREFERENCE.index(p.suffix.lower()), -p.stat().st_size, str(p).lower()))
+    return min(
+        files, key=lambda p: (PREFERENCE.index(p.suffix.lower()), -p.stat().st_size, str(p).lower())
+    )
 
 
 def sidecar(p: Path) -> bool:
@@ -70,8 +72,11 @@ def clutter(p: Path) -> bool:
 # An EPUB is a zip: META-INF/container.xml names the package file (OPF), which holds the
 # title, authors, description and which image is the cover.
 
-_NS = {"c": "urn:oasis:names:tc:opendocument:xmlns:container", "opf": "http://www.idpf.org/2007/opf",
-       "dc": "http://purl.org/dc/elements/1.1/"}
+_NS = {
+    "c": "urn:oasis:names:tc:opendocument:xmlns:container",
+    "opf": "http://www.idpf.org/2007/opf",
+    "dc": "http://purl.org/dc/elements/1.1/",
+}
 
 
 def _read(zf: zipfile.ZipFile, name: str, limit: int) -> bytes | None:
@@ -106,7 +111,13 @@ def _text(el: ElementTree.Element | None) -> str:
 def _plain(html: str) -> str:
     text = re.sub(r"(?i)<br\s*/?>|</p>", "\n", html or "")
     text = re.sub(r"<[^>]+>", "", text)
-    text = text.replace("&amp;", "&").replace("&quot;", '"').replace("&#39;", "'").replace("&lt;", "<").replace("&gt;", ">")
+    text = (
+        text.replace("&amp;", "&")
+        .replace("&quot;", '"')
+        .replace("&#39;", "'")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+    )
     return "\n\n".join(p for p in (" ".join(line.split()) for line in text.split("\n")) if p)
 
 
@@ -141,14 +152,24 @@ def epub_cover(path: Path) -> tuple[bytes, str] | None:
             opf_path, pkg = found
             items = pkg.findall("opf:manifest/opf:item", _NS)
             # EPUB 3 marks the cover in the manifest; EPUB 2 points at it from a <meta>.
-            item = next((i for i in items if "cover-image" in (i.get("properties") or "").split()), None)
+            item = next(
+                (i for i in items if "cover-image" in (i.get("properties") or "").split()), None
+            )
             if item is None:
-                ref = next((m.get("content") for m in pkg.findall("opf:metadata/opf:meta", _NS)
-                            if m.get("name") == "cover"), None)
+                ref = next(
+                    (
+                        m.get("content")
+                        for m in pkg.findall("opf:metadata/opf:meta", _NS)
+                        if m.get("name") == "cover"
+                    ),
+                    None,
+                )
                 item = next((i for i in items if ref and i.get("id") == ref), None)
             if item is None or not (item.get("media-type") or "").startswith("image/"):
                 return None
-            name = posixpath.normpath(posixpath.join(posixpath.dirname(opf_path), item.get("href") or ""))
+            name = posixpath.normpath(
+                posixpath.join(posixpath.dirname(opf_path), item.get("href") or "")
+            )
             data = _read(zf, name, MAX_COVER_BYTES)
             return (data, item.get("media-type")) if data else None
     except (OSError, zipfile.BadZipFile, ElementTree.ParseError, ValueError, KeyError):
@@ -161,19 +182,48 @@ def epub_cover(path: Path) -> tuple[bytes, str] | None:
 
 MAX_MEMBER_BYTES = 64 << 20
 READABLE_TYPES = {  # what a chapter may load from inside its book; anything else is sent as a download
-    "application/xhtml+xml", "text/html", "text/css", "image/jpeg", "image/png", "image/gif", "image/webp",
-    "image/svg+xml", "font/otf", "font/ttf", "font/woff", "font/woff2", "application/font-woff",
-    "application/font-sfnt", "application/vnd.ms-opentype", "application/x-font-ttf", "application/x-font-otf",
+    "application/xhtml+xml",
+    "text/html",
+    "text/css",
+    "image/jpeg",
+    "image/png",
+    "image/gif",
+    "image/webp",
+    "image/svg+xml",
+    "font/otf",
+    "font/ttf",
+    "font/woff",
+    "font/woff2",
+    "application/font-woff",
+    "application/font-sfnt",
+    "application/vnd.ms-opentype",
+    "application/x-font-ttf",
+    "application/x-font-otf",
 }
-_GUESS = {".xhtml": "application/xhtml+xml", ".html": "text/html", ".htm": "text/html", ".css": "text/css",
-          ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".gif": "image/gif", ".webp": "image/webp",
-          ".svg": "image/svg+xml", ".otf": "font/otf", ".ttf": "font/ttf", ".woff": "font/woff", ".woff2": "font/woff2"}
+_GUESS = {
+    ".xhtml": "application/xhtml+xml",
+    ".html": "text/html",
+    ".htm": "text/html",
+    ".css": "text/css",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".svg": "image/svg+xml",
+    ".otf": "font/otf",
+    ".ttf": "font/ttf",
+    ".woff": "font/woff",
+    ".woff2": "font/woff2",
+}
 
 
 def _resolve(base: str, href: str) -> tuple[str, str]:
     """A link inside the book, as (zip member name, #fragment)."""
     href, _, fragment = (href or "").partition("#")
-    name = posixpath.normpath(posixpath.join(posixpath.dirname(base), unquote(href))) if href else base
+    name = (
+        posixpath.normpath(posixpath.join(posixpath.dirname(base), unquote(href))) if href else base
+    )
     return name.lstrip("/"), fragment
 
 
@@ -204,7 +254,9 @@ class _NavParser(HTMLParser):
         elif self.in_toc and tag == "a" and self.href is not None:
             title = " ".join("".join(self.text).split())
             if title:
-                self.items.append({"href": self.href, "title": title[:200], "depth": max(self.depth, 0)})
+                self.items.append(
+                    {"href": self.href, "title": title[:200], "depth": max(self.depth, 0)}
+                )
             self.href = None
 
     def handle_data(self, data):
@@ -227,7 +279,9 @@ def _toc_from_ncx(data: bytes) -> list[dict]:
             title = _text(point.find("n:navLabel/n:text", ns))
             content = point.find("n:content", ns)
             if title and content is not None:
-                items.append({"href": content.get("src") or "", "title": title[:200], "depth": depth})
+                items.append(
+                    {"href": content.get("src") or "", "title": title[:200], "depth": depth}
+                )
             walk(point, depth + 1)
 
     nav_map = ElementTree.fromstring(data).find("n:navMap", ns)
@@ -245,15 +299,24 @@ def _index(path: str, signature: tuple) -> dict:
         manifest = {}
         for item in pkg.findall("opf:manifest/opf:item", _NS):
             name, _ = _resolve(opf_path, item.get("href") or "")
-            manifest[item.get("id")] = {"name": name, "type": item.get("media-type") or "",
-                                        "props": (item.get("properties") or "").split()}
+            manifest[item.get("id")] = {
+                "name": name,
+                "type": item.get("media-type") or "",
+                "props": (item.get("properties") or "").split(),
+            }
         spine_el = pkg.find("opf:spine", _NS)
         spine = []
         for ref in spine_el.findall("opf:itemref", _NS) if spine_el is not None else []:
             item = manifest.get(ref.get("idref"))
-            if item and item["type"] in ("application/xhtml+xml", "text/html") and item["name"] in zf.NameToInfo:
+            if (
+                item
+                and item["type"] in ("application/xhtml+xml", "text/html")
+                and item["name"] in zf.NameToInfo
+            ):
                 # Its size lets the reader say how far through the whole book a page is.
-                spine.append({"href": item["name"], "size": max(zf.NameToInfo[item["name"]].file_size, 1)})
+                spine.append(
+                    {"href": item["name"], "size": max(zf.NameToInfo[item["name"]].file_size, 1)}
+                )
         if not spine:
             raise ValueError("This EPUB has no pages Narratarr can show.")
         toc: list[dict] = []
@@ -271,7 +334,14 @@ def _index(path: str, signature: tuple) -> dict:
         for t in toc[:2000]:
             name, fragment = _resolve(t["base"], t["href"])
             if name in hrefs:
-                entries.append({"title": t["title"], "href": name, "fragment": fragment, "depth": min(t["depth"], 4)})
+                entries.append(
+                    {
+                        "title": t["title"],
+                        "href": name,
+                        "fragment": fragment,
+                        "depth": min(t["depth"], 4),
+                    }
+                )
         meta = pkg.find("opf:metadata", _NS)
         return {
             "title": _text(meta.find("dc:title", _NS)) if meta is not None else "",
@@ -305,5 +375,10 @@ def epub_member(path: Path, name: str) -> tuple[bytes, str] | None:
         data = _read(zf, name, MAX_MEMBER_BYTES)
     if data is None:
         return None
-    kind = (types.get(name) or _GUESS.get(posixpath.splitext(name)[1].lower(), "")).split(";")[0].strip().lower()
+    kind = (
+        (types.get(name) or _GUESS.get(posixpath.splitext(name)[1].lower(), ""))
+        .split(";")[0]
+        .strip()
+        .lower()
+    )
     return data, kind if kind in READABLE_TYPES else "application/octet-stream"

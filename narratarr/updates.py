@@ -27,9 +27,13 @@ from .cache import Cache
 log = logging.getLogger("narratarr.updates")
 
 REPO = "narratarr/narratarr"
-RELEASES = os.environ.get("NARRATARR_RELEASES_URL") or f"https://api.github.com/repos/{REPO}/releases"
+RELEASES = (
+    os.environ.get("NARRATARR_RELEASES_URL") or f"https://api.github.com/repos/{REPO}/releases"
+)
 CHECK_SECONDS = 24 * 3600
-PACKAGE = os.environ.get("NARRATARR_PACKAGE", "")  # override the install source (used by tests and the installer)
+PACKAGE = os.environ.get(
+    "NARRATARR_PACKAGE", ""
+)  # override the install source (used by tests and the installer)
 
 _cache: Cache[dict] = Cache(CHECK_SECONDS, 4)
 _state = {"status": "idle", "detail": "", "started": 0.0}  # the self-update in progress, if any
@@ -62,7 +66,13 @@ def install_kind() -> str:
 def find_uv() -> str:
     """uv, even when started by launchd or systemd with a bare PATH."""
     home = Path.home()
-    candidates = [shutil.which("uv"), home / ".local/bin/uv", home / ".cargo/bin/uv", "/opt/homebrew/bin/uv", "/usr/local/bin/uv"]
+    candidates = [
+        shutil.which("uv"),
+        home / ".local/bin/uv",
+        home / ".cargo/bin/uv",
+        "/opt/homebrew/bin/uv",
+        "/usr/local/bin/uv",
+    ]
     for c in candidates:
         if c and Path(c).is_file() and os.access(c, os.X_OK):
             return str(c)
@@ -70,19 +80,27 @@ def find_uv() -> str:
 
 
 def changelog() -> str:
-    for p in (Path(__file__).parent / "CHANGELOG.md", Path(__file__).parent.parent / "CHANGELOG.md"):
+    for p in (
+        Path(__file__).parent / "CHANGELOG.md",
+        Path(__file__).parent.parent / "CHANGELOG.md",
+    ):
         if p.is_file():
             return p.read_text(encoding="utf-8")
     return ""
 
 
-async def latest_release(force: bool = False, client: httpx.AsyncClient | None = None) -> dict | None:
+async def latest_release(
+    force: bool = False, client: httpx.AsyncClient | None = None
+) -> dict | None:
     """The newest GitHub release: {version, notes, url, published}, or None if it couldn't be checked."""
     if not force:
         hit = _cache.get("latest")
         if hit is not None:
             return hit
-    headers = {"Accept": "application/vnd.github+json", "User-Agent": f"narratarr/{current_version()}"}
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "User-Agent": f"narratarr/{current_version()}",
+    }
     try:
         if client:
             resp = await client.get(f"{RELEASES}/latest", headers=headers)
@@ -127,8 +145,20 @@ def _run_update(target: str) -> None:
         _state.update(status="installing", detail=f"Downloading and installing Narratarr {target}…")
         pkg = PACKAGE or f"git+https://github.com/{REPO}@v{target}"
         out = subprocess.run(
-            [uv, "tool", "install", "--force", "--reinstall-package", "narratarr", "--refresh-package", "narratarr", pkg],
-            capture_output=True, text=True, timeout=600,
+            [
+                uv,
+                "tool",
+                "install",
+                "--force",
+                "--reinstall-package",
+                "narratarr",
+                "--refresh-package",
+                "narratarr",
+                pkg,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=600,
         )
         if out.returncode != 0:
             tail = (out.stderr or out.stdout).strip().splitlines()[-1:] or ["unknown error"]
@@ -151,7 +181,11 @@ async def apply(target: str) -> dict:
         if _state["status"] in ("installing", "restarting"):
             return dict(_state)
         if install_kind() != "uv" or not find_uv():
-            raise RuntimeError("This copy can't update itself. See Settings → Updates for the command to run.")
+            raise RuntimeError(
+                "This copy can't update itself. See Settings → Updates for the command to run."
+            )
         _state.update(status="installing", detail="Starting…", started=time.time())
-    await asyncio.to_thread(lambda: threading.Thread(target=_run_update, args=(target,), daemon=True).start())
+    await asyncio.to_thread(
+        lambda: threading.Thread(target=_run_update, args=(target,), daemon=True).start()
+    )
     return dict(_state)

@@ -16,14 +16,33 @@ HOME = ("192.168.1.20", 50000)
 AWAY = ("8.8.4.4", 50000)
 
 DUNE = {
-    "asin": "B002V1OF70", "url": "https://www.audible.com/pd/B002V1OF70", "title": "Dune", "subtitle": "",
-    "author": "Frank Herbert", "author_asins": [], "narrators": ["Scott Brick", "Orlagh Cassidy"],
-    "cover_url": "https://m.media-amazon.com/images/I/dune._SL500_.jpg", "description": "Arrakis.",
-    "released": "2007-01-01", "length": "21 hours", "minutes": 1260, "language": "English",
-    "series": [{"asin": "B00GMG4N8E", "title": "Dune", "sequence": "1"}], "kind": "SinglePartBook", "abridged": False,
+    "asin": "B002V1OF70",
+    "url": "https://www.audible.com/pd/B002V1OF70",
+    "title": "Dune",
+    "subtitle": "",
+    "author": "Frank Herbert",
+    "author_asins": [],
+    "narrators": ["Scott Brick", "Orlagh Cassidy"],
+    "cover_url": "https://m.media-amazon.com/images/I/dune._SL500_.jpg",
+    "description": "Arrakis.",
+    "released": "2007-01-01",
+    "length": "21 hours",
+    "minutes": 1260,
+    "language": "English",
+    "series": [{"asin": "B00GMG4N8E", "title": "Dune", "sequence": "1"}],
+    "kind": "SinglePartBook",
+    "abridged": False,
 }
-HAIL_MARY = {**DUNE, "asin": "B08G9PRS1K", "url": "https://www.audible.com/pd/B08G9PRS1K", "title": "Project Hail Mary",
-             "author": "Andy Weir", "narrators": ["Ray Porter"], "series": [], "minutes": 970}
+HAIL_MARY = {
+    **DUNE,
+    "asin": "B08G9PRS1K",
+    "url": "https://www.audible.com/pd/B08G9PRS1K",
+    "title": "Project Hail Mary",
+    "author": "Andy Weir",
+    "narrators": ["Ray Porter"],
+    "series": [],
+    "minutes": 970,
+}
 CATALOG = {b["asin"]: b for b in (DUNE, HAIL_MARY)}
 
 
@@ -65,11 +84,15 @@ def app():
 
 @pytest.fixture
 def people():
-    return users.create("desmond", "correct horse", "admin"), users.create("kid", "listen-only", "listener")
+    return users.create("desmond", "correct horse", "admin"), users.create(
+        "kid", "listen-only", "listener"
+    )
 
 
 def login(c, username="kid", password="listen-only", app_name="Fable Frog on iPhone"):
-    r = c.post("/api/v1/auth/login", json={"username": username, "password": password, "client": app_name})
+    r = c.post(
+        "/api/v1/auth/login", json={"username": username, "password": password, "client": app_name}
+    )
     assert r.status_code == 200, r.text
     return r.json()
 
@@ -89,13 +112,20 @@ def test_status_needs_no_sign_in(app):
     r = app.get("/api/v1/status")
     assert r.status_code == 200
     assert r.json()["app"] == "narratarr" and r.json()["api_version"] == 1
-    assert r.headers["cache-control"] == "no-store" and r.headers["x-content-type-options"] == "nosniff"
+    assert (
+        r.headers["cache-control"] == "no-store"
+        and r.headers["x-content-type-options"] == "nosniff"
+    )
 
 
 def test_login_gives_tokens_and_stores_only_their_hashes(app, people):
     t = login(app)
     assert t["access_token"].startswith("nrt_at_") and t["refresh_token"].startswith("nrt_rt_")
-    assert t["token_type"] == "Bearer" and t["expires_in"] == 3600 and t["refresh_expires_in"] == 90 * 24 * 3600
+    assert (
+        t["token_type"] == "Bearer"
+        and t["expires_in"] == 3600
+        and t["refresh_expires_in"] == 90 * 24 * 3600
+    )
     assert t["user"]["username"] == "kid" and "password_hash" not in t["user"]
     with db.connect() as conn:
         stored = str([tuple(r) for r in conn.execute("SELECT * FROM app_tokens")])
@@ -109,7 +139,9 @@ def test_wrong_password_and_too_many_tries(app, people):
     assert r.status_code == 401 and err(r) == "invalid_credentials"
     for _ in range(auth.LOGIN_TRIES):
         app.post("/api/v1/auth/login", json={"username": "kid", "password": "nope", "client": "x"})
-    r = app.post("/api/v1/auth/login", json={"username": "kid", "password": "listen-only", "client": "x"})
+    r = app.post(
+        "/api/v1/auth/login", json={"username": "kid", "password": "listen-only", "client": "x"}
+    )
     assert r.status_code == 429 and err(r) == "rate_limited" and r.headers["retry-after"]
 
 
@@ -119,7 +151,10 @@ def test_login_before_setup(app):
 
 
 def test_validation_errors_never_echo_the_password(app, people):
-    r = app.post("/api/v1/auth/login", json={"username": "kid", "password": "hunter2-secret", "client": "", "extra": 1})
+    r = app.post(
+        "/api/v1/auth/login",
+        json={"username": "kid", "password": "hunter2-secret", "client": "", "extra": 1},
+    )
     assert r.status_code == 422 and err(r) == "validation_error"
     assert "hunter2-secret" not in r.text
     assert {f["field"] for f in r.json()["error"]["fields"]} >= {"client", "extra"}
@@ -127,7 +162,10 @@ def test_validation_errors_never_echo_the_password(app, people):
 
 def test_app_names_are_tidied(app, people):
     t = login(app, app_name="  Fable\x00 Frog\n\n on   iPhone  ")
-    assert app.get("/api/v1/me", headers=bearer(t["access_token"])).json()["app"]["name"] == "Fable Frog on iPhone"
+    assert (
+        app.get("/api/v1/me", headers=bearer(t["access_token"])).json()["app"]["name"]
+        == "Fable Frog on iPhone"
+    )
 
 
 # ---- what tokens can and can't do --------------------------------------------------------------
@@ -135,19 +173,30 @@ def test_app_names_are_tidied(app, people):
 
 def test_every_route_needs_sign_in_except_the_open_ones(app):
     schema = app.get("/api/v1/openapi.json").json()
-    routes = [(path, method) for path, ops in schema["paths"].items() for method in ops if path not in apiv1.OPEN_PATHS]
+    routes = [
+        (path, method)
+        for path, ops in schema["paths"].items()
+        for method in ops
+        if path not in apiv1.OPEN_PATHS
+    ]
     assert len(routes) >= 8
     for path, method in routes:
         url = "/api/v1" + path.replace("{asin}", "B002V1OF70").replace("{request_id}", "1")
         resp = app.request(method.upper(), url)
-        assert resp.status_code == 401, f"{method} {path} answered {resp.status_code} without sign-in"
+        assert resp.status_code == 401, (
+            f"{method} {path} answered {resp.status_code} without sign-in"
+        )
         assert resp.headers["www-authenticate"].startswith("Bearer")
 
 
 def test_app_tokens_dont_work_on_the_internal_api(app, people):
     t = login(app, "desmond", "correct horse")  # even an admin's
-    for method, path in (("GET", "/api/library"), ("GET", "/api/settings"), ("GET", "/api/users"),
-                         ("PUT", "/api/settings")):
+    for method, path in (
+        ("GET", "/api/library"),
+        ("GET", "/api/settings"),
+        ("GET", "/api/users"),
+        ("PUT", "/api/settings"),
+    ):
         assert app.request(method, path, headers=bearer(t["access_token"])).status_code == 401
 
 
@@ -170,11 +219,16 @@ def test_a_web_session_works_too(app, people):
 
 
 def test_bad_tokens(app, people):
-    assert err(app.get("/api/v1/me", headers={"Authorization": "Basic a2lkOmxpc3Rlbg=="})) == "invalid_token"
+    assert (
+        err(app.get("/api/v1/me", headers={"Authorization": "Basic a2lkOmxpc3Rlbg=="}))
+        == "invalid_token"
+    )
     assert err(app.get("/api/v1/me", headers={"Authorization": "Bearer "})) == "invalid_token"
     assert err(app.get("/api/v1/me", headers=bearer("nrt_at_" + "x" * 43))) == "invalid_token"
     t = login(app)
-    assert err(app.get("/api/v1/me", headers=bearer(t["refresh_token"]))) == "invalid_token"  # wrong kind
+    assert (
+        err(app.get("/api/v1/me", headers=bearer(t["refresh_token"]))) == "invalid_token"
+    )  # wrong kind
 
 
 def test_access_tokens_expire(app, people, monkeypatch):
@@ -203,29 +257,46 @@ def test_a_reused_refresh_token_signs_the_app_out(app, people, monkeypatch):
     t2 = app.post("/api/v1/auth/refresh", json={"refresh_token": t1["refresh_token"]}).json()
     later = time.time() + tokens.RETRY_SECONDS + 5
     monkeypatch.setattr(tokens.time, "time", lambda: later)
-    r = app.post("/api/v1/auth/refresh", json={"refresh_token": t1["refresh_token"]})  # a stolen copy
+    r = app.post(
+        "/api/v1/auth/refresh", json={"refresh_token": t1["refresh_token"]}
+    )  # a stolen copy
     assert r.status_code == 401 and err(r) == "invalid_token"
     # Everything from that sign-in is dead, including the real app's newer tokens.
     assert app.get("/api/v1/me", headers=bearer(t2["access_token"])).status_code == 401
-    assert app.post("/api/v1/auth/refresh", json={"refresh_token": t2["refresh_token"]}).status_code == 401
+    assert (
+        app.post("/api/v1/auth/refresh", json={"refresh_token": t2["refresh_token"]}).status_code
+        == 401
+    )
     assert tokens.grants(users.by_name("kid")["id"]) == []
 
 
 def test_a_quick_retry_is_forgiven(app, people):
     t1 = login(app)
-    lost = app.post("/api/v1/auth/refresh", json={"refresh_token": t1["refresh_token"]}).json()  # reply never arrived
+    lost = app.post(
+        "/api/v1/auth/refresh", json={"refresh_token": t1["refresh_token"]}
+    ).json()  # reply never arrived
     retry = app.post("/api/v1/auth/refresh", json={"refresh_token": t1["refresh_token"]})
     assert retry.status_code == 200
     assert app.get("/api/v1/me", headers=bearer(retry.json()["access_token"])).status_code == 200
-    assert app.get("/api/v1/me", headers=bearer(lost["access_token"])).status_code == 401  # the lost pair is void
-    assert app.post("/api/v1/auth/refresh", json={"refresh_token": lost["refresh_token"]}).status_code == 401
+    assert (
+        app.get("/api/v1/me", headers=bearer(lost["access_token"])).status_code == 401
+    )  # the lost pair is void
+    assert (
+        app.post("/api/v1/auth/refresh", json={"refresh_token": lost["refresh_token"]}).status_code
+        == 401
+    )
 
 
 def test_no_retry_once_the_new_pair_has_been_used(app, people):
     t1 = login(app)
     t2 = app.post("/api/v1/auth/refresh", json={"refresh_token": t1["refresh_token"]}).json()
-    app.post("/api/v1/auth/refresh", json={"refresh_token": t2["refresh_token"]})  # the app clearly got its reply
-    assert app.post("/api/v1/auth/refresh", json={"refresh_token": t1["refresh_token"]}).status_code == 401
+    app.post(
+        "/api/v1/auth/refresh", json={"refresh_token": t2["refresh_token"]}
+    )  # the app clearly got its reply
+    assert (
+        app.post("/api/v1/auth/refresh", json={"refresh_token": t1["refresh_token"]}).status_code
+        == 401
+    )
     assert tokens.grants(users.by_name("kid")["id"]) == []
 
 
@@ -233,37 +304,68 @@ def test_unused_apps_lapse(app, people, monkeypatch):
     t = login(app)
     later = time.time() + tokens.REFRESH_SECONDS + 5
     monkeypatch.setattr(tokens.time, "time", lambda: later)
-    assert app.post("/api/v1/auth/refresh", json={"refresh_token": t["refresh_token"]}).status_code == 401
+    assert (
+        app.post("/api/v1/auth/refresh", json={"refresh_token": t["refresh_token"]}).status_code
+        == 401
+    )
 
 
 def test_junk_refreshes_cant_lock_anyone_out_of_signing_in(app, people, monkeypatch):
     monkeypatch.setattr(apiv1, "refresh_failures", apiv1.Limiter(5, 600))
     for _ in range(5):
-        assert app.post("/api/v1/auth/refresh", json={"refresh_token": "nrt_rt_" + "y" * 43}).status_code == 401
+        assert (
+            app.post(
+                "/api/v1/auth/refresh", json={"refresh_token": "nrt_rt_" + "y" * 43}
+            ).status_code
+            == 401
+        )
     r = app.post("/api/v1/auth/refresh", json={"refresh_token": "nrt_rt_" + "y" * 43})
     assert r.status_code == 429 and err(r) == "rate_limited"  # floods stop…
-    assert app.post("/api/v1/auth/login", json={"username": "kid", "password": "listen-only", "client": "x"}).status_code == 200
+    assert (
+        app.post(
+            "/api/v1/auth/login", json={"username": "kid", "password": "listen-only", "client": "x"}
+        ).status_code
+        == 200
+    )
 
 
 def test_a_thief_replaying_inside_the_retry_window_gets_everyone_signed_out(app, people):
     t0 = login(app)
-    t1 = app.post("/api/v1/auth/refresh", json={"refresh_token": t0["refresh_token"]}).json()  # the app's trade
-    stolen = app.post("/api/v1/auth/refresh", json={"refresh_token": t0["refresh_token"]})  # a copy, seconds later
+    t1 = app.post(
+        "/api/v1/auth/refresh", json={"refresh_token": t0["refresh_token"]}
+    ).json()  # the app's trade
+    stolen = app.post(
+        "/api/v1/auth/refresh", json={"refresh_token": t0["refresh_token"]}
+    )  # a copy, seconds later
     assert stolen.status_code == 200  # indistinguishable from a lost reply, so far…
     thief = stolen.json()
-    assert app.get("/api/v1/me", headers=bearer(t1["access_token"])).status_code == 401  # the app's pair is superseded
-    r = app.post("/api/v1/auth/refresh", json={"refresh_token": t1["refresh_token"]})  # …until the app refreshes
+    assert (
+        app.get("/api/v1/me", headers=bearer(t1["access_token"])).status_code == 401
+    )  # the app's pair is superseded
+    r = app.post(
+        "/api/v1/auth/refresh", json={"refresh_token": t1["refresh_token"]}
+    )  # …until the app refreshes
     assert r.status_code == 401 and err(r) == "invalid_token"
-    assert app.get("/api/v1/me", headers=bearer(thief["access_token"])).status_code == 401  # the thief is out too
-    assert app.post("/api/v1/auth/refresh", json={"refresh_token": thief["refresh_token"]}).status_code == 401
+    assert (
+        app.get("/api/v1/me", headers=bearer(thief["access_token"])).status_code == 401
+    )  # the thief is out too
+    assert (
+        app.post("/api/v1/auth/refresh", json={"refresh_token": thief["refresh_token"]}).status_code
+        == 401
+    )
     assert tokens.grants(users.by_name("kid")["id"]) == []
 
 
 def test_no_retry_once_the_new_access_token_has_been_used(app, people):
     t0 = login(app)
     t1 = app.post("/api/v1/auth/refresh", json={"refresh_token": t0["refresh_token"]}).json()
-    assert app.get("/api/v1/me", headers=bearer(t1["access_token"])).status_code == 200  # the app got its reply
-    assert app.post("/api/v1/auth/refresh", json={"refresh_token": t0["refresh_token"]}).status_code == 401
+    assert (
+        app.get("/api/v1/me", headers=bearer(t1["access_token"])).status_code == 200
+    )  # the app got its reply
+    assert (
+        app.post("/api/v1/auth/refresh", json={"refresh_token": t0["refresh_token"]}).status_code
+        == 401
+    )
     assert tokens.grants(users.by_name("kid")["id"]) == []
 
 
@@ -274,9 +376,14 @@ def test_refreshing_is_limited_per_app_without_losing_the_token(app, people, mon
         t = app.post("/api/v1/auth/refresh", json={"refresh_token": t["refresh_token"]}).json()
     r = app.post("/api/v1/auth/refresh", json={"refresh_token": t["refresh_token"]})
     assert r.status_code == 429 and err(r) == "rate_limited"
-    assert app.get("/api/v1/me", headers=bearer(t["access_token"])).status_code == 200  # still signed in
+    assert (
+        app.get("/api/v1/me", headers=bearer(t["access_token"])).status_code == 200
+    )  # still signed in
     monkeypatch.setattr(tokens, "REFRESHES_PER_WINDOW", 30)
-    assert app.post("/api/v1/auth/refresh", json={"refresh_token": t["refresh_token"]}).status_code == 200
+    assert (
+        app.post("/api/v1/auth/refresh", json={"refresh_token": t["refresh_token"]}).status_code
+        == 200
+    )
 
 
 def test_the_token_table_stays_small(app, people, monkeypatch):
@@ -285,7 +392,9 @@ def test_the_token_table_stays_small(app, people, monkeypatch):
     for _ in range(60):
         t = app.post("/api/v1/auth/refresh", json={"refresh_token": t["refresh_token"]}).json()
     with db.connect() as conn:
-        spent = conn.execute("SELECT COUNT(*) FROM app_tokens WHERE kind='refresh' AND used_at IS NOT NULL").fetchone()[0]
+        spent = conn.execute(
+            "SELECT COUNT(*) FROM app_tokens WHERE kind='refresh' AND used_at IS NOT NULL"
+        ).fetchone()[0]
     assert spent <= tokens.KEEP_SPENT
 
 
@@ -293,7 +402,9 @@ def test_a_burst_of_guesses_cant_slip_past_the_limit(app, people):
     results = []
 
     def guess():
-        r = app.post("/api/v1/auth/login", json={"username": "kid", "password": "wrong-guess", "client": "x"})
+        r = app.post(
+            "/api/v1/auth/login", json={"username": "kid", "password": "wrong-guess", "client": "x"}
+        )
         results.append(r.status_code)
 
     threads = [threading.Thread(target=guess) for _ in range(24)]
@@ -309,7 +420,11 @@ def test_guesses_from_many_addresses_still_run_out(people):
     for n in range(auth.NAME_TRIES + 1):
         c = client((f"8.8.{n // 200}.{n % 200 + 1}", 50000))
         try:
-            hits.append(c.post("/api/v1/auth/login", json={"username": "KID", "password": "no", "client": "x"}).status_code)
+            hits.append(
+                c.post(
+                    "/api/v1/auth/login", json={"username": "KID", "password": "no", "client": "x"}
+                ).status_code
+            )
         finally:
             c.__exit__(None, None, None)
     assert hits[-1] == 429 and hits.count(401) == auth.NAME_TRIES
@@ -318,23 +433,48 @@ def test_guesses_from_many_addresses_still_run_out(people):
 def test_knowing_a_username_isnt_enough_to_lock_its_owner_out(people):
     familiar = client(("9.9.9.9", 50000))
     try:
-        assert familiar.post("/api/auth/login", json={"username": "kid", "password": "listen-only"}).status_code == 200
+        assert (
+            familiar.post(
+                "/api/auth/login", json={"username": "kid", "password": "listen-only"}
+            ).status_code
+            == 200
+        )
         for n in range(auth.NAME_TRIES):  # someone hammers the account from all over
             c = client((f"7.7.{n}.1", 50000))
             try:
-                c.post("/api/v1/auth/login", json={"username": "kid", "password": "guess", "client": "x"})
+                c.post(
+                    "/api/v1/auth/login",
+                    json={"username": "kid", "password": "guess", "client": "x"},
+                )
             finally:
                 c.__exit__(None, None, None)
         stranger = client(("7.7.200.1", 50000))
         try:
-            assert stranger.post("/api/v1/auth/login", json={"username": "kid", "password": "listen-only",
-                                                              "client": "x"}).status_code == 429  # strangers stop…
+            assert (
+                stranger.post(
+                    "/api/v1/auth/login",
+                    json={"username": "kid", "password": "listen-only", "client": "x"},
+                ).status_code
+                == 429
+            )  # strangers stop…
         finally:
             stranger.__exit__(None, None, None)
-        assert familiar.post("/api/auth/login", json={"username": "kid", "password": "listen-only"}).status_code == 200
-        home = client(HOME)  # …but a network that signed in before, or the home network, still gets in
+        assert (
+            familiar.post(
+                "/api/auth/login", json={"username": "kid", "password": "listen-only"}
+            ).status_code
+            == 200
+        )
+        home = client(
+            HOME
+        )  # …but a network that signed in before, or the home network, still gets in
         try:
-            assert home.post("/api/auth/login", json={"username": "kid", "password": "listen-only"}).status_code == 200
+            assert (
+                home.post(
+                    "/api/auth/login", json={"username": "kid", "password": "listen-only"}
+                ).status_code
+                == 200
+            )
         finally:
             home.__exit__(None, None, None)
     finally:
@@ -343,7 +483,9 @@ def test_knowing_a_username_isnt_enough_to_lock_its_owner_out(people):
 
 def test_made_up_usernames_dont_get_counters(app):
     for n in range(20):
-        app.post("/api/v1/auth/login", json={"username": f"nobody{n}", "password": "x", "client": "x"})
+        app.post(
+            "/api/v1/auth/login", json={"username": f"nobody{n}", "password": "x", "client": "x"}
+        )
         auth._failures.pop(f"ip:{AWAY[0]}", None)
     assert not [k for k in auth._failures if k.startswith("user:")]
 
@@ -362,12 +504,20 @@ def test_ipv6_addresses_count_by_network(people):
     for n in range(auth.LOGIN_TRIES):
         c = client((f"2001:db8:1:2::{n + 1:x}", 50000))  # one machine, many addresses
         try:
-            c.post("/api/v1/auth/login", json={"username": "nobody", "password": "x", "client": "x"})
+            c.post(
+                "/api/v1/auth/login", json={"username": "nobody", "password": "x", "client": "x"}
+            )
         finally:
             c.__exit__(None, None, None)
     c = client(("2001:db8:1:2::ffff", 50000))
     try:
-        assert c.post("/api/v1/auth/login", json={"username": "kid", "password": "listen-only", "client": "x"}).status_code == 429
+        assert (
+            c.post(
+                "/api/v1/auth/login",
+                json={"username": "kid", "password": "listen-only", "client": "x"},
+            ).status_code
+            == 429
+        )
     finally:
         c.__exit__(None, None, None)
 
@@ -378,7 +528,12 @@ def test_checking_the_current_password_is_limited_too(people):
         c.post("/api/auth/login", json={"username": "kid", "password": "listen-only"})
         for _ in range(auth.LOGIN_TRIES):
             c.put("/api/auth/password", json={"current": "guess", "password": "whatever-new"})
-        assert c.put("/api/auth/password", json={"current": "listen-only", "password": "whatever-new"}).status_code == 429
+        assert (
+            c.put(
+                "/api/auth/password", json={"current": "listen-only", "password": "whatever-new"}
+            ).status_code
+            == 429
+        )
     finally:
         c.__exit__(None, None, None)
 
@@ -386,10 +541,15 @@ def test_checking_the_current_password_is_limited_too(people):
 def test_using_a_retired_access_token_signs_the_app_out(app, people):
     t0 = login(app)
     t1 = app.post("/api/v1/auth/refresh", json={"refresh_token": t0["refresh_token"]}).json()
-    thief = app.post("/api/v1/auth/refresh", json={"refresh_token": t0["refresh_token"]}).json()  # replayed copy
+    thief = app.post(
+        "/api/v1/auth/refresh", json={"refresh_token": t0["refresh_token"]}
+    ).json()  # replayed copy
     r = app.get("/api/v1/me", headers=bearer(t1["access_token"]))  # the real app's next call
     assert r.status_code == 401 and err(r) == "invalid_token"
-    assert app.post("/api/v1/auth/refresh", json={"refresh_token": thief["refresh_token"]}).status_code == 401
+    assert (
+        app.post("/api/v1/auth/refresh", json={"refresh_token": thief["refresh_token"]}).status_code
+        == 401
+    )
     assert app.get("/api/v1/me", headers=bearer(thief["access_token"])).status_code == 401
 
 
@@ -400,8 +560,20 @@ def test_right_passwords_dont_count_against_anyone(app, people):
 
 def test_passwords_are_taken_exactly_as_typed(app):
     users.create("spacey", "  padded pass ", "listener")
-    assert app.post("/api/v1/auth/login", json={"username": "spacey", "password": "  padded pass ", "client": "x"}).status_code == 200
-    assert app.post("/api/v1/auth/login", json={"username": "spacey", "password": "padded pass", "client": "x"}).status_code == 401
+    assert (
+        app.post(
+            "/api/v1/auth/login",
+            json={"username": "spacey", "password": "  padded pass ", "client": "x"},
+        ).status_code
+        == 200
+    )
+    assert (
+        app.post(
+            "/api/v1/auth/login",
+            json={"username": "spacey", "password": "padded pass", "client": "x"},
+        ).status_code
+        == 401
+    )
 
 
 def test_the_real_address_behind_a_trusted_proxy(monkeypatch):
@@ -409,12 +581,15 @@ def test_the_real_address_behind_a_trusted_proxy(monkeypatch):
         def __init__(self, host, xff):
             self.client = type("C", (), {"host": host})()
             from starlette.datastructures import Headers
+
             self.headers = Headers({"x-forwarded-for": xff} if xff else {})
 
     assert auth.client_ip(Req("10.0.0.2", "1.2.3.4")) == "10.0.0.2"  # untrusted: headers ignored
     monkeypatch.setenv("NARRATARR_TRUSTED_PROXIES", "10.0.0.0/24")
     assert auth.client_ip(Req("10.0.0.2", "1.2.3.4")) == "1.2.3.4"
-    assert auth.client_ip(Req("10.0.0.2", "6.6.6.6, 1.2.3.4, 10.0.0.9")) == "1.2.3.4"  # a forged first hop is ignored
+    assert (
+        auth.client_ip(Req("10.0.0.2", "6.6.6.6, 1.2.3.4, 10.0.0.9")) == "1.2.3.4"
+    )  # a forged first hop is ignored
     assert auth.client_ip(Req("10.0.0.2", "not-an-ip")) == "10.0.0.2"
     assert auth.client_ip(Req("10.0.0.2", "1.2.3.4:5678")) == "1.2.3.4"
     assert auth.client_ip(Req("10.0.0.2", "[2001:db8::1]:443")) == "2001:db8::1"
@@ -440,7 +615,10 @@ def test_logout(app, people):
     t = login(app)
     assert app.post("/api/v1/auth/logout", headers=bearer(t["access_token"])).status_code == 204
     assert app.get("/api/v1/me", headers=bearer(t["access_token"])).status_code == 401
-    assert app.post("/api/v1/auth/refresh", json={"refresh_token": t["refresh_token"]}).status_code == 401
+    assert (
+        app.post("/api/v1/auth/refresh", json={"refresh_token": t["refresh_token"]}).status_code
+        == 401
+    )
 
 
 def test_changing_the_password_or_removing_the_person_signs_apps_out(app, people):
@@ -466,7 +644,9 @@ def test_people_see_and_revoke_their_own_apps_in_the_web_ui(app, people):
         web.post("/api/auth/logout")
         web.post("/api/auth/login", json={"username": "kid", "password": "listen-only"})
         mine = web.get("/api/auth/apps").json()
-        assert [a["name"] for a in mine] == ["Fable Frog on iPhone"] and mine[0]["last_ip"] == AWAY[0]
+        assert [a["name"] for a in mine] == ["Fable Frog on iPhone"] and mine[0]["last_ip"] == AWAY[
+            0
+        ]
         assert web.delete(f"/api/auth/apps/{mine[0]['id']}").status_code == 200
     finally:
         web.__exit__(None, None, None)
@@ -507,8 +687,15 @@ def test_search(app, kid):
     r = app.get("/api/v1/search", params={"q": "dune"}, headers=kid).json()
     assert r["page"] == 1 and r["pages"] == 1
     (b,) = r["items"]
-    assert b["asin"] == "B002V1OF70" and b["authors"] == ["Frank Herbert"] and b["runtime_minutes"] == 1260
-    assert b["series"] == [{"asin": "B00GMG4N8E", "name": "Dune", "position": "1"}] and b["request"] is None
+    assert (
+        b["asin"] == "B002V1OF70"
+        and b["authors"] == ["Frank Herbert"]
+        and b["runtime_minutes"] == 1260
+    )
+    assert (
+        b["series"] == [{"asin": "B00GMG4N8E", "name": "Dune", "position": "1"}]
+        and b["request"] is None
+    )
     assert app.get("/api/v1/search", params={"q": "  "}, headers=kid).status_code == 422
     assert app.get("/api/v1/search", params={"q": "x" * 201}, headers=kid).status_code == 422
 
@@ -523,30 +710,59 @@ def test_request_a_book_and_follow_it(app, kid):
 
     again = app.post("/api/v1/requests", json={"asin": "B002V1OF70"}, headers=kid)
     assert again.status_code == 200 and again.json()["id"] == req["id"]  # asking twice is harmless
-    assert app.get("/api/v1/search", params={"q": "dune"}, headers=kid).json()["items"][0]["request"]["id"] == req["id"]
+    assert (
+        app.get("/api/v1/search", params={"q": "dune"}, headers=kid).json()["items"][0]["request"][
+            "id"
+        ]
+        == req["id"]
+    )
     assert app.get("/api/v1/books/B002V1OF70", headers=kid).json()["request"]["status"] == "wanted"
 
     db.update(req["id"], status="downloading", progress=42.04, detail="3.1 MB/s")
     got = app.get(f"/api/v1/requests/{req['id']}", headers=kid).json()
-    assert (got["status"], got["stage"], got["progress"], got["message"]) == ("downloading", "downloading", 42.0, "3.1 MB/s")
+    assert (got["status"], got["stage"], got["progress"], got["message"]) == (
+        "downloading",
+        "downloading",
+        42.0,
+        "3.1 MB/s",
+    )
     db.update(req["id"], status="completed", progress=100, completed_at=time.time())
     got = app.get(f"/api/v1/requests/{req['id']}", headers=kid).json()
-    assert got["status"] == "available" and got["available_at"].endswith("Z") and got["progress"] is None
+    assert (
+        got["status"] == "available"
+        and got["available_at"].endswith("Z")
+        and got["progress"] is None
+    )
 
 
 def test_a_book_already_in_the_library_isnt_requested_again(app, kid):
-    db.insert({"source": "local", "source_url": "local:dune", "title": "Dune", "author": "Frank Herbert",
-               "status": "completed"})
+    db.insert(
+        {
+            "source": "local",
+            "source_url": "local:dune",
+            "title": "Dune",
+            "author": "Frank Herbert",
+            "status": "completed",
+        }
+    )
     r = app.post("/api/v1/requests", json={"asin": "B002V1OF70"}, headers=kid)
     assert r.status_code == 200 and r.json()["status"] == "available"
     assert len(db.list_books()) == 1
 
 
 def test_request_validation_and_unknown_books(app, kid):
-    assert err(app.post("/api/v1/requests", json={"asin": "b002v1of70"}, headers=kid)) == "validation_error"
-    assert err(app.post("/api/v1/requests", json={"asin": "'; DROP TABLE books"}, headers=kid)) == "validation_error"
+    assert (
+        err(app.post("/api/v1/requests", json={"asin": "b002v1of70"}, headers=kid))
+        == "validation_error"
+    )
+    assert (
+        err(app.post("/api/v1/requests", json={"asin": "'; DROP TABLE books"}, headers=kid))
+        == "validation_error"
+    )
     assert err(app.post("/api/v1/requests", json={}, headers=kid)) == "validation_error"
-    assert err(app.post("/api/v1/requests", json={"asin": "B000000000"}, headers=kid)) == "not_found"
+    assert (
+        err(app.post("/api/v1/requests", json={"asin": "B000000000"}, headers=kid)) == "not_found"
+    )
     assert err(app.get("/api/v1/books/nope", headers=kid)) == "validation_error"
     assert err(app.get("/api/v1/requests/999", headers=kid)) == "not_found"
     assert err(app.get("/api/v1/nowhere", headers=kid)) == "not_found"
@@ -576,14 +792,25 @@ def test_listing_requests(app, kid, people):
 
     every = app.get("/api/v1/requests", headers=kid).json()
     assert every["total"] == 2 and {i["id"] for i in every["items"]} == {mine["id"], theirs["id"]}
-    assert [i["id"] for i in app.get("/api/v1/requests", params={"mine": "true"}, headers=kid).json()["items"]] == [mine["id"]]
+    assert [
+        i["id"]
+        for i in app.get("/api/v1/requests", params={"mine": "true"}, headers=kid).json()["items"]
+    ] == [mine["id"]]
     failed = app.get("/api/v1/requests", params={"status": "failed"}, headers=kid).json()["items"]
     assert [(i["id"], i["message"]) for i in failed] == [(theirs["id"], "No release found")]
-    assert app.get("/api/v1/requests", params={"status": "wanted,failed"}, headers=kid).json()["total"] == 2
+    assert (
+        app.get("/api/v1/requests", params={"status": "wanted,failed"}, headers=kid).json()["total"]
+        == 2
+    )
     page = app.get("/api/v1/requests", params={"limit": 1, "offset": 1}, headers=kid).json()
     assert (len(page["items"]), page["total"], page["limit"], page["offset"]) == (1, 2, 1, 1)
-    assert err(app.get("/api/v1/requests", params={"status": "done"}, headers=kid)) == "validation_error"
-    assert err(app.get("/api/v1/requests", params={"limit": 1000}, headers=kid)) == "validation_error"
+    assert (
+        err(app.get("/api/v1/requests", params={"status": "done"}, headers=kid))
+        == "validation_error"
+    )
+    assert (
+        err(app.get("/api/v1/requests", params={"limit": 1000}, headers=kid)) == "validation_error"
+    )
 
 
 def test_cancelling(app, kid, people):
@@ -591,12 +818,16 @@ def test_cancelling(app, kid, people):
     mine = app.post("/api/v1/requests", json={"asin": "B002V1OF70"}, headers=kid).json()
     theirs = app.post("/api/v1/requests", json={"asin": "B08G9PRS1K"}, headers=admin_token).json()
 
-    assert err(app.delete(f"/api/v1/requests/{theirs['id']}", headers=kid)) == "forbidden"  # not yours
+    assert (
+        err(app.delete(f"/api/v1/requests/{theirs['id']}", headers=kid)) == "forbidden"
+    )  # not yours
     assert app.delete(f"/api/v1/requests/{mine['id']}", headers=kid).status_code == 204
     assert db.get(mine["id"]) is None
 
     db.update(theirs["id"], status="completed")
-    assert err(app.delete(f"/api/v1/requests/{theirs['id']}", headers=admin_token)) == "conflict"  # books stay
+    assert (
+        err(app.delete(f"/api/v1/requests/{theirs['id']}", headers=admin_token)) == "conflict"
+    )  # books stay
     db.update(theirs["id"], status="failed")
     assert app.delete(f"/api/v1/requests/{theirs['id']}", headers=admin_token).status_code == 204
 
@@ -606,7 +837,9 @@ def test_requests_are_rate_limited_per_person(app, kid, monkeypatch):
     assert app.post("/api/v1/requests", json={"asin": "B002V1OF70"}, headers=kid).status_code == 201
     r = app.post("/api/v1/requests", json={"asin": "B08G9PRS1K"}, headers=kid)
     assert r.status_code == 429 and err(r) == "rate_limited" and int(r.headers["retry-after"]) > 0
-    assert app.post("/api/v1/requests", json={"asin": "B002V1OF70"}, headers=kid).status_code == 200  # re-asking is free
+    assert (
+        app.post("/api/v1/requests", json={"asin": "B002V1OF70"}, headers=kid).status_code == 200
+    )  # re-asking is free
 
 
 def test_ebooks_are_requested_alongside_audiobooks(app, kid):
@@ -616,7 +849,9 @@ def test_ebooks_are_requested_alongside_audiobooks(app, kid):
     assert r.status_code == 201
     ebook = r.json()
     assert ebook["format"] == "ebook" and ebook["id"] != audio["id"] and ebook["narrators"] == []
-    again = app.post("/api/v1/requests", json={"asin": "B002V1OF70", "format": "ebook"}, headers=kid)
+    again = app.post(
+        "/api/v1/requests", json={"asin": "B002V1OF70", "format": "ebook"}, headers=kid
+    )
     assert again.status_code == 200 and again.json()["id"] == ebook["id"]
 
     book = app.get("/api/v1/books/B002V1OF70", headers=kid).json()
@@ -625,28 +860,52 @@ def test_ebooks_are_requested_alongside_audiobooks(app, kid):
     assert other["request"] is None and other["ebook_request"] is None
 
     # Lists show audiobooks unless asked: apps built before 0.7.0 see just what they always saw.
-    ids = lambda **q: [i["id"] for i in app.get("/api/v1/requests", params=q, headers=kid).json()["items"]]  # noqa: E731
+    def ids(**q):
+        return [i["id"] for i in app.get("/api/v1/requests", params=q, headers=kid).json()["items"]]
+
     assert ids() == [audio["id"]]
     assert ids(format="ebook") == [ebook["id"]]
     assert sorted(ids(format="all")) == sorted([audio["id"], ebook["id"]])
-    assert err(app.get("/api/v1/requests", params={"format": "pdf"}, headers=kid)) == "validation_error"
-    assert err(app.post("/api/v1/requests", json={"asin": "B08G9PRS1K", "format": "both"}, headers=kid)) == "validation_error"
+    assert (
+        err(app.get("/api/v1/requests", params={"format": "pdf"}, headers=kid))
+        == "validation_error"
+    )
+    assert (
+        err(
+            app.post("/api/v1/requests", json={"asin": "B08G9PRS1K", "format": "both"}, headers=kid)
+        )
+        == "validation_error"
+    )
 
 
 def test_an_ebook_already_in_the_library_isnt_requested_again(app, kid):
-    db.insert({"source": "local", "source_url": "local:dune.epub", "title": "Dune", "author": "Frank Herbert",
-               "status": "completed", "kind": "ebook"})
+    db.insert(
+        {
+            "source": "local",
+            "source_url": "local:dune.epub",
+            "title": "Dune",
+            "author": "Frank Herbert",
+            "status": "completed",
+            "kind": "ebook",
+        }
+    )
     r = app.post("/api/v1/requests", json={"asin": "B002V1OF70", "format": "ebook"}, headers=kid)
-    assert r.status_code == 200 and r.json()["status"] == "available" and r.json()["format"] == "ebook"
+    assert (
+        r.status_code == 200 and r.json()["status"] == "available" and r.json()["format"] == "ebook"
+    )
     r = app.post("/api/v1/requests", json={"asin": "B002V1OF70"}, headers=kid)
-    assert r.status_code == 201 and r.json()["format"] == "audiobook"  # having the ebook isn't having the audiobook
+    assert (
+        r.status_code == 201 and r.json()["format"] == "audiobook"
+    )  # having the ebook isn't having the audiobook
 
 
 def test_requests_from_the_web_ui_remember_who_asked(people):
     c = client(HOME)
     try:
         c.post("/api/auth/login", json={"username": "kid", "password": "listen-only"})
-        book = c.post("/api/library", json={"url": DUNE["url"], "source": "audible", "download": False}).json()
+        book = c.post(
+            "/api/library", json={"url": DUNE["url"], "source": "audible", "download": False}
+        ).json()
         assert book["requested_by"] == people[1]["id"]
     finally:
         c.__exit__(None, None, None)
@@ -664,7 +923,9 @@ def test_docs_are_published_for_v1_only(app):
 
 def test_other_websites_cant_use_a_session_to_request(app, people):
     app.post("/api/auth/login", json={"username": "kid", "password": "listen-only"})
-    r = app.post("/api/v1/requests", json={"asin": "B002V1OF70"}, headers={"Sec-Fetch-Site": "cross-site"})
+    r = app.post(
+        "/api/v1/requests", json={"asin": "B002V1OF70"}, headers={"Sec-Fetch-Site": "cross-site"}
+    )
     assert r.status_code == 403 and db.list_books() == []
 
 
@@ -677,7 +938,11 @@ INPUTS = {"Login", "Refresh", "NewRequest"}  # what apps send; everything else i
 def _plain(schema):
     """A schema without the wording, which can change freely."""
     if isinstance(schema, dict):
-        return {k: _plain(v) for k, v in schema.items() if k not in ("description", "title", "summary", "examples")}
+        return {
+            k: _plain(v)
+            for k, v in schema.items()
+            if k not in ("description", "title", "summary", "examples")
+        }
     if isinstance(schema, list):
         return [_plain(v) for v in schema]
     return schema
@@ -693,13 +958,22 @@ def test_v1_only_ever_grows():
             assert method in new["paths"][path], f"{method.upper()} {path} was removed"
             now = new["paths"][path][method]
             for param in op.get("parameters", []):
-                match = next((q for q in now.get("parameters", []) if q["name"] == param["name"]), None)
-                assert match is not None, f"{method.upper()} {path} lost its {param['name']} parameter"
-                assert _plain(match["schema"]) == _plain(param["schema"]), f"{param['name']} on {path} changed"
+                match = next(
+                    (q for q in now.get("parameters", []) if q["name"] == param["name"]), None
+                )
+                assert match is not None, (
+                    f"{method.upper()} {path} lost its {param['name']} parameter"
+                )
+                assert _plain(match["schema"]) == _plain(param["schema"]), (
+                    f"{param['name']} on {path} changed"
+                )
             for p in now.get("parameters", []):
-                assert not p.get("required") or any(q["name"] == p["name"] for q in op.get("parameters", [])), \
-                    f"{method.upper()} {path} has a new required parameter {p['name']}"
-            assert set(op["responses"]) <= set(now["responses"]), f"{method.upper()} {path} lost a response"
+                assert not p.get("required") or any(
+                    q["name"] == p["name"] for q in op.get("parameters", [])
+                ), f"{method.upper()} {path} has a new required parameter {p['name']}"
+            assert set(op["responses"]) <= set(now["responses"]), (
+                f"{method.upper()} {path} lost a response"
+            )
     for name, schema in old["components"]["schemas"].items():
         assert name in new["components"]["schemas"], f"{name} was removed"
         now = new["components"]["schemas"][name]
@@ -707,9 +981,13 @@ def test_v1_only_ever_grows():
             assert field in now.get("properties", {}), f"{name}.{field} was removed"
             assert _plain(now["properties"][field]) == _plain(spec), f"{name}.{field} changed type"
         if name in INPUTS:  # a new required input would break apps that don't send it
-            assert set(now.get("required", [])) <= set(schema.get("required", [])), f"{name} needs a new field"
+            assert set(now.get("required", [])) <= set(schema.get("required", [])), (
+                f"{name} needs a new field"
+            )
         else:  # an output field that may now be missing would break apps that read it
-            assert set(schema.get("required", [])) <= set(now.get("required", [])), f"{name} made a field optional"
+            assert set(schema.get("required", [])) <= set(now.get("required", [])), (
+                f"{name} made a field optional"
+            )
 
 
 def test_concurrent_refreshes_leave_one_live_pair(people):
@@ -727,15 +1005,21 @@ def test_concurrent_refreshes_leave_one_live_pair(people):
         t.start()
     for t in threads:
         t.join()
-    assert len(results) == 1 + tokens.RETRIES_PER_TOKEN and not errors  # one trade, three retries: all fine
+    assert (
+        len(results) == 1 + tokens.RETRIES_PER_TOKEN and not errors
+    )  # one trade, three retries: all fine
     with db.connect() as conn:
-        live = conn.execute("SELECT token_hash FROM app_tokens WHERE kind='access' AND superseded=0 AND parent != ''").fetchall()
+        live = conn.execute(
+            "SELECT token_hash FROM app_tokens WHERE kind='access' AND superseded=0 AND parent != ''"
+        ).fetchall()
     assert len(live) == 1
     newest = next(r for r in results if tokens._digest(r["access_token"]) == live[0]["token_hash"])
     assert tokens.authenticate(newest["access_token"])[0]["username"] == "kid"
     retired = next(r for r in results if r is not newest)
     with pytest.raises(tokens.TokenError):
-        tokens.authenticate(retired["access_token"])  # two holders of one refresh token: everyone out
+        tokens.authenticate(
+            retired["access_token"]
+        )  # two holders of one refresh token: everyone out
     with pytest.raises(tokens.TokenError):
         tokens.authenticate(newest["access_token"])
 
@@ -765,13 +1049,23 @@ def test_a_thief_cant_bury_the_tripwire(app, people, monkeypatch):
     """Refreshing again and again mustn't clean away the app's superseded pair."""
     monkeypatch.setattr(tokens, "REFRESHES_PER_WINDOW", 1000)
     t0 = login(app)
-    t1 = app.post("/api/v1/auth/refresh", json={"refresh_token": t0["refresh_token"]}).json()  # the app
-    thief = app.post("/api/v1/auth/refresh", json={"refresh_token": t0["refresh_token"]}).json()  # a copy
+    t1 = app.post(
+        "/api/v1/auth/refresh", json={"refresh_token": t0["refresh_token"]}
+    ).json()  # the app
+    thief = app.post(
+        "/api/v1/auth/refresh", json={"refresh_token": t0["refresh_token"]}
+    ).json()  # a copy
     for _ in range(tokens.KEEP_SPENT + 10):
-        thief = app.post("/api/v1/auth/refresh", json={"refresh_token": thief["refresh_token"]}).json()
-    r = app.post("/api/v1/auth/refresh", json={"refresh_token": t1["refresh_token"]})  # the app comes back
+        thief = app.post(
+            "/api/v1/auth/refresh", json={"refresh_token": thief["refresh_token"]}
+        ).json()
+    r = app.post(
+        "/api/v1/auth/refresh", json={"refresh_token": t1["refresh_token"]}
+    )  # the app comes back
     assert r.status_code == 401
-    assert app.get("/api/v1/me", headers=bearer(thief["access_token"])).status_code == 401  # the thief is out
+    assert (
+        app.get("/api/v1/me", headers=bearer(thief["access_token"])).status_code == 401
+    )  # the thief is out
 
 
 def test_an_idle_app_hears_expired_not_invalid(app, people, monkeypatch):
@@ -782,7 +1076,10 @@ def test_an_idle_app_hears_expired_not_invalid(app, people, monkeypatch):
     app.post("/api/v1/auth/refresh", json={"refresh_token": other["refresh_token"]})
     r = app.get("/api/v1/me", headers=bearer(idle["access_token"]))
     assert r.status_code == 401 and err(r) == "token_expired"
-    assert app.post("/api/v1/auth/refresh", json={"refresh_token": idle["refresh_token"]}).status_code == 200
+    assert (
+        app.post("/api/v1/auth/refresh", json={"refresh_token": idle["refresh_token"]}).status_code
+        == 200
+    )
 
 
 def test_an_apps_listener_request_waits_for_approval(app, kid):

@@ -29,7 +29,9 @@ _releases: OrderedDict[str, dict] = OrderedDict()
 _search_cache: Cache[list[dict]] = Cache(CACHE_SECONDS, 200)
 _offering: Cache[list[str]] = Cache(600, 20)  # which indexers offer which categories
 
-_FORMAT_RE = re.compile(r"\b(m4b|mp3|flac|aac|m4a|ogg|opus|epub|azw3|azw|mobi|pdf|fb2|cbz|cbr|djvu)\b", re.I)
+_FORMAT_RE = re.compile(
+    r"\b(m4b|mp3|flac|aac|m4a|ogg|opus|epub|azw3|azw|mobi|pdf|fb2|cbz|cbr|djvu)\b", re.I
+)
 _AUDIO = {"m4b", "mp3", "flac", "aac", "m4a", "ogg", "opus"}
 _BITRATE_RE = re.compile(r"\b(\d{2,3})\s?kb(?:ps|it)?s?\b", re.I)
 _BRACKETS_RE = re.compile(r"\s*[\(\[\{][^\)\]\}]*[\)\]\}]")
@@ -99,7 +101,11 @@ def with_key(url: str, base: str, api_key: str) -> str:
     u, b = urlparse(url), urlparse(base)
     if (u.scheme, u.netloc) != (b.scheme, b.netloc):
         return url
-    return urlunparse(u._replace(query=urlencode([*parse_qsl(u.query, keep_blank_values=True), ("apikey", api_key)])))
+    return urlunparse(
+        u._replace(
+            query=urlencode([*parse_qsl(u.query, keep_blank_values=True), ("apikey", api_key)])
+        )
+    )
 
 
 def _url_for(r: dict) -> str:
@@ -123,7 +129,9 @@ def to_details(r: dict) -> Details:
     found = [m.group(1) for m in _FORMAT_RE.finditer(release)]
     # "Dune (PDF + M4B)" is an audiobook with a companion PDF: its audio format is the one that counts.
     # "Opus" is also a word ("Magnum Opus [EPUB]"), so it only counts when nothing else is named.
-    fmt = next((f for f in found if f.lower() in _AUDIO and f.lower() != "opus"), found[0] if found else "")
+    fmt = next(
+        (f for f in found if f.lower() in _AUDIO and f.lower() != "opus"), found[0] if found else ""
+    )
     if fmt.lower() == "opus" and len(found) > 1:
         fmt = found[1]
     rate = _BITRATE_RE.search(release)
@@ -164,8 +172,14 @@ class Prowlarr:
     default_label = "Latest from your indexers"
     delivery = "indexer"
 
-    def __init__(self, url: str, api_key: str, categories: str = "3030", client: httpx.AsyncClient | None = None,
-                 fallback: str = "3030"):
+    def __init__(
+        self,
+        url: str,
+        api_key: str,
+        categories: str = "3030",
+        client: httpx.AsyncClient | None = None,
+        fallback: str = "3030",
+    ):
         self.base = url.rstrip("/")
         self.api_key = api_key
         self.cats = split_categories(categories, fallback)
@@ -190,7 +204,9 @@ class Prowlarr:
         # Prowlarr returns everything in one go; there is no page 2 to ask indexers for.
         if page > 1 or not query.strip():
             return Page(items=[], page=page, total_pages=1)
-        return Page(items=[to_details(r) for r in await self._search(query.strip())], page=1, total_pages=1)
+        return Page(
+            items=[to_details(r) for r in await self._search(query.strip())], page=1, total_pages=1
+        )
 
     async def details(self, url: str) -> Details:
         r = _releases.get(url)
@@ -215,14 +231,20 @@ class Prowlarr:
         headers = {"X-Api-Key": self.api_key}
         try:
             if self._client:
-                resp = await self._client.get(f"{self.base}{path}", params=params, headers=headers, timeout=TIMEOUT)
+                resp = await self._client.get(
+                    f"{self.base}{path}", params=params, headers=headers, timeout=TIMEOUT
+                )
             else:
                 async with httpx.AsyncClient(timeout=TIMEOUT) as client:
                     resp = await client.get(f"{self.base}{path}", params=params, headers=headers)
         except httpx.TimeoutException:
-            raise ProwlarrError("Prowlarr took too long to answer. One of your indexers may be slow or down.")
+            raise ProwlarrError(
+                "Prowlarr took too long to answer. One of your indexers may be slow or down."
+            )
         except httpx.HTTPError as e:
-            raise ProwlarrError(reach.explain(e, self.base, "Prowlarr", "http://192.168.1.10:9696")) from e
+            raise ProwlarrError(
+                reach.explain(e, self.base, "Prowlarr", "http://192.168.1.10:9696")
+            ) from e
         if resp.status_code == 401:
             raise ProwlarrError("Prowlarr rejected the API key. Check it in Settings.")
         if resp.status_code >= 400:
@@ -236,14 +258,22 @@ class Prowlarr:
         key = (self.base, query.lower(), tuple(self.cats))
         found = _search_cache.get(key)
         if found is None:
-            params = [("query", query), ("type", "search"), ("limit", "100"), *(("categories", c) for c in self.cats)]
+            params = [
+                ("query", query),
+                ("type", "search"),
+                ("limit", "100"),
+                *(("categories", c) for c in self.cats),
+            ]
             data = await self.request("/api/v1/search", params)
             found = [
-                r for r in (data if isinstance(data, list) else [])
+                r
+                for r in (data if isinstance(data, list) else [])
                 if r.get("protocol") in ("torrent", "usenet")
                 and (r.get("downloadUrl") or r.get("magnetUrl") or r.get("infoHash"))
             ]
-            if found:  # an empty answer may just mean an indexer was briefly down; ask again next time
+            if (
+                found
+            ):  # an empty answer may just mean an indexer was briefly down; ask again next time
                 _search_cache.set(key, found)
         for r in found:
             remember(r)
@@ -251,15 +281,24 @@ class Prowlarr:
 
     async def _enabled(self) -> list[dict]:
         indexers = await self.request("/api/v1/indexer")
-        return [i for i in indexers if isinstance(i, dict) and i.get("enable")] if isinstance(indexers, list) else []
+        return (
+            [i for i in indexers if isinstance(i, dict) and i.get("enable")]
+            if isinstance(indexers, list)
+            else []
+        )
 
     async def status(self, ebook_categories: str = "7020") -> dict:
         info = await self.request("/api/v1/system/status")
         enabled = await self._enabled()
         cats = split_categories(ebook_categories, "7020")
-        return {"version": info.get("version", ""), "indexers": len(enabled),
-                "ebook_indexers": sorted((i.get("name") or "?" for i in enabled if offers(i, cats)), key=str.lower),
-                "ebook_categories": cats}
+        return {
+            "version": info.get("version", ""),
+            "indexers": len(enabled),
+            "ebook_indexers": sorted(
+                (i.get("name") or "?" for i in enabled if offers(i, cats)), key=str.lower
+            ),
+            "ebook_categories": cats,
+        }
 
     async def offering(self) -> list[str] | None:
         """The enabled indexers that search this instance's categories; None if Prowlarr can't say right now."""
@@ -267,15 +306,23 @@ class Prowlarr:
         names = _offering.get(key)
         if names is None:
             try:
-                names = sorted((i.get("name") or "?" for i in await self._enabled() if offers(i, self.cats)), key=str.lower)
+                names = sorted(
+                    (i.get("name") or "?" for i in await self._enabled() if offers(i, self.cats)),
+                    key=str.lower,
+                )
             except ProwlarrError:
                 return None
             _offering.set(key, names)
         return names
 
 
-async def fetch(url: str, base: str, api_key: str, transport: httpx.AsyncBaseTransport | None = None,
-                who: str = "Prowlarr"):
+async def fetch(
+    url: str,
+    base: str,
+    api_key: str,
+    transport: httpx.AsyncBaseTransport | None = None,
+    who: str = "Prowlarr",
+):
     """Download a release: ("magnet", uri) | ("torrent", bytes) | ("nzb", bytes).
 
     `who` names the client in error messages, so a Torznab indexer failure doesn't tell the user
@@ -299,16 +346,24 @@ async def fetch(url: str, base: str, api_key: str, transport: httpx.AsyncBaseTra
                 target = str(resp.url.join(location))
                 continue
             if resp.status_code == 401:
-                raise ProwlarrError(f"{who.capitalize()} rejected the API key. Check it in Settings.")
+                raise ProwlarrError(
+                    f"{who.capitalize()} rejected the API key. Check it in Settings."
+                )
             if resp.status_code >= 400:
-                raise ProwlarrError(f"The indexer wouldn't hand over this release ({resp.status_code}). Try another one.")
+                raise ProwlarrError(
+                    f"The indexer wouldn't hand over this release ({resp.status_code}). Try another one."
+                )
             body = resp.content
             if len(body) > MAX_FETCH_BYTES:
-                raise ProwlarrError("The indexer sent something far too big to be a .torrent or .nzb file.")
+                raise ProwlarrError(
+                    "The indexer sent something far too big to be a .torrent or .nzb file."
+                )
             head = body[:4096].lstrip().lower()
             if b"<nzb" in head:
                 return "nzb", body
             if head.startswith(b"d") and b"4:infod" in body:  # a bencoded .torrent
                 return "torrent", body
-            raise ProwlarrError("The indexer didn't return a .torrent or .nzb file for this release.")
+            raise ProwlarrError(
+                "The indexer didn't return a .torrent or .nzb file for this release."
+            )
     raise ProwlarrError("Too many redirects while fetching this release.")

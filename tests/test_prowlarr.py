@@ -7,7 +7,14 @@ from fastapi.testclient import TestClient
 
 from narratarr import api, config, db, search, worker
 from narratarr.sources import prowlarr
-from narratarr.sources.prowlarr import Prowlarr, ProwlarrError, strip_key, tidy_title, to_details, with_key
+from narratarr.sources.prowlarr import (
+    Prowlarr,
+    ProwlarrError,
+    strip_key,
+    tidy_title,
+    to_details,
+    with_key,
+)
 from narratarr.worker import Worker, mapped_path
 
 PROWLARR = "http://prowlarr:9696"
@@ -35,8 +42,12 @@ TORRENT = {
     "seeders": 31,
     "magnetUrl": f"magnet:?xt=urn:btih:{HASH.upper()}&dn=PHM&tr=udp%3A%2F%2Ftracker.example%3A1337",
 }
-TORRENT_FILE = {**TORRENT, "guid": "https://tracker.example/t/10", "magnetUrl": None,
-                "downloadUrl": f"{PROWLARR}/7/download?apikey=PKEY&link=t10"}
+TORRENT_FILE = {
+    **TORRENT,
+    "guid": "https://tracker.example/t/10",
+    "magnetUrl": None,
+    "downloadUrl": f"{PROWLARR}/7/download?apikey=PKEY&link=t10",
+}
 
 
 @pytest.fixture(autouse=True)
@@ -44,10 +55,15 @@ def setup(monkeypatch):
     prowlarr._releases.clear()
     prowlarr._search_cache.clear()
     monkeypatch.setattr(worker, "POLL_SECONDS", 0)
-    config.update({
-        "prowlarr_url": PROWLARR, "prowlarr_api_key": "PKEY",
-        "sabnzbd_url": SAB, "sabnzbd_api_key": "SKEY", "sabnzbd_category": "audiobooks",
-    })
+    config.update(
+        {
+            "prowlarr_url": PROWLARR,
+            "prowlarr_api_key": "PKEY",
+            "sabnzbd_url": SAB,
+            "sabnzbd_api_key": "SKEY",
+            "sabnzbd_category": "audiobooks",
+        }
+    )
 
 
 def test_release_parsing():
@@ -66,7 +82,10 @@ def test_release_parsing():
 def test_api_key_only_goes_back_to_prowlarr():
     assert strip_key("http://p/1/download?apikey=X&link=y") == "http://p/1/download?link=y"
     assert "apikey=K" in with_key("http://p:9696/1/download?link=y", "http://p:9696", "K")
-    assert with_key("https://elsewhere.example/x", "http://p:9696", "K") == "https://elsewhere.example/x"
+    assert (
+        with_key("https://elsewhere.example/x", "http://p:9696", "K")
+        == "https://elsewhere.example/x"
+    )
     assert tidy_title("Some Book (Unabridged)") == "Some Book"
 
 
@@ -79,7 +98,12 @@ async def test_search_and_details():
         junk = {"title": "no link", "protocol": "torrent"}
         return httpx.Response(200, json=[USENET, TORRENT, junk])
 
-    p = Prowlarr(PROWLARR, "PKEY", "3030, 3000", client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    p = Prowlarr(
+        PROWLARR,
+        "PKEY",
+        "3030, 3000",
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
     page = await p.search("dune")
     assert [i.protocol for i in page.items] == ["usenet", "torrent"]
     assert seen["key"] == "PKEY"
@@ -90,14 +114,24 @@ async def test_search_and_details():
     assert p.owns(url) and not p.owns("https://archive.org/details/x")
 
     async def apple(q, limit=8, client=None):
-        return [{"title": "Dune: Book 1", "author": "Frank Herbert", "cover_url": "https://apple.example/dune.jpg"}]
+        return [
+            {
+                "title": "Dune: Book 1",
+                "author": "Frank Herbert",
+                "cover_url": "https://apple.example/dune.jpg",
+            }
+        ]
 
     search.suggestions, original = apple, search.suggestions
     try:
         d = await p.details(url)
     finally:
         search.suggestions = original
-    assert (d.title, d.author, d.cover_url) == ("Dune", "Frank Herbert", "https://apple.example/dune.jpg")
+    assert (d.title, d.author, d.cover_url) == (
+        "Dune",
+        "Frank Herbert",
+        "https://apple.example/dune.jpg",
+    )
 
     prowlarr._releases.clear()
     with pytest.raises(ProwlarrError, match="expired"):
@@ -113,7 +147,11 @@ async def test_identify_refuses_loose_matches(monkeypatch):
 
 
 async def test_bad_key_message():
-    p = Prowlarr(PROWLARR, "nope", client=httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(401))))
+    p = Prowlarr(
+        PROWLARR,
+        "nope",
+        client=httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(401))),
+    )
     with pytest.raises(ProwlarrError, match="API key"):
         await p.search("dune")
 
@@ -143,13 +181,24 @@ class FakeServers:
             assert q["apikey"] == ["SKEY"]
             mode = q["mode"][0]
             if mode == "addfile":
-                self.added = {"cat": q.get("cat"), "name": q.get("nzbname"), "body": request.content}
+                self.added = {
+                    "cat": q.get("cat"),
+                    "name": q.get("nzbname"),
+                    "body": request.content,
+                }
                 return httpx.Response(200, json={"status": True, "nzo_ids": ["SABnzbd_nzo_1"]})
             if mode == "queue":
                 self.polls += 1
                 if self.polls == 1:
-                    slot = {"nzo_id": "SABnzbd_nzo_1", "status": "Downloading", "percentage": "40", "timeleft": "0:02:00"}
-                    return httpx.Response(200, json={"queue": {"kbpersec": "2048", "slots": [slot]}})
+                    slot = {
+                        "nzo_id": "SABnzbd_nzo_1",
+                        "status": "Downloading",
+                        "percentage": "40",
+                        "timeleft": "0:02:00",
+                    }
+                    return httpx.Response(
+                        200, json={"queue": {"kbpersec": "2048", "slots": [slot]}}
+                    )
                 return httpx.Response(200, json={"queue": {"slots": []}})
             if mode == "history":
                 if "name" in q:
@@ -159,7 +208,9 @@ class FakeServers:
                 job.mkdir(parents=True, exist_ok=True)
                 (job / "Dune.m4b").write_bytes(b"audio")
                 slot = {
-                    "nzo_id": "SABnzbd_nzo_1", "status": self.history_status, "fail_message": "Out of retention",
+                    "nzo_id": "SABnzbd_nzo_1",
+                    "status": self.history_status,
+                    "fail_message": "Out of retention",
                     "storage": self.report_path or str(job),
                 }
                 return httpx.Response(200, json={"history": {"slots": [slot]}})
@@ -174,11 +225,19 @@ class FakeServers:
 
 def add_release(release: dict, **extra) -> dict:
     d = to_details(release)
-    return db.insert({
-        "source": "prowlarr", "source_url": d.url, "title": "Dune", "author": "Frank Herbert",
-        "protocol": d.protocol, "download_url": d.download_url, "info_hash": d.info_hash,
-        "status": "queued", **extra,
-    })
+    return db.insert(
+        {
+            "source": "prowlarr",
+            "source_url": d.url,
+            "title": "Dune",
+            "author": "Frank Herbert",
+            "protocol": d.protocol,
+            "download_url": d.download_url,
+            "info_hash": d.info_hash,
+            "status": "queued",
+            **extra,
+        }
+    )
 
 
 async def test_usenet_pipeline(isolated_data):
@@ -199,7 +258,9 @@ async def test_usenet_pipeline(isolated_data):
 
 async def test_usenet_path_mapping(isolated_data):
     config.update({"path_remote": "/downloads", "path_local": str(isolated_data / "sab")})
-    fake = FakeServers(isolated_data / "sab" / "complete", report_path="/downloads/complete/Frank Herbert - Dune")
+    fake = FakeServers(
+        isolated_data / "sab" / "complete", report_path="/downloads/complete/Frank Herbert - Dune"
+    )
     book = add_release(USENET)
 
     await Worker(transport=httpx.MockTransport(fake)).process(book["id"])
@@ -235,7 +296,9 @@ async def test_prowlarr_torrent_file_goes_to_real_debrid(isolated_data):
     await Worker(transport=httpx.MockTransport(fake))._run(book["id"])
 
     assert fake.rd_torrent.startswith(b"d8:announce")
-    assert "dead" in db.get(book["id"])["error"]  # our fake Real-Debrid gives up; the hand-off is what matters
+    assert (
+        "dead" in db.get(book["id"])["error"]
+    )  # our fake Real-Debrid gives up; the hand-off is what matters
 
 
 def test_mapped_path_mapping():
@@ -251,7 +314,9 @@ def test_prowlarr_tab_appears_once_configured():
     with TestClient(api.app) as c:
         c.app.state.worker.poke = lambda: None
         assert "prowlarr" in [s["name"] for s in c.get("/api/sources").json()]
-        s = c.put("/api/settings", json={"prowlarr_api_key": "", "sabnzbd_api_key": "ABCDEFGH9876"}).json()
+        s = c.put(
+            "/api/settings", json={"prowlarr_api_key": "", "sabnzbd_api_key": "ABCDEFGH9876"}
+        ).json()
         assert "prowlarr" not in [x["name"] for x in c.get("/api/sources").json()]
         assert s["sabnzbd_api_key"].endswith("9876") and "ABCD" not in s["sabnzbd_api_key"]
         assert s["sabnzbd_configured"] and not s["prowlarr_configured"]

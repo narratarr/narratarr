@@ -40,10 +40,20 @@ def is_bad_release(e: BaseException) -> bool:
 
 
 USENET_CLIENTS = {"sabnzbd": "SABnzbd", "nzbget": "NZBGet"}
-DEBRID = ("realdebrid", "alldebrid", "torbox", "premiumize")  # cloud services: they fetch the torrent, we download the files
+DEBRID = (
+    "realdebrid",
+    "alldebrid",
+    "torbox",
+    "premiumize",
+)  # cloud services: they fetch the torrent, we download the files
 TORRENT_CLIENTS = {
-    "realdebrid": "Real-Debrid", "alldebrid": "AllDebrid", "torbox": "TorBox", "premiumize": "Premiumize",
-    "qbittorrent": "qBittorrent", "transmission": "Transmission", "deluge": "Deluge",
+    "realdebrid": "Real-Debrid",
+    "alldebrid": "AllDebrid",
+    "torbox": "TorBox",
+    "premiumize": "Premiumize",
+    "qbittorrent": "qBittorrent",
+    "transmission": "Transmission",
+    "deluge": "Deluge",
 }
 
 
@@ -57,15 +67,23 @@ TORRENT_CLIENTS = {
 # magnet or .torrent to one, and a debrid service fetches the torrent and gives us the files.
 
 DELIVERY = {
-    "sabnzbd": "usenet", "nzbget": "usenet",
-    "qbittorrent": "torrent", "transmission": "torrent", "deluge": "torrent",
-    "realdebrid": "torrent", "alldebrid": "torrent", "torbox": "torrent", "premiumize": "torrent",
+    "sabnzbd": "usenet",
+    "nzbget": "usenet",
+    "qbittorrent": "torrent",
+    "transmission": "torrent",
+    "deluge": "torrent",
+    "realdebrid": "torrent",
+    "alldebrid": "torrent",
+    "torbox": "torrent",
+    "premiumize": "torrent",
 }
 LABELS = {**USENET_CLIENTS, **TORRENT_CLIENTS}
 # Where a debrid service keeps its "delete after" preference, so one client entry can differ from another.
 DELETE_SETTINGS = {
-    "realdebrid": "delete_from_rd_after", "alldebrid": "delete_from_ad_after",
-    "torbox": "delete_from_tb_after", "premiumize": "delete_from_pm_after",
+    "realdebrid": "delete_from_rd_after",
+    "alldebrid": "delete_from_ad_after",
+    "torbox": "delete_from_tb_after",
+    "premiumize": "delete_from_pm_after",
 }
 
 
@@ -105,10 +123,16 @@ class ClientEntry:
 
     def public(self) -> dict:
         return {
-            "id": self.id, "type": self.type, "label": self.label, "delivery": self.delivery,
-            "url": self.url, "username": self.username,
-            "password": config._mask(self.password, "x_password"), "api_key": config._mask(self.api_key, "x_api_key"),
-            "category": self.category, "save_path": self.save_path,
+            "id": self.id,
+            "type": self.type,
+            "label": self.label,
+            "delivery": self.delivery,
+            "url": self.url,
+            "username": self.username,
+            "password": config._mask(self.password, "x_password"),
+            "api_key": config._mask(self.api_key, "x_api_key"),
+            "category": self.category,
+            "save_path": self.save_path,
             "configured": self.configured,
         }
 
@@ -140,7 +164,9 @@ def entry_for_job(settings: config.Settings, name: str) -> ClientEntry | None:
     """The client a book's job was sent to. Books record the entry's id; ones from before the list
     recorded the client type, which is also the id the migration gives each entry."""
     listed = entries(settings)
-    return next((e for e in listed if e.id == name), None) or next((e for e in listed if e.type == name), None)
+    return next((e for e in listed if e.id == name), None) or next(
+        (e for e in listed if e.type == name), None
+    )
 
 
 def client_for(entry: ClientEntry, transport: httpx.AsyncBaseTransport | None = None):
@@ -216,7 +242,9 @@ def torrent_configured(s: config.Settings, name: str | None = None) -> bool:
     return bool(s.rd_api_key)
 
 
-def usenet_client(s: config.Settings, transport: httpx.AsyncBaseTransport | None = None, name: str | None = None):
+def usenet_client(
+    s: config.Settings, transport: httpx.AsyncBaseTransport | None = None, name: str | None = None
+):
     name = name or s.usenet_client
     if name == "nzbget":
         from .nzbget import NZBGet
@@ -227,21 +255,32 @@ def usenet_client(s: config.Settings, transport: httpx.AsyncBaseTransport | None
     return SABnzbd(s.sabnzbd_url, s.sabnzbd_api_key, transport=transport)
 
 
-def torrent_client(s: config.Settings, transport: httpx.AsyncBaseTransport | None = None, name: str | None = None):
+def torrent_client(
+    s: config.Settings, transport: httpx.AsyncBaseTransport | None = None, name: str | None = None
+):
     name = name or s.torrent_client
     if name == "qbittorrent":
         from .qbittorrent import QBittorrent
 
-        return QBittorrent(s.qbittorrent_url, s.qbittorrent_username, s.qbittorrent_password, transport=transport)
+        return QBittorrent(
+            s.qbittorrent_url, s.qbittorrent_username, s.qbittorrent_password, transport=transport
+        )
     if name == "transmission":
         from .transmission import Transmission
 
-        return Transmission(s.transmission_url, s.transmission_username, s.transmission_password, transport=transport)
+        return Transmission(
+            s.transmission_url,
+            s.transmission_username,
+            s.transmission_password,
+            transport=transport,
+        )
     if name == "deluge":
         from .deluge import Deluge
 
         return Deluge(s.deluge_url, s.deluge_password, transport=transport)
-    raise ClientError(f"{TORRENT_CLIENTS.get(name, name)} isn't a torrent client Narratarr can hand torrents to.")
+    raise ClientError(
+        f"{TORRENT_CLIENTS.get(name, name)} isn't a torrent client Narratarr can hand torrents to."
+    )
 
 
 def debrid_client(s: config.Settings, transport: httpx.AsyncBaseTransport | None = None):
@@ -266,11 +305,17 @@ def debrid_client(s: config.Settings, transport: httpx.AsyncBaseTransport | None
 def category_for(s: config.Settings, name: str) -> str:
     """The category (or label) a client files Narratarr's downloads under."""
     return {
-        "sabnzbd": s.sabnzbd_category, "nzbget": s.nzbget_category,
-        "qbittorrent": s.qbittorrent_category, "transmission": s.transmission_label,
+        "sabnzbd": s.sabnzbd_category,
+        "nzbget": s.nzbget_category,
+        "qbittorrent": s.qbittorrent_category,
+        "transmission": s.transmission_label,
     }.get(name, "")
 
 
 def folder_for(s: config.Settings, name: str) -> str:
     """Where a torrent client should save Narratarr's downloads, as the client sees it ("" = its default)."""
-    return {"qbittorrent": s.qbittorrent_folder, "transmission": s.transmission_folder, "deluge": s.deluge_folder}.get(name, "")
+    return {
+        "qbittorrent": s.qbittorrent_folder,
+        "transmission": s.transmission_folder,
+        "deluge": s.deluge_folder,
+    }.get(name, "")

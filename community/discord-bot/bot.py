@@ -43,8 +43,12 @@ class Gatekeeper(discord.Client):
         intents = discord.Intents.none()
         intents.guilds = True
         intents.guild_reactions = True  # no privileged intents needed
-        super().__init__(intents=intents, activity=discord.Activity(type=discord.ActivityType.watching,
-                                                                     name=f"for {GATE} in #welcome"))
+        super().__init__(
+            intents=intents,
+            activity=discord.Activity(
+                type=discord.ActivityType.watching, name=f"for {GATE} in #welcome"
+            ),
+        )
         self.post: discord.Message | None = None
         self.role: discord.Role | None = None
 
@@ -64,9 +68,16 @@ class Gatekeeper(discord.Client):
     async def on_ready(self) -> None:
         await self.find_post()
         if not self.post or not self.role:
-            log.error("Couldn't find the welcome post or the %s role. Is the bot in the server?", ROLE)
+            log.error(
+                "Couldn't find the welcome post or the %s role. Is the bot in the server?", ROLE
+            )
             return
-        log.info("Watching %s on the welcome post in #%s for the %s role", GATE, self.post.channel.name, ROLE)
+        log.info(
+            "Watching %s on the welcome post in #%s for the %s role",
+            GATE,
+            self.post.channel.name,
+            ROLE,
+        )
         await self.catch_up()
 
     async def catch_up(self) -> None:
@@ -80,9 +91,13 @@ class Gatekeeper(discord.Client):
             async for user in reaction.users():
                 if user.bot:
                     continue
-                member = post.guild.get_member(user.id) or await self.fetch_member(post.guild, user.id)
+                member = post.guild.get_member(user.id) or await self.fetch_member(
+                    post.guild, user.id
+                )
                 if member and self.role not in member.roles:
-                    await member.add_roles(self.role, reason=f"Reacted with {GATE} while the bot was away")
+                    await member.add_roles(
+                        self.role, reason=f"Reacted with {GATE} while the bot was away"
+                    )
                     given += 1
         if given:
             log.info("Caught up: gave %s to %d people", ROLE, given)
@@ -121,7 +136,9 @@ class Gatekeeper(discord.Client):
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+    )
     logging.getLogger("discord").setLevel(logging.WARNING)
     Gatekeeper().run(token(), log_handler=None)
 

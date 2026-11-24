@@ -46,7 +46,9 @@ def away():
 
 
 def book(title="Dune"):
-    return db.insert({"source": "local", "source_url": f"local:{title}", "title": title, "status": "completed"})
+    return db.insert(
+        {"source": "local", "source_url": f"local:{title}", "title": title, "status": "completed"}
+    )
 
 
 def sign_in(c, username, password):
@@ -62,7 +64,11 @@ def test_nothing_works_until_the_admin_exists(home):
     r = home.get("/api/library")
     assert r.status_code == 401 and r.json()["setup"] is True
     assert home.get("/api/health").status_code == 200  # Docker health checks stay open
-    assert home.get("/api/auth/status").json() == {"setup": True, "setup_code_needed": False, "user": None}
+    assert home.get("/api/auth/status").json() == {
+        "setup": True,
+        "setup_code_needed": False,
+        "user": None,
+    }
     assert home.get("/").status_code == 200  # the page itself loads, to show the setup screen
 
 
@@ -77,15 +83,24 @@ def test_setup_from_the_home_network_needs_no_code(home):
 
 def test_setup_from_the_internet_needs_the_code_from_the_log(away):
     assert away.get("/api/auth/status").json()["setup_code_needed"] is True
-    wrong = away.post("/api/auth/setup", json={"username": "mallory", "password": "correct horse", "code": "0000-0000"})
+    wrong = away.post(
+        "/api/auth/setup",
+        json={"username": "mallory", "password": "correct horse", "code": "0000-0000"},
+    )
     assert wrong.status_code == 403 and users.count() == 0
-    ok = away.post("/api/auth/setup", json={"username": "desmond", "password": "correct horse", "code": auth.setup_code()})
+    ok = away.post(
+        "/api/auth/setup",
+        json={"username": "desmond", "password": "correct horse", "code": auth.setup_code()},
+    )
     assert ok.status_code == 200
 
 
 def test_requests_through_a_proxy_are_never_local(home):
-    r = home.post("/api/auth/setup", json={"username": "mallory", "password": "correct horse"},
-                  headers={"X-Forwarded-For": "198.51.100.7"})
+    r = home.post(
+        "/api/auth/setup",
+        json={"username": "mallory", "password": "correct horse"},
+        headers={"X-Forwarded-For": "198.51.100.7"},
+    )
     assert r.status_code == 403
 
 
@@ -114,7 +129,9 @@ def test_the_old_shared_password_becomes_the_admin_account(monkeypatch):
 def test_sign_in_and_out(away):
     users.create("desmond", "correct horse", "admin")
     assert away.get("/api/library").status_code == 401
-    r = away.post("/api/auth/login", json={"username": "DESMOND", "password": "correct horse"})  # names ignore case
+    r = away.post(
+        "/api/auth/login", json={"username": "DESMOND", "password": "correct horse"}
+    )  # names ignore case
     assert r.status_code == 200
     cookie = r.cookies[auth.COOKIE]
     assert "httponly" in r.headers["set-cookie"].lower()
@@ -128,15 +145,27 @@ def test_sign_in_and_out(away):
 def test_wrong_passwords_are_slowed_down(away):
     users.create("desmond", "correct horse", "admin")
     for _ in range(auth.LOGIN_TRIES):
-        assert away.post("/api/auth/login", json={"username": "desmond", "password": "nope"}).status_code == 401
-    assert away.post("/api/auth/login", json={"username": "desmond", "password": "correct horse"}).status_code == 429
+        assert (
+            away.post(
+                "/api/auth/login", json={"username": "desmond", "password": "nope"}
+            ).status_code
+            == 401
+        )
+    assert (
+        away.post(
+            "/api/auth/login", json={"username": "desmond", "password": "correct horse"}
+        ).status_code
+        == 429
+    )
 
 
 def test_changing_a_password_signs_out_everywhere_else(home, away):
     users.create("desmond", "correct horse", "admin")
     sign_in(home, "desmond", "correct horse")
     sign_in(away, "desmond", "correct horse")
-    r = home.put("/api/auth/password", json={"current": "correct horse", "password": "battery staple"})
+    r = home.put(
+        "/api/auth/password", json={"current": "correct horse", "password": "battery staple"}
+    )
     assert r.status_code == 200
     assert home.get("/api/library").status_code == 200  # this browser stays signed in
     assert away.get("/api/library").status_code == 401
@@ -180,7 +209,10 @@ def test_admins_manage_users_but_never_lose_the_last_admin(home):
     sign_in(home, "desmond", "correct horse")
     kid = home.post("/api/users", json={"username": "kid", "password": "listen-only"}).json()
     assert kid["role"] == "listener"
-    assert home.post("/api/users", json={"username": "Kid", "password": "whatever-long"}).status_code == 400
+    assert (
+        home.post("/api/users", json={"username": "Kid", "password": "whatever-long"}).status_code
+        == 400
+    )
     assert home.post("/api/users", json={"username": "x", "password": "short"}).status_code == 400
     me = users.by_name("desmond")
     assert home.patch(f"/api/users/{me['id']}", json={"role": "listener"}).status_code == 400
@@ -230,8 +262,10 @@ def test_cli(monkeypatch, capsys):
 def test_a_database_from_before_the_superseded_column_is_upgraded():
     with db.connect() as conn:
         conn.execute("DROP TABLE app_tokens")
-        conn.execute("CREATE TABLE app_tokens (token_hash TEXT PRIMARY KEY, grant_id INTEGER NOT NULL, kind TEXT NOT NULL, "
-                     "created_at REAL NOT NULL, expires_at REAL NOT NULL, used_at REAL, parent TEXT NOT NULL DEFAULT '')")
+        conn.execute(
+            "CREATE TABLE app_tokens (token_hash TEXT PRIMARY KEY, grant_id INTEGER NOT NULL, kind TEXT NOT NULL, "
+            "created_at REAL NOT NULL, expires_at REAL NOT NULL, used_at REAL, parent TEXT NOT NULL DEFAULT '')"
+        )
     db.init()
     with db.connect() as conn:
         assert "superseded" in {r["name"] for r in conn.execute("PRAGMA table_info(app_tokens)")}

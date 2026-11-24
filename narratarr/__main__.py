@@ -29,22 +29,34 @@ def users_cli(argv: list[str]) -> int:
     """narratarr users …: add people, reset a forgotten password, and so on. Works while Narratarr runs."""
     from . import db, users
 
-    parser = argparse.ArgumentParser(prog="narratarr users", description="Manage who can sign in to Narratarr.")
+    parser = argparse.ArgumentParser(
+        prog="narratarr users", description="Manage who can sign in to Narratarr."
+    )
     sub = parser.add_subparsers(dest="cmd", required=True)
     add = sub.add_parser("add", help="add someone (the first account is an admin)")
     add.add_argument("username")
-    add.add_argument("--role", choices=users.ROLES, help="admin or listener (default: admin for the first account)")
-    add.add_argument("--password-stdin", action="store_true", help="read the password from standard input")
+    add.add_argument(
+        "--role",
+        choices=users.ROLES,
+        help="admin or listener (default: admin for the first account)",
+    )
+    add.add_argument(
+        "--password-stdin", action="store_true", help="read the password from standard input"
+    )
     sub.add_parser("list", help="list everyone who can sign in")
     passwd = sub.add_parser("passwd", help="set someone's password (signs them out everywhere)")
     passwd.add_argument("username")
-    passwd.add_argument("--password-stdin", action="store_true", help="read the password from standard input")
+    passwd.add_argument(
+        "--password-stdin", action="store_true", help="read the password from standard input"
+    )
     role = sub.add_parser("role", help="make someone an admin or a listener")
     role.add_argument("username")
     role.add_argument("role", choices=users.ROLES)
     remove = sub.add_parser("remove", help="remove someone")
     remove.add_argument("username")
-    sub.add_parser("any", help=argparse.SUPPRESS)  # exit 0 when an account exists (for the installer)
+    sub.add_parser(
+        "any", help=argparse.SUPPRESS
+    )  # exit 0 when an account exists (for the installer)
     args = parser.parse_args(argv)
 
     db.init()
@@ -87,7 +99,8 @@ def main() -> None:
     if sys.argv[1:2] == ["users"]:
         sys.exit(users_cli(sys.argv[2:]))
     parser = argparse.ArgumentParser(
-        prog="narratarr", description="Run the Narratarr web app.",
+        prog="narratarr",
+        description="Run the Narratarr web app.",
         epilog="Manage accounts with: narratarr users {add,list,passwd,role,remove}",
     )
     parser.add_argument(
@@ -104,7 +117,9 @@ def main() -> None:
     parser.add_argument("--version", action="version", version=f"narratarr {_version()}")
     args = parser.parse_args()
 
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+    )
     # httpx logs every request URL at INFO, and some services (SABnzbd, Prowlarr links) put API keys in URLs.
     logging.getLogger("httpx").setLevel(logging.WARNING)
     shown = "127.0.0.1" if args.host in ("0.0.0.0", "::") else args.host

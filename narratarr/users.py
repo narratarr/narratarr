@@ -48,20 +48,33 @@ def check_password(password: str, stored: str) -> bool:
     try:
         _, n, r, p, salt, key = stored.split("$")
         with _HASHING:
-            got = hashlib.scrypt(password.encode(), salt=base64.b64decode(salt), n=int(n), r=int(r), p=int(p),
-                                 maxmem=64 << 20)
+            got = hashlib.scrypt(
+                password.encode(),
+                salt=base64.b64decode(salt),
+                n=int(n),
+                r=int(r),
+                p=int(p),
+                maxmem=64 << 20,
+            )
     except (ValueError, TypeError):
         return False
     return hmac.compare_digest(got, base64.b64decode(key))
 
 
-_DUMMY = hash_password(secrets.token_hex(8))  # checked against when a username doesn't exist, so timing gives nothing away
+_DUMMY = hash_password(
+    secrets.token_hex(8)
+)  # checked against when a username doesn't exist, so timing gives nothing away
 
 
 def _public(row: sqlite3.Row | None) -> dict | None:
     if row is None:
         return None
-    return {"id": row["id"], "username": row["username"], "role": row["role"], "created_at": row["created_at"]}
+    return {
+        "id": row["id"],
+        "username": row["username"],
+        "role": row["role"],
+        "created_at": row["created_at"],
+    }
 
 
 def _valid_password(password: str) -> None:
@@ -92,19 +105,27 @@ def get(user_id: int) -> dict | None:
 
 def by_name(username: str) -> dict | None:
     with db.connect() as conn:
-        return _public(conn.execute("SELECT * FROM users WHERE username=? COLLATE NOCASE", (username,)).fetchone())
+        return _public(
+            conn.execute(
+                "SELECT * FROM users WHERE username=? COLLATE NOCASE", (username,)
+            ).fetchone()
+        )
 
 
 def owner() -> dict | None:
     """The first admin: who the home network acts as when sign-in is skipped there."""
     with db.connect() as conn:
-        return _public(conn.execute("SELECT * FROM users WHERE role='admin' ORDER BY id LIMIT 1").fetchone())
+        return _public(
+            conn.execute("SELECT * FROM users WHERE role='admin' ORDER BY id LIMIT 1").fetchone()
+        )
 
 
 def create(username: str, password: str, role: str = "listener") -> dict:
     username = username.strip()
     if not _USERNAME.fullmatch(username):
-        raise UserError("Usernames are 1–32 letters, numbers, dots, dashes, underscores or @, starting with a letter or number.")
+        raise UserError(
+            "Usernames are 1–32 letters, numbers, dots, dashes, underscores or @, starting with a letter or number."
+        )
     if role not in ROLES:
         raise UserError("A user is either an admin or a listener.")
     _valid_password(password)
@@ -130,7 +151,9 @@ def create(username: str, password: str, role: str = "listener") -> dict:
 
 def authenticate(username: str, password: str) -> dict | None:
     with db.connect() as conn:
-        row = conn.execute("SELECT * FROM users WHERE username=? COLLATE NOCASE", (username.strip(),)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM users WHERE username=? COLLATE NOCASE", (username.strip(),)
+        ).fetchone()
     if row is None:
         check_password(password, _DUMMY)
         return None
@@ -141,7 +164,9 @@ def set_password(user_id: int, password: str) -> None:
     """Change a password and sign that person out everywhere, apps included."""
     _valid_password(password)
     with db.connect() as conn:
-        conn.execute("UPDATE users SET password_hash=? WHERE id=?", (hash_password(password), user_id))
+        conn.execute(
+            "UPDATE users SET password_hash=? WHERE id=?", (hash_password(password), user_id)
+        )
         conn.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
         _revoke_apps(conn, user_id)
 
@@ -170,7 +195,10 @@ def delete(user_id: int) -> None:
 
 def _revoke_apps(conn: sqlite3.Connection, user_id: int) -> None:
     """Sign every app out of this account (see tokens.py)."""
-    conn.execute("DELETE FROM app_tokens WHERE grant_id IN (SELECT id FROM app_grants WHERE user_id=?)", (user_id,))
+    conn.execute(
+        "DELETE FROM app_tokens WHERE grant_id IN (SELECT id FROM app_grants WHERE user_id=?)",
+        (user_id,),
+    )
     conn.execute("DELETE FROM app_grants WHERE user_id=?", (user_id,))
 
 
@@ -186,8 +214,10 @@ def start_session(user_id: int) -> str:
     now = time.time()
     with db.connect() as conn:
         conn.execute("DELETE FROM sessions WHERE expires_at < ?", (now,))
-        conn.execute("INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
-                     (_digest(token), user_id, now, now + SESSION_SECONDS))
+        conn.execute(
+            "INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
+            (_digest(token), user_id, now, now + SESSION_SECONDS),
+        )
     return token
 
 

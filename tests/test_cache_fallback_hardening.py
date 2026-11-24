@@ -1,4 +1,5 @@
 """The cache fallback's edges: untrusted hashes, a restart mid-download, and the saved setting."""
+
 from contextlib import asynccontextmanager
 
 import httpx
@@ -15,9 +16,20 @@ MAGNET = f"magnet:?xt=urn:btih:{HEX}"
 
 # ---- hashes come from indexers, so they are checked before they reach a URL ----
 
-@pytest.mark.parametrize("bad", [
-    "../../user", f"{HEX}/../../user", f"{HEX}?x=1", HEX[:39], HEX + "0", "z" * 40, "", None,
-])
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "../../user",
+        f"{HEX}/../../user",
+        f"{HEX}?x=1",
+        HEX[:39],
+        HEX + "0",
+        "z" * 40,
+        "",
+        None,
+    ],
+)
 def test_only_forty_hex_characters_are_a_hash(bad):
     assert cachecheck.valid_infohash(bad) == ""
 
@@ -45,10 +57,13 @@ async def test_an_untrusted_hash_never_reaches_the_cloud_service():
     assert asked == []
 
 
-@pytest.mark.parametrize("make", [
-    lambda t: RealDebrid(api_key="k", transport=t),
-    lambda t: TorBox(api_key="k", transport=t),
-])
+@pytest.mark.parametrize(
+    "make",
+    [
+        lambda t: RealDebrid(api_key="k", transport=t),
+        lambda t: TorBox(api_key="k", transport=t),
+    ],
+)
 async def test_the_clients_send_no_request_for_a_bad_hash(make):
     def handler(request: httpx.Request) -> httpx.Response:
         raise AssertionError(f"no request should be made, got {request.url}")
@@ -57,6 +72,7 @@ async def test_the_clients_send_no_request_for_a_bad_hash(make):
 
 
 # ---- a grab that was already diverted carries on in the local client after a restart ----
+
 
 class _Db:
     def __init__(self):
@@ -70,12 +86,19 @@ class _Settings:
     debrid_fallback_client = "qb"
     clients = [
         {"id": "torbox", "type": "torbox", "api_key": "k"},
-        {"id": "qb", "type": "qbittorrent", "url": "http://qb:8080", "username": "u", "password": "p"},
+        {
+            "id": "qb",
+            "type": "qbittorrent",
+            "url": "http://qb:8080",
+            "username": "u",
+            "password": "p",
+        },
     ]
 
 
 class _AskingCloud:
     """A cloud service whose cache check answers "cached" now, as one might after a restart."""
+
     label = "TorBox"
     prefix = "tb:"
 
@@ -115,7 +138,14 @@ async def _grab(w, monkeypatch, book, job_still_there):
     diverted = await w._resume_local(book, None, None, _Settings())
     if not diverted:
         diverted = await w._fall_back_if_uncached(
-            book, None, ClientEntry(id="torbox", type="torbox"), None, cloud, "magnet", MAGNET, _Settings(),
+            book,
+            None,
+            ClientEntry(id="torbox", type="torbox"),
+            None,
+            cloud,
+            "magnet",
+            MAGNET,
+            _Settings(),
         )
     return diverted, went, cloud
 
@@ -149,9 +179,17 @@ CLIENTS = [
 ]
 
 
-@pytest.mark.parametrize("pick, saved", [
-    ("qb", "qb"), (" QB ", "qb"), ("torbox", ""), ("sab", ""), ("nope", ""), ("", ""),
-])
+@pytest.mark.parametrize(
+    "pick, saved",
+    [
+        ("qb", "qb"),
+        (" QB ", "qb"),
+        ("torbox", ""),
+        ("sab", ""),
+        ("nope", ""),
+        ("", ""),
+    ],
+)
 def test_the_fallback_must_be_a_local_torrent_client(pick, saved):
     s = config.update({"clients": CLIENTS, "debrid_fallback_client": pick})
     assert s.debrid_fallback_client == saved
@@ -165,5 +203,10 @@ def test_removing_the_fallback_client_turns_the_fallback_off():
 
 def test_the_settings_page_gets_the_saved_fallback_back(accounts):
     c = accounts
-    assert c.put("/api/settings", json={"clients": CLIENTS, "debrid_fallback_client": "qb"}).status_code == 200
+    assert (
+        c.put(
+            "/api/settings", json={"clients": CLIENTS, "debrid_fallback_client": "qb"}
+        ).status_code
+        == 200
+    )
     assert c.get("/api/download-clients").json()["debrid_fallback_client"] == "qb"

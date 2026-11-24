@@ -41,8 +41,13 @@ log = logging.getLogger("narratarr.api.v1")
 API_VERSION = 1
 ASIN = r"^[A-Z0-9]{10}$"
 STATUSES = ("wanted", "downloading", "available", "failed")
-STAGES = {"queued": "queued", "resolving": "preparing", "caching": "preparing",
-          "downloading": "downloading", "organizing": "importing"}
+STAGES = {
+    "queued": "queued",
+    "resolving": "preparing",
+    "caching": "preparing",
+    "downloading": "downloading",
+    "organizing": "importing",
+}
 
 
 # ---- errors ------------------------------------------------------------------------------
@@ -51,19 +56,31 @@ STAGES = {"queued": "queued", "resolving": "preparing", "caching": "preparing",
 
 
 class ApiError(Exception):
-    def __init__(self, status: int, code: str, message: str, headers: dict | None = None,
-                 fields: list[dict] | None = None):
+    def __init__(
+        self,
+        status: int,
+        code: str,
+        message: str,
+        headers: dict | None = None,
+        fields: list[dict] | None = None,
+    ):
         super().__init__(message)
         self.status, self.code, self.message, self.headers = status, code, message, headers or {}
         self.fields = fields
 
 
-def _error(status: int, code: str, message: str, headers: dict | None = None, **extra) -> JSONResponse:
-    return JSONResponse({"error": {"code": code, "message": message, **extra}}, status_code=status, headers=headers)
+def _error(
+    status: int, code: str, message: str, headers: dict | None = None, **extra
+) -> JSONResponse:
+    return JSONResponse(
+        {"error": {"code": code, "message": message, **extra}}, status_code=status, headers=headers
+    )
 
 
 def _unauthorized(code: str, message: str) -> ApiError:
-    challenge = 'Bearer realm="narratarr"' + (f', error="{code}"' if code in ("invalid_token", "token_expired") else "")
+    challenge = 'Bearer realm="narratarr"' + (
+        f', error="{code}"' if code in ("invalid_token", "token_expired") else ""
+    )
     return ApiError(401, code, message, {"WWW-Authenticate": challenge})
 
 
@@ -90,7 +107,9 @@ class Limiter:
     def _forget_stale(self, now: float) -> None:
         for key in [k for k, h in self._hits.items() if not h or now - h[-1] > self.window]:
             del self._hits[key]
-        if len(self._hits) >= 10_000:  # all live: drop the stalest half rather than everyone's count
+        if (
+            len(self._hits) >= 10_000
+        ):  # all live: drop the stalest half rather than everyone's count
             for key in sorted(self._hits, key=lambda k: self._hits[k][-1])[: len(self._hits) // 2]:
                 del self._hits[key]
 
@@ -100,8 +119,12 @@ class Limiter:
         hits = self._live(key, now)
         if len(hits) >= self.limit:
             wait = int(self.window - (now - hits[0])) + 1
-            raise ApiError(429, "rate_limited", f"Too many requests. Try again in {wait} seconds.",
-                           {"Retry-After": str(wait)})
+            raise ApiError(
+                429,
+                "rate_limited",
+                f"Too many requests. Try again in {wait} seconds.",
+                {"Retry-After": str(wait)},
+            )
 
     def add(self, key: object) -> None:
         now = time.monotonic()
@@ -133,16 +156,23 @@ async def caller(request: Request) -> dict:
     if header is not None:
         scheme, _, credential = header.strip().partition(" ")
         if scheme.lower() != "bearer" or not credential.strip():
-            raise _unauthorized("invalid_token", "Send the access token as: Authorization: Bearer <token>")
+            raise _unauthorized(
+                "invalid_token", "Send the access token as: Authorization: Bearer <token>"
+            )
         try:
-            user, grant = await asyncio.to_thread(tokens.authenticate, credential.strip(), _ip(request))
+            user, grant = await asyncio.to_thread(
+                tokens.authenticate, credential.strip(), _ip(request)
+            )
         except tokens.TokenError as e:
             raise _unauthorized(e.code, str(e))
     else:
         user, grant = users.session_user(request.cookies.get(auth.COOKIE, "")), None
         if user is None:
-            raise _unauthorized("unauthorized", "Sign in first: POST /api/v1/auth/login, then send the access "
-                                                "token as Authorization: Bearer <token>.")
+            raise _unauthorized(
+                "unauthorized",
+                "Sign in first: POST /api/v1/auth/login, then send the access "
+                "token as Authorization: Bearer <token>.",
+            )
     request.state.user, request.state.grant = user, grant
     return user
 
@@ -168,8 +198,15 @@ def _names(author: str) -> list[str]:
 
 
 def _series(series: list[dict]) -> list[dict]:
-    return [{"asin": s.get("asin") or None, "name": s.get("title") or "", "position": s.get("sequence") or None}
-            for s in series or [] if s.get("title")]
+    return [
+        {
+            "asin": s.get("asin") or None,
+            "name": s.get("title") or "",
+            "position": s.get("sequence") or None,
+        }
+        for s in series or []
+        if s.get("title")
+    ]
 
 
 def public_status(status: str) -> str:
@@ -196,9 +233,16 @@ def request_out(b: dict, names: dict[int, str]) -> dict:
         "status": status,
         "stage": STAGES.get(b["status"]) if status == "downloading" else None,
         "progress": round(float(b.get("progress") or 0), 1) if status == "downloading" else None,
-        "message": ("Waiting for an admin to approve it." if b["status"] == "requested"
-                    else b.get("error") if status == "failed" else b.get("search_note") if status == "wanted"
-                    else b.get("detail")) or None,
+        "message": (
+            "Waiting for an admin to approve it."
+            if b["status"] == "requested"
+            else b.get("error")
+            if status == "failed"
+            else b.get("search_note")
+            if status == "wanted"
+            else b.get("detail")
+        )
+        or None,
         "requested_by": {"id": by, "username": names[by]} if by in names else None,
         "requested_at": _iso(b["added_at"]),
         "updated_at": _iso(b["updated_at"]),
@@ -237,7 +281,9 @@ def _usernames() -> dict[int, str]:
 
 
 def _audible_error(e: Exception) -> ApiError:
-    return ApiError(502, "upstream_unavailable", str(e) or "Audible's catalog didn't answer. Try again shortly.")
+    return ApiError(
+        502, "upstream_unavailable", str(e) or "Audible's catalog didn't answer. Try again shortly."
+    )
 
 
 # ---- response shapes ----------------------------------------------------------------------------
@@ -300,18 +346,24 @@ class RequesterOut(_Out):
 class RequestOut(_Out):
     id: int
     asin: str | None = Field(description="Null for books that didn't come from Audible's catalog.")
-    format: Format = Field(description="audiobook or ebook. A book wanted in both formats is two requests. "
-                                       "Added in Narratarr 0.7.0; more formats may be added.")
+    format: Format = Field(
+        description="audiobook or ebook. A book wanted in both formats is two requests. "
+        "Added in Narratarr 0.7.0; more formats may be added."
+    )
     title: str
     authors: list[str]
     narrators: list[str]
     series: list[SeriesOut]
     cover_url: str | None
-    status: Status = Field(description="wanted: looking for a release. downloading: on its way. "
-                                       "available: in the library. failed: see message.")
+    status: Status = Field(
+        description="wanted: looking for a release. downloading: on its way. "
+        "available: in the library. failed: see message."
+    )
     stage: Stage | None = Field(description="While downloading: where it's got to.")
     progress: float | None = Field(description="While downloading: 0 to 100.")
-    message: str | None = Field(description="For people: why it failed, the last search, or download detail.")
+    message: str | None = Field(
+        description="For people: why it failed, the last search, or download detail."
+    )
     requested_by: RequesterOut | None
     requested_at: str = Field(description="ISO 8601, UTC.")
     updated_at: str
@@ -331,9 +383,13 @@ class BookOut(_Out):
     release_date: str | None = Field(description="YYYY-MM-DD.")
     language: str | None
     abridged: bool
-    request: RequestOut | None = Field(description="Narratarr's request for this book as an audiobook, if it has one.")
-    ebook_request: RequestOut | None = Field(description="Narratarr's request for this book as an ebook, if it "
-                                                               "has one. Added in Narratarr 0.7.0.")
+    request: RequestOut | None = Field(
+        description="Narratarr's request for this book as an audiobook, if it has one."
+    )
+    ebook_request: RequestOut | None = Field(
+        description="Narratarr's request for this book as an ebook, if it "
+        "has one. Added in Narratarr 0.7.0."
+    )
 
 
 class SearchOut(_Out):
@@ -350,10 +406,12 @@ class RequestsOut(_Out):
 
 
 class ErrorDetail(_Out):
-    code: str = Field(description="Stable: unauthorized, invalid_credentials, invalid_token, token_expired, "
-                                  "forbidden, not_found, method_not_allowed, validation_error, conflict, "
-                                  "setup_required, rate_limited, upstream_unavailable, internal_error. "
-                                  "More may be added.")
+    code: str = Field(
+        description="Stable: unauthorized, invalid_credentials, invalid_token, token_expired, "
+        "forbidden, not_found, method_not_allowed, validation_error, conflict, "
+        "setup_required, rate_limited, upstream_unavailable, internal_error. "
+        "More may be added."
+    )
     message: str = Field(description="For people; may change.")
     fields: list[dict] | None = None
 
@@ -373,12 +431,17 @@ class _Body(BaseModel):
 
 
 class Login(BaseModel):
-    model_config = ConfigDict(extra="forbid")  # passwords are taken exactly as typed, spaces and all
+    model_config = ConfigDict(
+        extra="forbid"
+    )  # passwords are taken exactly as typed, spaces and all
 
     username: str = Field(min_length=1, max_length=64)
     password: str = Field(min_length=1, max_length=1024)
-    client: str = Field(min_length=1, max_length=tokens.NAME_MAX,
-                        description='Your app and device, shown to the person: "Fable Frog on iPhone".')
+    client: str = Field(
+        min_length=1,
+        max_length=tokens.NAME_MAX,
+        description='Your app and device, shown to the person: "Fable Frog on iPhone".',
+    )
 
 
 class Refresh(_Body):
@@ -387,8 +450,11 @@ class Refresh(_Body):
 
 class NewRequest(_Body):
     asin: str = Field(pattern=ASIN, description="The book's Audible ASIN.")
-    format: Format = Field("audiobook", description="audiobook (the default) or ebook. To want both, make two "
-                                                    "requests. Added in Narratarr 0.7.0.")
+    format: Format = Field(
+        "audiobook",
+        description="audiobook (the default) or ebook. To want both, make two "
+        "requests. Added in Narratarr 0.7.0.",
+    )
 
 
 # ---- the app ------------------------------------------------------------------------------------
@@ -397,13 +463,15 @@ v1 = FastAPI(
     title="Narratarr API",
     version=str(API_VERSION),
     description="Search Audible's catalog, request audiobooks and ebooks, and follow them until they're in the library. "
-                "See docs/api.md in the Narratarr repository for the full guide.",
+    "See docs/api.md in the Narratarr repository for the full guide.",
     docs_url="/docs",
     redoc_url=None,
     openapi_url="/openapi.json",
 )
 public = APIRouter(responses=ERRORS)
-private = APIRouter(dependencies=[Depends(caller)], responses=ERRORS)  # everything here needs a signed-in person
+private = APIRouter(
+    dependencies=[Depends(caller)], responses=ERRORS
+)  # everything here needs a signed-in person
 
 
 @v1.middleware("http")
@@ -425,40 +493,70 @@ async def _api_error(request: Request, e: ApiError):
 @v1.exception_handler(StarletteHTTPException)
 async def _http_error(request: Request, e: StarletteHTTPException):
     code = {404: "not_found", 405: "method_not_allowed"}.get(e.status_code, "error")
-    message = {404: "There's nothing here.", 405: "That method isn't allowed here."}.get(e.status_code, str(e.detail))
+    message = {404: "There's nothing here.", 405: "That method isn't allowed here."}.get(
+        e.status_code, str(e.detail)
+    )
     return _error(e.status_code, code, message, getattr(e, "headers", None))
 
 
 @v1.exception_handler(RequestValidationError)
 async def _invalid(request: Request, e: RequestValidationError):
     # Say which fields were wrong and why, without echoing what was sent (it may be a password).
-    fields = [{"field": ".".join(str(p) for p in err["loc"] if p not in ("body", "query", "path")) or None,
-               "message": err["msg"]} for err in e.errors()]
+    fields = [
+        {
+            "field": ".".join(str(p) for p in err["loc"] if p not in ("body", "query", "path"))
+            or None,
+            "message": err["msg"],
+        }
+        for err in e.errors()
+    ]
     return _error(422, "validation_error", "Some of what was sent isn't valid.", fields=fields)
 
 
 @v1.exception_handler(Exception)
 async def _crashed(request: Request, e: Exception):
     log.exception("API v1 error on %s %s", request.method, request.url.path)
-    return _error(500, "internal_error", "Something went wrong in Narratarr. Its log has the details.")
+    return _error(
+        500, "internal_error", "Something went wrong in Narratarr. Its log has the details."
+    )
 
 
 # ---- public ----------------------------------------------------------------------------------------
 
 
-@public.get("/status", tags=["Server"], response_model=StatusOut, summary="Is this Narratarr, and which API does it speak?")
+@public.get(
+    "/status",
+    tags=["Server"],
+    response_model=StatusOut,
+    summary="Is this Narratarr, and which API does it speak?",
+)
 async def status():
     return {"app": "narratarr", "version": updates.current_version(), "api_version": API_VERSION}
 
 
-@public.post("/auth/login", tags=["Signing in"], response_model=TokensOut, summary="Sign an app in with a username and password")
+@public.post(
+    "/auth/login",
+    tags=["Signing in"],
+    response_model=TokensOut,
+    summary="Sign an app in with a username and password",
+)
 async def login(body: Login, request: Request):
     if users.count() == 0:
-        raise ApiError(409, "setup_required", "Narratarr has no accounts yet. Open it in a browser to create one.")
-    ticket = auth.start_try(request, body.username)  # counted before checking, so a burst can't slip past
+        raise ApiError(
+            409,
+            "setup_required",
+            "Narratarr has no accounts yet. Open it in a browser to create one.",
+        )
+    ticket = auth.start_try(
+        request, body.username
+    )  # counted before checking, so a burst can't slip past
     if ticket is None:
-        raise ApiError(429, "rate_limited", "Too many sign-in attempts. Wait ten minutes and try again.",
-                       {"Retry-After": str(auth.LOGIN_WINDOW)})
+        raise ApiError(
+            429,
+            "rate_limited",
+            "Too many sign-in attempts. Wait ten minutes and try again.",
+            {"Retry-After": str(auth.LOGIN_WINDOW)},
+        )
     user = await asyncio.to_thread(users.authenticate, body.username, body.password)
     if not user:
         raise ApiError(401, "invalid_credentials", "That username and password don't match.")
@@ -468,7 +566,12 @@ async def login(body: Login, request: Request):
     return {**pair, "user": user}
 
 
-@public.post("/auth/refresh", tags=["Signing in"], response_model=TokensOut, summary="Trade a refresh token for a new pair of tokens")
+@public.post(
+    "/auth/refresh",
+    tags=["Signing in"],
+    response_model=TokensOut,
+    summary="Trade a refresh token for a new pair of tokens",
+)
 async def refresh(body: Refresh, request: Request):
     ip = _ip(request)
     refresh_failures.check(ip)
@@ -485,7 +588,12 @@ async def refresh(body: Refresh, request: Request):
 # ---- signed in ----------------------------------------------------------------------------------------
 
 
-@private.post("/auth/logout", tags=["Signing in"], status_code=204, summary="Sign this app out (its tokens stop working)")
+@private.post(
+    "/auth/logout",
+    tags=["Signing in"],
+    status_code=204,
+    summary="Sign this app out (its tokens stop working)",
+)
 async def logout(request: Request, me: Caller):
     if request.state.grant is not None:
         tokens.revoke(request.state.grant, me["id"])
@@ -498,12 +606,23 @@ async def me(request: Request, me: Caller):
     return {"user": me, "app": {"id": grant["id"], "name": grant["name"]} if grant else None}
 
 
-@private.get("/search", tags=["Catalog"], response_model=SearchOut, summary="Search Audible's catalog")
-async def search(me: Caller,
-                 q: Annotated[str, Query(min_length=1, max_length=200, description="Title, author, narrator or series.")],
-                 page: Annotated[int, Query(ge=1, le=10)] = 1):
+@private.get(
+    "/search", tags=["Catalog"], response_model=SearchOut, summary="Search Audible's catalog"
+)
+async def search(
+    me: Caller,
+    q: Annotated[
+        str, Query(min_length=1, max_length=200, description="Title, author, narrator or series.")
+    ],
+    page: Annotated[int, Query(ge=1, le=10)] = 1,
+):
     if not q.strip():
-        raise ApiError(422, "validation_error", "Type something to search for.", fields=[{"field": "q", "message": "empty"}])
+        raise ApiError(
+            422,
+            "validation_error",
+            "Type something to search for.",
+            fields=[{"field": "q", "message": "empty"}],
+        )
     search_limit.take(me["id"])
     try:
         found, pages = await audible.search_books(q.strip(), page)
@@ -513,7 +632,12 @@ async def search(me: Caller,
     return {"items": [_book_out(b, books, names) for b in found], "page": page, "pages": pages}
 
 
-@private.get("/books/{asin}", tags=["Catalog"], response_model=BookOut, summary="One book in Audible's catalog")
+@private.get(
+    "/books/{asin}",
+    tags=["Catalog"],
+    response_model=BookOut,
+    summary="One book in Audible's catalog",
+)
 async def book(me: Caller, asin: Annotated[str, Path(pattern=ASIN)]):
     search_limit.take(me["id"])  # each lookup asks Audible
     try:
@@ -525,12 +649,21 @@ async def book(me: Caller, asin: Annotated[str, Path(pattern=ASIN)]):
     return _book_out(b, db.list_books(), _usernames())
 
 
-@private.post("/requests", tags=["Requests"], response_model=RequestOut, status_code=201, summary="Request a book",
-              responses={200: {"model": RequestOut, "description": "Narratarr already has it"}})
+@private.post(
+    "/requests",
+    tags=["Requests"],
+    response_model=RequestOut,
+    status_code=201,
+    summary="Request a book",
+    responses={200: {"model": RequestOut, "description": "Narratarr already has it"}},
+)
 async def create_request(body: NewRequest, me: Caller, response: Response):
     response.status_code = 200  # unless it turns out to be new
     kind = body.format
-    existing = next((b for b in db.list_books() if b.get("asin") == body.asin and wanted.kind_of(b) == kind), None)
+    existing = next(
+        (b for b in db.list_books() if b.get("asin") == body.asin and wanted.kind_of(b) == kind),
+        None,
+    )
     if existing:
         return request_out(existing, _usernames())
     request_limit.take(me["id"])
@@ -551,8 +684,9 @@ async def create_request(body: NewRequest, me: Caller, response: Response):
     except sqlite3.IntegrityError:  # requested twice at the same moment
         added = None
     if added is None:
-        same = db.get_by_url(wanted.url_for(b["url"], kind)) or wanted.in_library(body.asin, b["title"], b["author"],
-                                                                                   kind=kind)
+        same = db.get_by_url(wanted.url_for(b["url"], kind)) or wanted.in_library(
+            body.asin, b["title"], b["author"], kind=kind
+        )
         if same is None:
             raise ApiError(409, "conflict", "That book couldn't be added. Try again.")
         return request_out(same, _usernames())
@@ -566,14 +700,25 @@ async def create_request(body: NewRequest, me: Caller, response: Response):
     return request_out(db.get(added["id"]), _usernames())
 
 
-@private.get("/requests", tags=["Requests"], response_model=RequestsOut, summary="Requests and the books Narratarr has, newest first")
+@private.get(
+    "/requests",
+    tags=["Requests"],
+    response_model=RequestsOut,
+    summary="Requests and the books Narratarr has, newest first",
+)
 async def list_requests(
     me: Caller,
-    status: Annotated[str | None, Query(description="Comma-separated: wanted, downloading, available, failed.")] = None,
+    status: Annotated[
+        str | None, Query(description="Comma-separated: wanted, downloading, available, failed.")
+    ] = None,
     mine: Annotated[bool, Query(description="Only books this person requested.")] = False,
-    format: Annotated[Literal["audiobook", "ebook", "all"],
-                      Query(description="Which format to list: audiobook (the default, as before 0.7.0), ebook, "
-                                        "or all.")] = "audiobook",
+    format: Annotated[
+        Literal["audiobook", "ebook", "all"],
+        Query(
+            description="Which format to list: audiobook (the default, as before 0.7.0), ebook, "
+            "or all."
+        ),
+    ] = "audiobook",
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     offset: Annotated[int, Query(ge=0, le=1_000_000)] = 0,
 ):
@@ -582,17 +727,28 @@ async def list_requests(
         wanted_statuses = {s.strip() for s in status.split(",") if s.strip()}
         unknown = wanted_statuses - set(STATUSES)
         if unknown:
-            raise ApiError(422, "validation_error", f"Unknown status: {', '.join(sorted(unknown))}.",
-                           fields=[{"field": "status", "message": f"one or more of: {', '.join(STATUSES)}"}])
+            raise ApiError(
+                422,
+                "validation_error",
+                f"Unknown status: {', '.join(sorted(unknown))}.",
+                fields=[{"field": "status", "message": f"one or more of: {', '.join(STATUSES)}"}],
+            )
     books = db.list_books()
-    books = [b for b in books
-             if (not wanted_statuses or public_status(b["status"]) in wanted_statuses)
-             and (not mine or b.get("requested_by") == me["id"])
-             and format in ("all", wanted.kind_of(b))]
+    books = [
+        b
+        for b in books
+        if (not wanted_statuses or public_status(b["status"]) in wanted_statuses)
+        and (not mine or b.get("requested_by") == me["id"])
+        and format in ("all", wanted.kind_of(b))
+    ]
     books.sort(key=lambda b: b["updated_at"], reverse=True)
     names = _usernames()
-    return {"items": [request_out(b, names) for b in books[offset:offset + limit]],
-            "total": len(books), "limit": limit, "offset": offset}
+    return {
+        "items": [request_out(b, names) for b in books[offset : offset + limit]],
+        "total": len(books),
+        "limit": limit,
+        "offset": offset,
+    }
 
 
 def _request_or_404(request_id: int) -> dict:
@@ -602,18 +758,26 @@ def _request_or_404(request_id: int) -> dict:
     return b
 
 
-@private.get("/requests/{request_id}", tags=["Requests"], response_model=RequestOut, summary="One request")
+@private.get(
+    "/requests/{request_id}", tags=["Requests"], response_model=RequestOut, summary="One request"
+)
 async def get_request(me: Caller, request_id: Annotated[int, Path(ge=1, le=2**62)]):
     return request_out(_request_or_404(request_id), _usernames())
 
 
-@private.delete("/requests/{request_id}", tags=["Requests"], status_code=204, summary="Cancel a request")
+@private.delete(
+    "/requests/{request_id}", tags=["Requests"], status_code=204, summary="Cancel a request"
+)
 async def cancel_request(me: Caller, request_id: Annotated[int, Path(ge=1, le=2**62)]):
     b = _request_or_404(request_id)
     if me["role"] != "admin" and b.get("requested_by") != me["id"]:
-        raise ApiError(403, "forbidden", "Only the person who requested it, or an admin, can cancel this.")
+        raise ApiError(
+            403, "forbidden", "Only the person who requested it, or an admin, can cancel this."
+        )
     if b["status"] == "completed":
-        raise ApiError(409, "conflict", "That book is already in the library. Remove it in Narratarr instead.")
+        raise ApiError(
+            409, "conflict", "That book is already in the library. Remove it in Narratarr instead."
+        )
     from . import api as core
 
     await core.remove(request_id, delete_files=False)  # stops a download in progress, too
@@ -626,7 +790,14 @@ v1.include_router(private)
 
 # Paths an app may call without signing in. Every other route must need a signed-in person
 # (tests/test_api_v1.py checks this against the routes above).
-OPEN_PATHS = {"/status", "/auth/login", "/auth/refresh", "/docs", "/docs/oauth2-redirect", "/openapi.json"}
+OPEN_PATHS = {
+    "/status",
+    "/auth/login",
+    "/auth/refresh",
+    "/docs",
+    "/docs/oauth2-redirect",
+    "/openapi.json",
+}
 
 
 def contract() -> dict:
@@ -634,7 +805,9 @@ def contract() -> dict:
     return v1.openapi()
 
 
-if __name__ == "__main__":  # python -m narratarr.apiv1 > docs/openapi-v1.json, after adding to the API
+if (
+    __name__ == "__main__"
+):  # python -m narratarr.apiv1 > docs/openapi-v1.json, after adding to the API
     import json
 
     print(json.dumps(contract(), indent=2, sort_keys=True))

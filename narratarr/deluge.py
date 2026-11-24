@@ -22,7 +22,13 @@ from .downloaders import ClientError, Job
 
 # get_torrent_status returns only the keys asked for.
 KEYS = [
-    "name", "state", "progress", "download_payload_rate", "download_location", "is_finished", "message",
+    "name",
+    "state",
+    "progress",
+    "download_payload_rate",
+    "download_location",
+    "is_finished",
+    "message",
 ]
 CHECKING = {"Allocating", "Checking", "Moving"}
 
@@ -58,17 +64,25 @@ class Deluge:
         try:
             resp = await self._client.post(self._rpc, json=body)
         except httpx.HTTPError as e:
-            raise DelugeError(reach.explain(e, self._rpc, "Deluge", "http://192.168.1.10:8112")) from e
+            raise DelugeError(
+                reach.explain(e, self._rpc, "Deluge", "http://192.168.1.10:8112")
+            ) from e
         if resp.status_code == 401:
             raise DelugeError("Deluge rejected the password. Check it in Settings.")
         if resp.status_code == 404:
-            raise DelugeError("That address doesn't look like Deluge's web UI. Check it in Settings.")
+            raise DelugeError(
+                "That address doesn't look like Deluge's web UI. Check it in Settings."
+            )
         if resp.status_code >= 400:
-            raise DelugeError(f"Deluge returned an error ({resp.status_code}). Check the address in Settings.")
+            raise DelugeError(
+                f"Deluge returned an error ({resp.status_code}). Check the address in Settings."
+            )
         try:
             data = resp.json()
         except ValueError:
-            raise DelugeError("That address doesn't look like Deluge's web UI. Check it in Settings.")
+            raise DelugeError(
+                "That address doesn't look like Deluge's web UI. Check it in Settings."
+            )
         error = data.get("error")
         if error:  # a 200 can still be a failure
             message = error.get("message") if isinstance(error, dict) else str(error)
@@ -104,7 +118,9 @@ class Deluge:
         await self._login()
         return str(await self._call("daemon.get_version") or "")
 
-    async def add(self, kind: str, payload: str | bytes, tag: str = "", category: str = "", folder: str = "") -> str:
+    async def add(
+        self, kind: str, payload: str | bytes, tag: str = "", category: str = "", folder: str = ""
+    ) -> str:
         await self._login()
         options: dict = {}
         if folder:
@@ -131,7 +147,9 @@ class Deluge:
         try:
             await self._call("label.add", [tag])
         except DelugeError as e:
-            if "already exists" not in str(e).lower():  # created on an earlier run; anything else is real
+            if (
+                "already exists" not in str(e).lower()
+            ):  # created on an earlier run; anything else is real
                 raise
         await self._call("label.set_torrent", [torrent_hash, tag])
 
@@ -163,7 +181,12 @@ class Deluge:
         A torrent the user already had, or that another book is waiting on, is left alone.
         """
         await self._login()
-        label = str((await self._call("core.get_torrent_status", [torrent_hash, ["label"]]) or {}).get("label") or "")
+        label = str(
+            (await self._call("core.get_torrent_status", [torrent_hash, ["label"]]) or {}).get(
+                "label"
+            )
+            or ""
+        )
         if tag and tag != label:
             return
         files = files and label.startswith("narratarr-")

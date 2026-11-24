@@ -8,7 +8,11 @@ BASE = "https://audiobookbay.lu"
 
 ITUNES_RESULTS = {
     "results": [
-        {"collectionName": "Project Hail Mary (Unabridged)", "artistName": "Andy Weir", "artworkUrl100": "https://a/100x100bb.jpg"},
+        {
+            "collectionName": "Project Hail Mary (Unabridged)",
+            "artistName": "Andy Weir",
+            "artworkUrl100": "https://a/100x100bb.jpg",
+        },
         {"collectionName": "Project Hail Mary", "artistName": "Andy Weir"},
         {"collectionName": "Project Hail Mary (Book Summary & Analysis)", "artistName": "Briefly"},
         {"collectionName": "The Martian", "artistName": "Andy Weir"},
@@ -31,7 +35,9 @@ def test_score_prefers_exact_title():
 
 async def test_suggestions_clean_dedupe_and_skip_summaries():
     search._cache.clear()
-    client = httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200, json=ITUNES_RESULTS)))
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda r: httpx.Response(200, json=ITUNES_RESULTS))
+    )
     out = await search.suggestions("projct hail marry", client=client)
     assert [s["title"] for s in out] == ["Project Hail Mary", "The Martian"]
     assert out[0]["cover_url"] == "https://a/300x300bb.jpg"
@@ -42,7 +48,9 @@ def test_correct_words_fixes_typos():
     assert search.correct_words("projct hail marry", sugg) == "project hail mary"
     sugg = [{"title": "Mistborn", "author": "Brandon Sanderson"}]
     assert search.correct_words("brandon sandersen mistborn", sugg) == "brandon sanderson mistborn"
-    extra, label = search.corrected_queries("projct hail marry", [{"title": "Project Hail Mary", "author": "Andy Weir"}])
+    extra, label = search.corrected_queries(
+        "projct hail marry", [{"title": "Project Hail Mary", "author": "Andy Weir"}]
+    )
     assert label == "project hail mary"
     assert "project hail mary" in extra
 
@@ -75,7 +83,9 @@ async def test_smart_search_without_suggestions_is_literal(fixture_html):
     source = AudiobookBay(
         BASE,
         client=httpx.AsyncClient(
-            transport=httpx.MockTransport(lambda r: httpx.Response(200, text=fixture_html("abb_search.html")))
+            transport=httpx.MockTransport(
+                lambda r: httpx.Response(200, text=fixture_html("abb_search.html"))
+            )
         ),
     )
     result = await search.smart_search(source, "dune", use_suggestions=False)
@@ -94,7 +104,9 @@ def test_relevant_drops_loose_suggestions():
 
 
 def test_little_words_do_not_create_matches():
-    unrelated = Listing(url="a", title="Twenty Thousand Leagues Under the Sea", author="Jules Verne")
+    unrelated = Listing(
+        url="a", title="Twenty Thousand Leagues Under the Sea", author="Jules Verne"
+    )
     poe = Listing(url="b", title="12 Creepy Tales by Edgar Allan Poe", author="Edgar Allan Poe")
     exact = Listing(url="c", title="The Tell-Tale Heart", author="Edgar Allan Poe")
     q = "the tell tale heart"

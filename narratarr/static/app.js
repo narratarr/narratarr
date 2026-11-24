@@ -1,10 +1,22 @@
 // Narratarr web UI — no build step, just modules.
 
-import { $, $$, esc, I, api, hue, coverHTML, firstAuthor, fmtBytes, fmtLeft, ago, toast } from "./util.js";
+import {
+  $,
+  $$,
+  esc,
+  I,
+  api,
+  hue,
+  coverHTML,
+  firstAuthor,
+  fmtBytes,
+  fmtLeft,
+  ago,
+  toast,
+} from "./util.js";
 import { player } from "./player.js";
 import { openAbsGuide } from "./guide.js";
 import { reader } from "./reader.js";
-
 
 // Narratarr's community: help, ideas and release news.
 const DISCORD_URL = "https://discord.gg/kB5EgmfBrA";
@@ -14,7 +26,9 @@ const STATUS = {
   wanted: "Wanted",
   queued: "Queued",
   resolving: "Resolving",
-  get caching() { return `On ${cloudName()}`; },
+  get caching() {
+    return `On ${cloudName()}`;
+  },
   downloading: "Downloading",
   organizing: "Organizing",
   completed: "In library",
@@ -26,11 +40,23 @@ const PHASES = [
   ["downloading", "Download"],
   ["organizing", "Organize"],
 ];
-const CLIENTS = { sabnzbd: "SABnzbd", nzbget: "NZBGet", realdebrid: "Real-Debrid", alldebrid: "AllDebrid", torbox: "TorBox", premiumize: "Premiumize", qbittorrent: "qBittorrent", transmission: "Transmission", deluge: "Deluge" };
+const CLIENTS = {
+  sabnzbd: "SABnzbd",
+  nzbget: "NZBGet",
+  realdebrid: "Real-Debrid",
+  alldebrid: "AllDebrid",
+  torbox: "TorBox",
+  premiumize: "Premiumize",
+  qbittorrent: "qBittorrent",
+  transmission: "Transmission",
+  deluge: "Deluge",
+};
 // Cloud services fetch torrents for us; then we download the files from them.
 const DEBRID = ["realdebrid", "alldebrid", "torbox", "premiumize"];
-const SHORT = { realdebrid: "rd", alldebrid: "ad", torbox: "tb", premiumize: "pm" }; // their settings' prefixes
-const cloudName = () => (DEBRID.includes(state.settings?.torrent_client) ? CLIENTS[state.settings.torrent_client] : "Real-Debrid");
+const cloudName = () =>
+  DEBRID.includes(state.settings?.torrent_client)
+    ? CLIENTS[state.settings.torrent_client]
+    : "Real-Debrid";
 // Catalogs are where book details come from; the book itself is then found on your indexers.
 const CATALOGS = ["audible", "openlibrary"];
 const isCatalog = (name) => CATALOGS.includes(name);
@@ -39,7 +65,6 @@ const FORMATS = {
   ebook: { label: "Ebook", icon: "book", wanted: " as an ebook" },
   both: { label: "Both", icon: "", wanted: " as an audiobook and an ebook" },
 };
-
 
 // ---------------------------------------------------------------------------
 // state + api
@@ -50,7 +75,23 @@ const state = {
   library: [],
   libraryKey: "",
   libRatings: { at: 0, ratings: {} },
-  discover: { q: "", category: "", page: 0, total: 1, items: [], loading: false, error: "", token: 0, dym: "", lang: "", fmt: "", sort: "", note: "", source: lastSource(), kind: lastKind() },
+  discover: {
+    q: "",
+    category: "",
+    page: 0,
+    total: 1,
+    items: [],
+    loading: false,
+    error: "",
+    token: 0,
+    dym: "",
+    lang: "",
+    fmt: "",
+    sort: "",
+    note: "",
+    source: lastSource(),
+    kind: lastKind(),
+  },
   libFilter: "all",
   libFormat: "",
   libSearch: "",
@@ -61,27 +102,34 @@ const state = {
   updates: null,
 };
 
-
 const byUrl = () => new Map(state.library.map((b) => [b.source_url, b]));
 // A catalog book in the library: its audiobook, or its ebook when that's all there is.
 const libFor = (map, url) => map.get(url) || map.get(`${url}#ebook`);
 const isEbook = (b) => b?.kind === "ebook";
 // EPUBs open in Narratarr's reader, PDFs in the browser's own viewer; other formats are downloaded.
-const canRead = (b) => isEbook(b) && b.status === "completed" && /\.(epub|pdf)$/i.test(b.path || "");
+const canRead = (b) =>
+  isEbook(b) && b.status === "completed" && /\.(epub|pdf)$/i.test(b.path || "");
 // Part-way through: listening (seconds) or reading (percent).
-const underway = (b) => b.status === "completed" && !b.finished && b.listen_duration
-  && (isEbook(b) ? b.listen_position > 0 : b.listen_position > 30);
-const readLeft = (b) => `${Math.max(1, Math.round(100 - (b.listen_position / b.listen_duration) * 100))}% left`;
+const underway = (b) =>
+  b.status === "completed" &&
+  !b.finished &&
+  b.listen_duration &&
+  (isEbook(b) ? b.listen_position > 0 : b.listen_position > 30);
+const readLeft = (b) =>
+  `${Math.max(1, Math.round(100 - (b.listen_position / b.listen_duration) * 100))}% left`;
 
 function savedFormat() {
-  try { return localStorage.getItem("narratarr.format") || ""; } catch { return ""; }
+  try {
+    return localStorage.getItem("narratarr.format") || "";
+  } catch {
+    return "";
+  }
 }
 // Open Library is mostly for ebooks, so its books start out as ebooks until someone picks otherwise.
 const formatFor = (source) => state.format || (source === "openlibrary" ? "ebook" : "audiobook");
 
 // ---------------------------------------------------------------------------
 // helpers
-
 
 function statusTag(status) {
   return `<span class="status-tag s-${status}"><i></i>${esc(STATUS[status] || status)}</span>`;
@@ -97,11 +145,14 @@ const asksFirst = () => !isAdmin() && state.settings?.listener_approval !== fals
 function stBadge(b, onShelf = false) {
   if (!b) return "";
   const s = b.status;
-  let cls = "dl", text = STATUS[s] || s, icon = "";
+  let cls = "dl",
+    text = STATUS[s] || s,
+    icon = "";
   if (s === "completed") {
     if (!onShelf) [cls, text, icon] = ["ok", "In library", I.check];
     else if (b.finished) [cls, text, icon] = ["ok", "Finished", I.check];
-    else if (!b.listen_position && Date.now() / 1000 - (b.completed_at || 0) < 3 * 86400) [cls, text] = ["new", "New"];
+    else if (!b.listen_position && Date.now() / 1000 - (b.completed_at || 0) < 3 * 86400)
+      [cls, text] = ["new", "New"];
     else return "";
   } else if (s === "requested") [cls, text, icon] = ["req", "Awaiting approval", I.bell];
   else if (s === "wanted") [cls, text, icon] = ["want", "Wanted", I.bookmark];
@@ -122,7 +173,6 @@ function spinBtn(btn, on) {
     btn.disabled = false;
   }
 }
-
 
 function modal({ title, body, confirm = "Confirm", danger = false, extra = "" }) {
   return new Promise((resolve) => {
@@ -145,7 +195,12 @@ function modal({ title, body, confirm = "Confirm", danger = false, extra = "" })
       document.removeEventListener("keydown", onKey, true);
       resolve(ok ? { ok, ...extras } : null);
     };
-    const onKey = (e) => { if (e.key === "Escape") { e.stopPropagation(); done(false); } };
+    const onKey = (e) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        done(false);
+      }
+    };
     document.addEventListener("keydown", onKey, true);
     scrim.onclick = (e) => {
       if (e.target === scrim) return done(false);
@@ -158,63 +213,110 @@ function modal({ title, body, confirm = "Confirm", danger = false, extra = "" })
 
 // What the Prowlarr tab searches for: "audiobook" or "ebook".
 function lastKind() {
-  try { return localStorage.getItem("narratarr.discoverKind") === "ebook" ? "ebook" : "audiobook"; } catch { return "audiobook"; }
+  try {
+    return localStorage.getItem("narratarr.discoverKind") === "ebook" ? "ebook" : "audiobook";
+  } catch {
+    return "audiobook";
+  }
 }
 
 function lastSource() {
-  try { return localStorage.getItem("narratarr.source") || localStorage.getItem("audiobookeer.source") || "librivox"; } catch { return "librivox"; }
+  try {
+    return (
+      localStorage.getItem("narratarr.source") ||
+      localStorage.getItem("audiobookeer.source") ||
+      "librivox"
+    );
+  } catch {
+    return "librivox";
+  }
 }
 const FALLBACK_SOURCES = {
   local: { label: "Your files", delivery: "local" },
   audible: { label: "Audible catalog", delivery: "wanted" },
   openlibrary: { label: "Open Library", delivery: "wanted" },
 };
-const sourceInfo = (name) => state.sources.find((s) => s.name === name)
-  || { name, label: name, delivery: "torrent", categories: [], ...FALLBACK_SOURCES[name] };
+const sourceInfo = (name) =>
+  state.sources.find((s) => s.name === name) || {
+    name,
+    label: name,
+    delivery: "torrent",
+    categories: [],
+    ...FALLBACK_SOURCES[name],
+  };
 const isDirect = (name) => sourceInfo(name).delivery === "direct";
 
 // Which download client a book needs that isn't set up yet ("" when it can download now).
 function missingClient(source, protocol) {
   if (isDirect(source) || isCatalog(source) || source === "local") return "";
   const st = state.settings || {};
-  if (protocol === "usenet") return st.usenet_configured ? "" : CLIENTS[st.usenet_client] || "SABnzbd";
+  if (protocol === "usenet")
+    return st.usenet_configured ? "" : CLIENTS[st.usenet_client] || "SABnzbd";
   return st.torrent_configured ? "" : CLIENTS[st.torrent_client] || "Real-Debrid";
 }
 
 // Wanted Audible books, imports and client-handled jobs each show their own steps.
 function phasesFor(b) {
   const st = state.settings || {};
-  if (b.source === "local") return [["downloading", "Copy"], ["organizing", "Organize"]];
+  if (b.source === "local")
+    return [
+      ["downloading", "Copy"],
+      ["organizing", "Organize"],
+    ];
   if (isDirect(b.source)) return PHASES.filter(([s]) => s !== "caching");
-  const client = b.protocol === "usenet" ? b.download_client || st.usenet_client
-    : b.download_client || (DEBRID.includes(st.torrent_client) ? "" : st.torrent_client);
-  if (client && !DEBRID.includes(client)) return [["resolving", "Resolve"], ["downloading", CLIENTS[client]], ["organizing", "Organize"]];
+  const client =
+    b.protocol === "usenet"
+      ? b.download_client || st.usenet_client
+      : b.download_client || (DEBRID.includes(st.torrent_client) ? "" : st.torrent_client);
+  if (client && !DEBRID.includes(client))
+    return [
+      ["resolving", "Resolve"],
+      ["downloading", CLIENTS[client]],
+      ["organizing", "Organize"],
+    ];
   return PHASES.map(([s, label]) => [s, s === "caching" ? cloudName() : label]);
 }
 
 // ---------------------------------------------------------------------------
 // library actions (shared by every view)
 
-async function addBook(url, { cover = "", title = "", source = "audiobookbay", protocol = "", format } = {}) {
+async function addBook(
+  url,
+  { cover = "", title = "", source = "audiobookbay", protocol = "", format } = {},
+) {
   if (isCatalog(source)) {
     format ||= formatFor(source);
     // A catalog only describes the book: it goes to Wanted and Narratarr looks for a release.
-    const book = await api("/api/library", { method: "POST", body: { url, download: true, source, format } });
+    const book = await api("/api/library", {
+      method: "POST",
+      body: { url, download: true, source, format },
+    });
     await refreshLibrary();
-    toast(book.status === "requested" ? `Asked for ${book.title}. It’ll be looked for once an admin approves it.`
-      : book.status === "wanted" ? `${book.title} is on your Wanted list${FORMATS[format].wanted}. Looking for it now…` : `${book.title} is already in your library`,
-      { kind: "ok", cover: cover || book.cover_url });
+    toast(
+      book.status === "requested"
+        ? `Asked for ${book.title}. It’ll be looked for once an admin approves it.`
+        : book.status === "wanted"
+          ? `${book.title} is on your Wanted list${FORMATS[format].wanted}. Looking for it now…`
+          : `${book.title} is already in your library`,
+      { kind: "ok", cover: cover || book.cover_url },
+    );
     return book;
   }
   // Free sources download directly; torrents and Usenet releases need a download client.
   const missing = missingClient(source, protocol);
   const download = !missing;
-  const book = await api("/api/library", { method: "POST", body: { url, download, source, ...(format === "ebook" ? { format } : {}) } });
+  const book = await api("/api/library", {
+    method: "POST",
+    body: { url, download, source, ...(format === "ebook" ? { format } : {}) },
+  });
   await refreshLibrary();
   toast(
-    book.status === "requested" ? `Asked for ${book.title || title}. It’ll download once an admin approves it.`
-    : download ? `${book.title || title} is on its way` : `Saved ${book.title || title} to Wanted. Connect ${missing} in Settings to download.`,
-    { kind: "ok", cover: cover || book.cover_url }
+    book.status === "requested"
+      ? `Asked for ${book.title || title}. It’ll download once an admin approves it.`
+      : download
+        ? `${book.title || title} is on its way`
+        : `Saved ${book.title || title} to Wanted. Connect ${missing} in Settings to download.`,
+    { kind: "ok", cover: cover || book.cover_url },
   );
   return book;
 }
@@ -225,27 +327,50 @@ async function bookAction(id, action) {
     const takeBack = !isAdmin();
     const decline = isAdmin() && book?.status === "requested";
     const res = await modal({
-      title: takeBack ? "Take back your request?" : decline ? "Decline this request?" : "Remove from library?",
-      body: takeBack ? `“${book?.title}” won’t be looked for or downloaded.`
-        : decline ? `“${book?.title}” won’t be downloaded${book.requested_by_name ? ` for ${esc(book.requested_by_name)}` : ""}.`
-        : `“${book?.title}” will be removed from Narratarr.`,
+      title: takeBack
+        ? "Take back your request?"
+        : decline
+          ? "Decline this request?"
+          : "Remove from library?",
+      body: takeBack
+        ? `“${book?.title}” won’t be looked for or downloaded.`
+        : decline
+          ? `“${book?.title}” won’t be downloaded${book.requested_by_name ? ` for ${esc(book.requested_by_name)}` : ""}.`
+          : `“${book?.title}” will be removed from Narratarr.`,
       confirm: takeBack ? "Take it back" : decline ? "Decline" : "Remove",
       danger: true,
-      extra: book?.path && !takeBack
-        ? `<label class="switch"><input type="checkbox" name="files"><i></i>Also delete its files on disk${book.source === "local" ? " (the ones you imported)" : ""}</label>`
-        : "",
+      extra:
+        book?.path && !takeBack
+          ? `<label class="switch"><input type="checkbox" name="files"><i></i>Also delete its files on disk${book.source === "local" ? " (the ones you imported)" : ""}</label>`
+          : "",
     });
     if (!res) return false;
     if (player.book?.id === id) player.close();
     const out = await api(`/api/library/${id}?delete_files=${!!res.files}`, { method: "DELETE" });
-    toast(out?.kept ? `Removed. Its files were kept at ${out.kept}` : takeBack ? "Request taken back" : decline ? "Request declined" : "Removed from library",
-      out?.kept ? { kind: "ok" } : {});
+    toast(
+      out?.kept
+        ? `Removed. Its files were kept at ${out.kept}`
+        : takeBack
+          ? "Request taken back"
+          : decline
+            ? "Request declined"
+            : "Removed from library",
+      out?.kept ? { kind: "ok" } : {},
+    );
   } else if (action === "keep-looking") {
     const book = await api(`/api/library/${id}/keep-looking`, { method: "POST" });
-    toast(`Turned that release down. Still looking for ${book.title}`, { kind: "ok", cover: book.cover_url });
+    toast(`Turned that release down. Still looking for ${book.title}`, {
+      kind: "ok",
+      cover: book.cover_url,
+    });
   } else if (action === "approve") {
     const book = await api(`/api/library/${id}/approve`, { method: "POST" });
-    toast(book.status === "queued" ? `Approved. ${book.title} is downloading` : `Approved. Looking for ${book.title} now`, { kind: "ok", cover: book.cover_url });
+    toast(
+      book.status === "queued"
+        ? `Approved. ${book.title} is downloading`
+        : `Approved. Looking for ${book.title} now`,
+      { kind: "ok", cover: book.cover_url },
+    );
   } else {
     const book = state.library.find((b) => b.id === id);
     const missing = action === "download" && book && missingClient(book.source, book.protocol);
@@ -293,21 +418,38 @@ function updateRdPill() {
   const pill = $("#rd-pill");
   const st = state.settings || {};
   // Name the clients the list actually holds, not the flat setting it replaced.
-  const ready = (st.clients || []).filter((c) => c.configured).map((c) => c.label)
-    .concat([st.torrent_configured && !(st.clients || []).length && CLIENTS[st.torrent_client],
-             st.usenet_configured && !(st.clients || []).length && CLIENTS[st.usenet_client]]).filter(Boolean);
+  const ready = (st.clients || [])
+    .filter((c) => c.configured)
+    .map((c) => c.label)
+    .concat([
+      st.torrent_configured && !(st.clients || []).length && CLIENTS[st.torrent_client],
+      st.usenet_configured && !(st.clients || []).length && CLIENTS[st.usenet_client],
+    ])
+    .filter(Boolean);
   pill.className = `rd-pill ${ready.length ? "ok" : "missing"}`;
-  $("span", pill).textContent = ready.length ? `${ready.join(" · ")} ready` : "Connect a downloader";
+  $("span", pill).textContent = ready.length
+    ? `${ready.join(" · ")} ready`
+    : "Connect a downloader";
 }
 
 async function refreshFollows() {
-  try { state.follows = await api("/api/follows"); } catch { /* the page still works without them */ }
+  try {
+    state.follows = await api("/api/follows");
+  } catch {
+    /* the page still works without them */
+  }
 }
 
 // ---------------------------------------------------------------------------
 // router
 
-const views = { discover: Discover, library: Library, authors: Authors, activity: Activity, settings: Settings };
+const views = {
+  discover: Discover,
+  library: Library,
+  authors: Authors,
+  activity: Activity,
+  settings: Settings,
+};
 
 function route() {
   let [name = "discover", param] = location.hash.replace(/^#\/?/, "").split("?")[0].split("/");
@@ -335,9 +477,19 @@ function route() {
 function cardHTML(item, lib, i = 0) {
   const h = hue(item.title + item.author);
   const facts = [
-    item.format, item.size, item.language && item.language !== "English" ? item.language : "",
-    item.protocol === "usenet" ? "Usenet" : item.seeders != null ? `${item.seeders} seeder${item.seeders === 1 ? "" : "s"}` : "",
-    item.source === "audible" ? shortLength(item.length) : item.source === "openlibrary" ? item.posted : "",
+    item.format,
+    item.size,
+    item.language && item.language !== "English" ? item.language : "",
+    item.protocol === "usenet"
+      ? "Usenet"
+      : item.seeders != null
+        ? `${item.seeders} seeder${item.seeders === 1 ? "" : "s"}`
+        : "",
+    item.source === "audible"
+      ? shortLength(item.length)
+      : item.source === "openlibrary"
+        ? item.posted
+        : "",
     item.source === "audible" ? releaseLabel(item.released || item.posted) : "",
   ].filter(Boolean);
   const active = lib && ACTIVE.includes(lib.status);
@@ -365,7 +517,7 @@ function ratingPillHTML(item) {
   // Switched off in Settings: no slot, no words. "Absent" is not "unrated".
   if (item.rating_state === "off") return "";
   const r = item.rating;
-  let inner = "";
+  let inner;
   if (r && (r.score_text || r.display)) {
     const score = r.score_text || `★ ${Number(r.R).toFixed(1)}`;
     const second = r.label || (r.count ? `${r.count}` : "");
@@ -392,12 +544,20 @@ function clientChip(item) {
   return `<div class="client-chip" title="This release would go to ${esc(c.label)}${c.rule === null ? " (no rule matched, so the default)" : ""}">${esc(c.label)}</div>`;
 }
 
-const shortLength = (len) => (len || "").replace(/ hours?/, "h").replace(/ and /, " ").replace(/ minutes?/, "m");
+const shortLength = (len) =>
+  (len || "")
+    .replace(/ hours?/, "h")
+    .replace(/ and /, " ")
+    .replace(/ minutes?/, "m");
 
 function releaseLabel(day, always = false) {
   const t = Date.parse(day || "");
   if (!t) return "";
-  const when = new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  const when = new Date(t).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
   return t > Date.now() ? `Out ${when}` : always ? when : "";
 }
 
@@ -406,10 +566,14 @@ function quickButton(item, lib) {
     const as = FORMATS[formatFor(item.source)].wanted;
     return `<button class="quick" data-quick aria-label="Add ${esc(item.title)} to Wanted${as}" title="Add to Wanted${as}">${I.bookmark}</button>`;
   }
-  if (canRead(lib)) return `<button class="quick play-quick" data-play="${lib.id}" aria-label="Read ${esc(item.title)}" title="Read">${I.book}</button>`;
-  if (isEbook(lib) && lib.status === "completed") return `<a class="quick" href="/api/library/${lib.id}/ebook" download aria-label="Download the ebook of ${esc(item.title)}" title="Download ebook">${I.down}</a>`;
-  if (!lib) return `<button class="quick" data-quick aria-label="Download ${esc(item.title)}" title="Download">${I.plus}</button>`;
-  if (lib.status === "completed") return `<button class="quick play-quick" data-play="${lib.id}" aria-label="Play ${esc(item.title)}" title="Play">${I.play}</button>`;
+  if (canRead(lib))
+    return `<button class="quick play-quick" data-play="${lib.id}" aria-label="Read ${esc(item.title)}" title="Read">${I.book}</button>`;
+  if (isEbook(lib) && lib.status === "completed")
+    return `<a class="quick" href="/api/library/${lib.id}/ebook" download aria-label="Download the ebook of ${esc(item.title)}" title="Download ebook">${I.down}</a>`;
+  if (!lib)
+    return `<button class="quick" data-quick aria-label="Download ${esc(item.title)}" title="Download">${I.plus}</button>`;
+  if (lib.status === "completed")
+    return `<button class="quick play-quick" data-play="${lib.id}" aria-label="Play ${esc(item.title)}" title="Play">${I.play}</button>`;
   return "";
 }
 
@@ -417,14 +581,26 @@ function quickButton(item, lib) {
 function spotlightHTML(item, lib, src) {
   const narr = (item.narrators || []).slice(0, 2).join(", ");
   const facts = [
-    isCatalog(item.source) ? (formatFor(item.source) === "ebook" ? "Ebook" : "Audiobook") : item.format,
+    isCatalog(item.source)
+      ? formatFor(item.source) === "ebook"
+        ? "Ebook"
+        : "Audiobook"
+      : item.format,
     item.source === "audible" ? shortLength(item.length) : item.size,
     item.language && item.language !== "English" ? item.language : "",
-    item.protocol === "usenet" ? "Usenet" : item.seeders != null ? `${item.seeders} seeder${item.seeders === 1 ? "" : "s"}` : "",
+    item.protocol === "usenet"
+      ? "Usenet"
+      : item.seeders != null
+        ? `${item.seeders} seeder${item.seeders === 1 ? "" : "s"}`
+        : "",
     releaseLabel(item.released || item.posted),
   ].filter(Boolean);
   const author = firstAuthor(item.author);
-  const also = author ? state.library.filter((b) => firstAuthor(b.author) === author && b.source_url !== item.url).slice(0, 3) : [];
+  const also = author
+    ? state.library
+        .filter((b) => firstAuthor(b.author) === author && b.source_url !== item.url)
+        .slice(0, 3)
+    : [];
   let primary;
   if (lib?.status === "completed") {
     primary = `<button class="btn primary" data-play="${lib.id}">${isEbook(lib) ? `${I.book} Read` : `${I.play} Play`}</button>`;
@@ -432,8 +608,13 @@ function spotlightHTML(item, lib, src) {
     primary = stBadge(lib).replace("st-badge", "st-badge inline");
   } else {
     const asks = asksFirst();
-    const label = asks ? "Ask for it" : isCatalog(item.source) ? "Add to Wanted"
-      : missingClient(item.source, item.protocol) ? "Save to Wanted" : "Download";
+    const label = asks
+      ? "Ask for it"
+      : isCatalog(item.source)
+        ? "Add to Wanted"
+        : missingClient(item.source, item.protocol)
+          ? "Save to Wanted"
+          : "Download";
     primary = `<button class="btn primary" data-quick>${asks ? I.bell : isCatalog(item.source) ? I.bookmark : I.down} ${label}</button>`;
   }
   return `
@@ -451,21 +632,40 @@ function spotlightHTML(item, lib, src) {
           ${author ? `<button class="btn ghost" type="button" data-more-by="${esc(author)}">More by ${esc(author)}</button>` : ""}
         </div>
         ${!lib && asksFirst() ? `<p class="spot-note">An admin approves requests before anything downloads.</p>` : ""}
-        ${also.length ? `<div class="spot-also"><span>Also by ${esc(author)}</span>${also.map((b) => `
-          <button type="button" class="also" data-open-book="${b.id}">${coverHTML(b)}<span>${esc(b.title)}</span>${stBadge(b).replace("st-badge", "st-badge inline")}</button>`).join("")}</div>` : ""}
+        ${
+          also.length
+            ? `<div class="spot-also"><span>Also by ${esc(author)}</span>${also
+                .map(
+                  (b) => `
+          <button type="button" class="also" data-open-book="${b.id}">${coverHTML(b)}<span>${esc(b.title)}</span>${stBadge(b).replace("st-badge", "st-badge inline")}</button>`,
+                )
+                .join("")}</div>`
+            : ""
+        }
       </div>
     </section>`;
 }
 
 // New books from the authors and series you follow (following puts them in the library as Wanted).
 function followShelfHTML() {
-  const norm = (n) => String(n || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-  const authors = new Set(state.follows.filter((f) => f.kind === "author").map((f) => norm(f.name)));
+  const norm = (n) =>
+    String(n || "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
+  const authors = new Set(
+    state.follows.filter((f) => f.kind === "author").map((f) => norm(f.name)),
+  );
   const series = new Set(state.follows.filter((f) => f.kind === "series").map((f) => f.asin));
   if (!authors.size && !series.size) return "";
   const when = (b) => Date.parse(b.released || "") || (b.added_at || 0) * 1000;
   const books = state.library
-    .filter((b) => !isEbook(b) && (authors.has(norm(firstAuthor(b.author))) || (b.series || []).some((x) => series.has(x.asin))))
+    .filter(
+      (b) =>
+        !isEbook(b) &&
+        (authors.has(norm(firstAuthor(b.author))) ||
+          (b.series || []).some((x) => series.has(x.asin))),
+    )
     .sort((a, b) => when(b) - when(a))
     .slice(0, 12);
   if (!books.length) return "";
@@ -476,39 +676,86 @@ function followShelfHTML() {
     </section>`;
 }
 
-const skeletons = (n) => Array.from({ length: n }, () => '<div class="card skeleton"><div class="cover-wrap"></div><div class="line"></div><div class="line short"></div></div>').join("");
+const skeletons = (n) =>
+  Array.from(
+    { length: n },
+    () =>
+      '<div class="card skeleton"><div class="cover-wrap"></div><div class="line"></div><div class="line short"></div></div>',
+  ).join("");
 
 function Discover(root) {
   const d = state.discover;
   if (!state.sources.some((s) => s.name === d.source)) d.source = "librivox";
   const src = sourceInfo(d.source);
   const st = state.settings;
-  const needsClient = st && (src.delivery === "torrent" ? !st.torrent_configured
-    : src.delivery === "indexer" ? !st.torrent_configured && !st.usenet_configured : false);
-  const ebooksHere = src.name === "prowlarr" ? d.kind === "ebook" : isCatalog(d.source) && formatFor(d.source) === "ebook";
-  const defaultLabel = src.name === "prowlarr" && d.kind === "ebook" ? "Latest ebooks from your indexers" : src.default_label || "Fresh arrivals";
+  const needsClient =
+    st &&
+    (src.delivery === "torrent"
+      ? !st.torrent_configured
+      : src.delivery === "indexer"
+        ? !st.torrent_configured && !st.usenet_configured
+        : false);
+  const ebooksHere =
+    src.name === "prowlarr"
+      ? d.kind === "ebook"
+      : isCatalog(d.source) && formatFor(d.source) === "ebook";
+  const defaultLabel =
+    src.name === "prowlarr" && d.kind === "ebook"
+      ? "Latest ebooks from your indexers"
+      : src.default_label || "Fresh arrivals";
   const greeting = (() => {
     const h = new Date().getHours();
-    return h < 5 ? "Late night listening" : h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening";
+    return h < 5
+      ? "Late night listening"
+      : h < 12
+        ? "Good morning"
+        : h < 18
+          ? "Good afternoon"
+          : "Good evening";
   })();
 
   // Audiobooks or ebooks: Prowlarr searches different categories; a catalog book is wanted in that format.
-  const fmtNow = src.name === "prowlarr" ? d.kind : isCatalog(d.source) ? (formatFor(d.source) === "ebook" ? "ebook" : "audiobook") : "";
+  const fmtNow =
+    src.name === "prowlarr"
+      ? d.kind
+      : isCatalog(d.source)
+        ? formatFor(d.source) === "ebook"
+          ? "ebook"
+          : "audiobook"
+        : "";
   const groups = [
     ["Free · download now", (s) => s.delivery === "direct"],
     ["Your indexers", (s) => s.delivery === "torrent" || s.delivery === "indexer"],
     ["Catalogs · add to Wanted", (s) => s.delivery === "wanted"],
   ];
-  const ready = (s) => s.delivery === "direct" || (s.delivery === "torrent" ? st?.torrent_configured
-    : s.delivery === "indexer" ? st?.torrent_configured || st?.usenet_configured : st?.indexer_configured);
-  const sourceSub = (s) => s.name === "openlibrary" ? "Books · for ebooks"
-    : { direct: "Free · direct download", indexer: "Your indexers", wanted: "Add to Wanted" }[s.delivery] || "Torrents";
-  const groupHTML = (role) => groups.map(([label, test]) => {
-    const list = state.sources.filter(test);
-    return list.length ? `<div class="src-group"><span class="src-label">${label}</span><div class="src-pills">${list.map((s) => `
+  const ready = (s) =>
+    s.delivery === "direct" ||
+    (s.delivery === "torrent"
+      ? st?.torrent_configured
+      : s.delivery === "indexer"
+        ? st?.torrent_configured || st?.usenet_configured
+        : st?.indexer_configured);
+  const sourceSub = (s) =>
+    s.name === "openlibrary"
+      ? "Books · for ebooks"
+      : { direct: "Free · direct download", indexer: "Your indexers", wanted: "Add to Wanted" }[
+          s.delivery
+        ] || "Torrents";
+  const groupHTML = (role) =>
+    groups
+      .map(([label, test]) => {
+        const list = state.sources.filter(test);
+        return list.length
+          ? `<div class="src-group"><span class="src-label">${label}</span><div class="src-pills">${list
+              .map(
+                (s) => `
       <button type="button" role="${role}" aria-${role === "radio" ? "checked" : "selected"}="${s.name === d.source}" class="src-pill ${s.name === d.source ? "on" : ""}" data-src="${esc(s.name)}" title="${esc(sourceSub(s))}">
-        <i class="dot ${ready(s) ? "ok" : ""}" aria-hidden="true"></i>${esc(s.label)}</button>`).join("")}</div></div>` : "";
-  }).join("");
+        <i class="dot ${ready(s) ? "ok" : ""}" aria-hidden="true"></i>${esc(s.label)}</button>`,
+              )
+              .join("")}</div></div>`
+          : "";
+      })
+      .join("");
 
   root.innerHTML = `
     <header class="disc-head">
@@ -516,10 +763,21 @@ function Discover(root) {
         <div class="eyebrow">${greeting}</div>
         <h1 class="page-title">What are we <em>${ebooksHere ? "reading" : "listening"}</em> to next?</h1>
       </div>
-      ${fmtNow ? `<div class="segmented kinds" role="radiogroup" aria-label="Look for">
-        ${[["audiobook", I.headphones, "Audiobooks"], ["ebook", I.book, "Ebooks"]].map(([k, icon, label]) => `
-          <button type="button" role="radio" aria-checked="${fmtNow === k}" aria-label="${label}" class="${fmtNow === k ? "on" : ""}" data-kind="${k}">${icon}<span>${label}</span></button>`).join("")}
-      </div>` : ""}
+      ${
+        fmtNow
+          ? `<div class="segmented kinds" role="radiogroup" aria-label="Look for">
+        ${[
+          ["audiobook", I.headphones, "Audiobooks"],
+          ["ebook", I.book, "Ebooks"],
+        ]
+          .map(
+            ([k, icon, label]) => `
+          <button type="button" role="radio" aria-checked="${fmtNow === k}" aria-label="${label}" class="${fmtNow === k ? "on" : ""}" data-kind="${k}">${icon}<span>${label}</span></button>`,
+          )
+          .join("")}
+      </div>`
+          : ""
+      }
     </header>
     <div class="search-wrap">
       <form class="search" id="search-form" role="search">
@@ -535,14 +793,20 @@ function Discover(root) {
       <div class="suggest" id="suggest" role="listbox" hidden></div>
     </div>
     <div class="src-groups" id="sources" role="radiogroup" aria-label="Where to look">${groupHTML("radio")}</div>
-    ${needsClient ? `
+    ${
+      needsClient
+        ? `
       <div class="banner">
         <div class="ico">${I.key}</div>
-        <div><strong>Connect a download client to start downloading</strong><p>${src.delivery === "indexer"
-          ? "Usenet results go to SABnzbd or NZBGet, torrents to Real-Debrid, AllDebrid, TorBox, Premiumize, qBittorrent, Transmission or Deluge. You can save books to Wanted until then."
-          : "Use Real-Debrid, AllDebrid, TorBox, Premiumize, qBittorrent, Transmission or Deluge. You can browse and save books to Wanted until then."}</p></div>
+        <div><strong>Connect a download client to start downloading</strong><p>${
+          src.delivery === "indexer"
+            ? "Usenet results go to SABnzbd or NZBGet, torrents to Real-Debrid, AllDebrid, TorBox, Premiumize, qBittorrent, Transmission or Deluge. You can save books to Wanted until then."
+            : "Use Real-Debrid, AllDebrid, TorBox, Premiumize, qBittorrent, Transmission or Deluge. You can browse and save books to Wanted until then."
+        }</p></div>
         <a class="btn" href="#/settings">Open Settings</a>
-      </div>` : ""}
+      </div>`
+        : ""
+    }
     <div id="spotlight"></div>
     <div id="follow-shelf"></div>
     <div class="section-head"><h2 id="disc-title"></h2><div class="refine" id="refine"></div></div>
@@ -564,28 +828,50 @@ function Discover(root) {
     $("#disc-title", root).innerHTML = d.q
       ? `Results for <em style="font-style:italic">“${esc(d.q)}”</em> <span class="in-src">in ${esc(src.label)}${src.name === "prowlarr" && d.kind === "ebook" ? " · ebooks" : ""}</span>`
       : esc(cat ? cat.name : defaultLabel);
-    $("#dym", root).innerHTML = (d.dym
-      ? `<p class="dym">Including results for <em>${esc(d.dym)}</em> · <button data-literal>Show only close matches for “${esc(d.q)}”</button></p>`
-      : "") + (d.storeNote ? `<p class="dym">${esc(d.storeNote)}</p>` : "");
+    $("#dym", root).innerHTML =
+      (d.dym
+        ? `<p class="dym">Including results for <em>${esc(d.dym)}</em> · <button data-literal>Show only close matches for “${esc(d.q)}”</button></p>`
+        : "") + (d.storeNote ? `<p class="dym">${esc(d.storeNote)}</p>` : "");
     refine();
   }
 
   // Filter + sort what's loaded, client side.
   function refine() {
-    const opts = (vals, cur, all) => `<option value="">${all}</option>` + [...new Set(vals.filter(Boolean))].sort()
-      .map((v) => `<option ${v === cur ? "selected" : ""}>${esc(v)}</option>`).join("");
+    const opts = (vals, cur, all) =>
+      `<option value="">${all}</option>` +
+      [...new Set(vals.filter(Boolean))]
+        .sort()
+        .map((v) => `<option ${v === cur ? "selected" : ""}>${esc(v)}</option>`)
+        .join("");
     // The unsorted order is whatever the source gave us: relevance, popularity or recency.
-    const listedNewest = !d.q && (["torrent", "indexer"].includes(src.delivery) || d.category === "new");
+    const listedNewest =
+      !d.q && (["torrent", "indexer"].includes(src.delivery) || d.category === "new");
     const natural = d.q ? "Best match" : listedNewest ? "Newest first" : "Most popular";
-    const sorts = [["", natural], ["rating", "Rating"], ["newest", "Newest first"], ["largest", "Largest"], ["smallest", "Smallest"], ["title", "Title A–Z"]]
-      .filter(([v]) => !(v === "newest" && listedNewest));
+    const sorts = [
+      ["", natural],
+      ["rating", "Rating"],
+      ["newest", "Newest first"],
+      ["largest", "Largest"],
+      ["smallest", "Smallest"],
+      ["title", "Title A–Z"],
+    ].filter(([v]) => !(v === "newest" && listedNewest));
     const shown = visibleItems().length;
-    $("#refine", root).innerHTML = !d.items.length ? storePicker() : `
+    $("#refine", root).innerHTML = !d.items.length
+      ? storePicker()
+      : `
       <span class="muted">${shown}${shown !== d.items.length ? ` of ${d.items.length}` : ""} books</span>
-      <select class="select" data-r="lang" aria-label="Language">${opts(d.items.map((i) => i.language), d.lang, "All languages")}</select>
-      <select class="select" data-r="fmt" aria-label="Format">${opts(d.items.map((i) => i.format.toUpperCase()), d.fmt, "All formats")}</select>
-      <select class="select" data-r="sort" aria-label="Sort">${sorts.map(([v, l]) => `<option value="${v}" ${v === d.sort ? "selected" : ""}>${l}</option>`).join("")}</select>`
-      + storePicker();
+      <select class="select" data-r="lang" aria-label="Language">${opts(
+        d.items.map((i) => i.language),
+        d.lang,
+        "All languages",
+      )}</select>
+      <select class="select" data-r="fmt" aria-label="Format">${opts(
+        d.items.map((i) => i.format.toUpperCase()),
+        d.fmt,
+        "All formats",
+      )}</select>
+      <select class="select" data-r="sort" aria-label="Sort">${sorts.map(([v, l]) => `<option value="${v}" ${v === d.sort ? "selected" : ""}>${l}</option>`).join("")}</select>` +
+        storePicker();
   }
 
   // The Audible catalog can be searched in the other stores an admin turned on.
@@ -593,20 +879,37 @@ function Discover(root) {
     const stores = src.name === "audible" ? audibleStores() : [];
     if (stores.length < 2) return "";
     const cur = d.store || d.storeUsed || stores[0];
-    return `<select class="select" data-store-pick aria-label="Audible store">${stores.map((v) =>
-      `<option value="${v}" ${v === cur ? "selected" : ""}>${esc(storeName(v))} store</option>`).join("")}</select>`;
+    return `<select class="select" data-store-pick aria-label="Audible store">${stores
+      .map(
+        (v) =>
+          `<option value="${v}" ${v === cur ? "selected" : ""}>${esc(storeName(v))} store</option>`,
+      )
+      .join("")}</select>`;
   }
 
   const sizeOf = (s) => {
     const m = /([\d.]+)\s*([KMGT]?B)/i.exec(s || "");
-    return m ? parseFloat(m[1]) * 1024 ** ["B", "KB", "MB", "GB", "TB"].indexOf(m[2].toUpperCase()) : 0;
+    return m
+      ? parseFloat(m[1]) * 1024 ** ["B", "KB", "MB", "GB", "TB"].indexOf(m[2].toUpperCase())
+      : 0;
   };
 
   function visibleItems() {
-    let items = d.items.filter((i) => (!d.lang || i.language === d.lang) && (!d.fmt || i.format.toUpperCase() === d.fmt))
+    let items = d.items
+      .filter(
+        (i) => (!d.lang || i.language === d.lang) && (!d.fmt || i.format.toUpperCase() === d.fmt),
+      )
       .filter((i) => d.allLangs || i.lang_ok !== false);
     const by = {
-      rating: (a, b) => { const s = (x) => x.rating?.score ?? null; const av = s(a), bv = s(b); if (av == null && bv == null) return 0; if (av == null) return 1; if (bv == null) return -1; return bv - av; },
+      rating: (a, b) => {
+        const s = (x) => x.rating?.score ?? null;
+        const av = s(a),
+          bv = s(b);
+        if (av == null && bv == null) return 0;
+        if (av == null) return 1;
+        if (bv == null) return -1;
+        return bv - av;
+      },
       newest: (a, b) => (Date.parse(b.posted) || 0) - (Date.parse(a.posted) || 0),
       largest: (a, b) => sizeOf(b.size) - sizeOf(a.size),
       smallest: (a, b) => sizeOf(a.size) - sizeOf(b.size),
@@ -629,8 +932,11 @@ function Discover(root) {
     $("#follow-shelf", root).innerHTML = d.q ? "" : followShelfHTML();
     if (spot) items = items.filter((i) => i !== spot);
     const others = d.allLangs ? 0 : d.items.filter((i) => i.lang_ok === false).length;
-    $("#lang-note", root).innerHTML = others ? `<p class="dym">${others} book${others === 1 ? "" : "s"} in other languages hidden (you chose ${esc(state.settings?.languages || "")}) · <button data-all-langs>Show them</button></p>`
-      : d.allLangs && d.items.some((i) => i.lang_ok === false) ? `<p class="dym">Showing every language · <button data-all-langs>Only mine</button></p>` : "";
+    $("#lang-note", root).innerHTML = others
+      ? `<p class="dym">${others} book${others === 1 ? "" : "s"} in other languages hidden (you chose ${esc(state.settings?.languages || "")}) · <button data-all-langs>Show them</button></p>`
+      : d.allLangs && d.items.some((i) => i.lang_ok === false)
+        ? `<p class="dym">Showing every language · <button data-all-langs>Only mine</button></p>`
+        : "";
     grid.innerHTML = items.map((it, i) => cardHTML(it, libFor(lib, it.url), i)).join("");
     if (!items.length && !d.loading) {
       const filtered = d.items.length > 0;
@@ -645,14 +951,24 @@ function Discover(root) {
 
   function footer() {
     if (d.loading) sentinel.innerHTML = '<span class="spinner" style="color:var(--text-3)"></span>';
-    else if (d.page && d.page < d.total) sentinel.innerHTML = '<button class="btn" data-more>Load more</button>';
+    else if (d.page && d.page < d.total)
+      sentinel.innerHTML = '<button class="btn" data-more>Load more</button>';
     else sentinel.innerHTML = "";
   }
 
   async function load(reset) {
     if (d.loading && !reset) return;
     const token = ++d.token;
-    if (reset) { d.items = []; d.page = 0; d.total = 1; d.error = ""; d.dym = ""; d.note = ""; d.storeNote = ""; grid.innerHTML = skeletons(12); }
+    if (reset) {
+      d.items = [];
+      d.page = 0;
+      d.total = 1;
+      d.error = "";
+      d.dym = "";
+      d.note = "";
+      d.storeNote = "";
+      grid.innerHTML = skeletons(12);
+    }
     d.loading = true;
     heading();
     footer();
@@ -662,7 +978,12 @@ function Discover(root) {
       }
     }, 6000);
     try {
-      const params = new URLSearchParams({ q: d.q, category: d.category, page: d.page + 1, source: d.source });
+      const params = new URLSearchParams({
+        q: d.q,
+        category: d.category,
+        page: d.page + 1,
+        source: d.source,
+      });
       if (src.name === "prowlarr") params.set("kind", d.kind);
       if (src.name === "audible" && d.store) params.set("region", d.store);
       if (d.sort === "rating") params.set("sort", "rating");
@@ -672,7 +993,12 @@ function Discover(root) {
       d.items.push(...res.items.filter((i) => !seen.has(i.url)));
       d.page = res.page;
       d.total = res.total_pages;
-      if (reset) { d.dym = res.did_you_mean || ""; d.note = res.note || ""; d.storeUsed = res.region || ""; d.storeNote = res.region_note || ""; }
+      if (reset) {
+        d.dym = res.did_you_mean || "";
+        d.note = res.note || "";
+        d.storeUsed = res.region || "";
+        d.storeNote = res.region_note || "";
+      }
     } catch (e) {
       if (token !== d.token) return;
       d.error = e.message;
@@ -688,7 +1014,10 @@ function Discover(root) {
 
   const input = $("#q", root);
   const box = $("#suggest", root);
-  let sugg = [], hi = -1, suggTimer = 0, suggToken = 0;
+  let sugg = [],
+    hi = -1,
+    suggTimer = 0,
+    suggToken = 0;
 
   function search(q) {
     d.q = q;
@@ -699,19 +1028,33 @@ function Discover(root) {
     load(true);
   }
 
-  function hideSuggest() { clearTimeout(suggTimer); box.hidden = true; hi = -1; suggToken++; }
+  function hideSuggest() {
+    clearTimeout(suggTimer);
+    box.hidden = true;
+    hi = -1;
+    suggToken++;
+  }
 
   function showSuggest() {
     if (!sugg.length || document.activeElement !== input) return hideSuggest();
-    box.innerHTML = `<div class="label">Did you mean</div>` + sugg.map((sg, i) => `
+    box.innerHTML =
+      `<div class="label">Did you mean</div>` +
+      sugg
+        .map(
+          (sg, i) => `
       <button type="button" role="option" class="${i === hi ? "on" : ""}" data-s="${i}">
         ${/^https:\/\//.test(sg.cover_url) ? `<img src="${esc(sg.cover_url)}" alt="" referrerpolicy="no-referrer">` : '<span class="ph"></span>'}
         <span style="min-width:0"><b>${esc(sg.title)}</b><small>${esc(sg.author)}</small></span>
-      </button>`).join("");
+      </button>`,
+        )
+        .join("");
     box.hidden = false;
   }
 
-  const pickSuggestion = (sg) => { input.value = sg.title.split(":")[0]; search(input.value.trim()); };
+  const pickSuggestion = (sg) => {
+    input.value = sg.title.split(":")[0];
+    search(input.value.trim());
+  };
 
   input.addEventListener("input", () => {
     clearTimeout(suggTimer);
@@ -722,8 +1065,12 @@ function Discover(root) {
       try {
         const res = await api(`/api/suggest?q=${encodeURIComponent(q)}`);
         if (token !== suggToken) return;
-        sugg = res; hi = -1; showSuggest();
-      } catch { /* suggestions are a nicety */ }
+        sugg = res;
+        hi = -1;
+        showSuggest();
+      } catch {
+        /* suggestions are a nicety */
+      }
     }, 300);
   });
   input.addEventListener("keydown", (e) => {
@@ -731,17 +1078,31 @@ function Discover(root) {
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
       const n = sugg.length;
-      hi = e.key === "ArrowDown" ? (hi + 1 >= n ? -1 : hi + 1) : (hi <= -1 ? n - 1 : hi - 1);
+      hi = e.key === "ArrowDown" ? (hi + 1 >= n ? -1 : hi + 1) : hi <= -1 ? n - 1 : hi - 1;
       showSuggest();
-    } else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); hideSuggest(); }
-    else if (e.key === "Enter" && hi >= 0) { e.preventDefault(); pickSuggestion(sugg[hi]); }
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      hideSuggest();
+    } else if (e.key === "Enter" && hi >= 0) {
+      e.preventDefault();
+      pickSuggestion(sugg[hi]);
+    }
   });
   input.addEventListener("blur", () => setTimeout(hideSuggest, 150));
   box.onpointerdown = (e) => e.preventDefault(); // keep focus so the click lands
-  box.onclick = (e) => { const b = e.target.closest("[data-s]"); if (b) pickSuggestion(sugg[Number(b.dataset.s)]); };
+  box.onclick = (e) => {
+    const b = e.target.closest("[data-s]");
+    if (b) pickSuggestion(sugg[Number(b.dataset.s)]);
+  };
 
-  $("#search-form", root).onsubmit = (e) => { e.preventDefault(); search(input.value.trim()); };
-  input.addEventListener("search", () => { if (!input.value && d.q) search(""); });
+  $("#search-form", root).onsubmit = (e) => {
+    e.preventDefault();
+    search(input.value.trim());
+  };
+  input.addEventListener("search", () => {
+    if (!input.value && d.q) search("");
+  });
 
   $("#refine", root).onchange = (e) => {
     if (e.target.matches("[data-store-pick]")) {
@@ -755,15 +1116,27 @@ function Discover(root) {
     refine();
   };
 
-  const scopeBtn = $("#scope-btn", root), scopeMenu = $("#scope-menu", root);
-  const closeScope = () => { scopeMenu.hidden = true; scopeBtn.setAttribute("aria-expanded", "false"); };
+  const scopeBtn = $("#scope-btn", root),
+    scopeMenu = $("#scope-menu", root);
+  const closeScope = () => {
+    scopeMenu.hidden = true;
+    scopeBtn.setAttribute("aria-expanded", "false");
+  };
   scopeBtn.onclick = () => {
     scopeMenu.hidden = !scopeMenu.hidden;
     scopeBtn.setAttribute("aria-expanded", String(!scopeMenu.hidden));
     if (!scopeMenu.hidden) $(".src-pill.on", scopeMenu)?.focus();
   };
-  scopeMenu.onkeydown = (e) => { if (e.key === "Escape") { e.stopPropagation(); closeScope(); scopeBtn.focus(); } };
-  const outsideScope = (e) => { if (!e.target.closest(".scope")) closeScope(); };
+  scopeMenu.onkeydown = (e) => {
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      closeScope();
+      scopeBtn.focus();
+    }
+  };
+  const outsideScope = (e) => {
+    if (!e.target.closest(".scope")) closeScope();
+  };
   document.addEventListener("click", outsideScope);
 
   $("#sources", root).onclick = scopeMenu.onclick = (e) => {
@@ -771,7 +1144,11 @@ function Discover(root) {
     closeScope();
     if (!b || b.dataset.src === d.source) return;
     d.source = b.dataset.src;
-    try { localStorage.setItem("narratarr.source", d.source); } catch { /* private mode */ }
+    try {
+      localStorage.setItem("narratarr.source", d.source);
+    } catch {
+      /* private mode */
+    }
     // Keep the search (if any) and run it against the new source.
     d.category = "";
     d.items = [];
@@ -782,22 +1159,31 @@ function Discover(root) {
   };
 
   const kindBox = $(".disc-head .kinds", root);
-  if (kindBox) kindBox.onclick = (e) => {
-    const kind = e.target.closest("[data-kind]");
-    if (!kind || kind.dataset.kind === fmtNow) return;
-    if (src.name === "prowlarr") {
-      d.kind = kind.dataset.kind;
-      try { localStorage.setItem("narratarr.discoverKind", d.kind); } catch { /* private mode */ }
-      d.items = [];
-      d.lang = d.fmt = d.sort = "";
-      d.token++;
-      d.loading = false;
-    } else {
-      state.format = kind.dataset.kind; // what catalog books are wanted as from now on
-      try { localStorage.setItem("narratarr.format", state.format); } catch { /* private mode */ }
-    }
-    route(); // the same search, now for the other format
-  };
+  if (kindBox)
+    kindBox.onclick = (e) => {
+      const kind = e.target.closest("[data-kind]");
+      if (!kind || kind.dataset.kind === fmtNow) return;
+      if (src.name === "prowlarr") {
+        d.kind = kind.dataset.kind;
+        try {
+          localStorage.setItem("narratarr.discoverKind", d.kind);
+        } catch {
+          /* private mode */
+        }
+        d.items = [];
+        d.lang = d.fmt = d.sort = "";
+        d.token++;
+        d.loading = false;
+      } else {
+        state.format = kind.dataset.kind; // what catalog books are wanted as from now on
+        try {
+          localStorage.setItem("narratarr.format", state.format);
+        } catch {
+          /* private mode */
+        }
+      }
+      route(); // the same search, now for the other format
+    };
 
   $("#chips", root).onclick = (e) => {
     const chip = e.target.closest(".chip");
@@ -812,20 +1198,29 @@ function Discover(root) {
 
   root.onclick = async (e) => {
     if (e.target.closest("[data-more]")) return load(false);
-    if (e.target.closest("[data-all-langs]")) { d.allLangs = !d.allLangs; renderItems(); refine(); return; }
+    if (e.target.closest("[data-all-langs]")) {
+      d.allLangs = !d.allLangs;
+      renderItems();
+      refine();
+      return;
+    }
     if (e.target.closest("[data-retry]")) return load(true);
     if (e.target.closest("[data-literal]")) {
       // Re-run without typo correction by searching the exact phrase.
       d.dym = "";
       d.items = d.items.filter((i) => i.score >= 90);
-      renderItems(); heading();
+      renderItems();
+      heading();
       return;
     }
     if (e.target.closest("a.quick")) return; // an ebook download: let the link do it
     const play = e.target.closest("[data-play]");
     if (play) return playBook(Number(play.dataset.play));
     const moreBy = e.target.closest("[data-more-by]");
-    if (moreBy) { input.value = moreBy.dataset.moreBy; return search(moreBy.dataset.moreBy); }
+    if (moreBy) {
+      input.value = moreBy.dataset.moreBy;
+      return search(moreBy.dataset.moreBy);
+    }
     const openBook = e.target.closest("[data-open-book]");
     if (openBook) return openDrawer({ bookId: Number(openBook.dataset.openBook) });
     const shelfCard = e.target.closest("#follow-shelf .card[data-id]");
@@ -837,8 +1232,18 @@ function Discover(root) {
     if (e.target.closest("[data-quick]")) {
       const btn = e.target.closest("[data-quick]");
       spinBtn(btn, true);
-      try { await addBook(item.url, { cover: item.cover_url, title: item.title, source: d.source, protocol: item.protocol, format: kindOf(item) }); }
-      catch (err) { toast(err.message, { kind: "err" }); spinBtn(btn, false); }
+      try {
+        await addBook(item.url, {
+          cover: item.cover_url,
+          title: item.title,
+          source: d.source,
+          protocol: item.protocol,
+          format: kindOf(item),
+        });
+      } catch (err) {
+        toast(err.message, { kind: "err" });
+        spinBtn(btn, false);
+      }
       return;
     }
     openDrawer({ url: item.url, preview: item, source: d.source, format: kindOf(item) });
@@ -851,13 +1256,20 @@ function Discover(root) {
     return item.source === "prowlarr" && d.kind === "ebook" ? "ebook" : undefined;
   }
 
-  const io = new IntersectionObserver((entries) => {
-    if (entries[0].isIntersecting && !d.loading && d.page && d.page < d.total && !d.error) load(false);
-  }, { rootMargin: "600px" });
+  const io = new IntersectionObserver(
+    (entries) => {
+      if (entries[0].isIntersecting && !d.loading && d.page && d.page < d.total && !d.error)
+        load(false);
+    },
+    { rootMargin: "600px" },
+  );
   io.observe(sentinel);
 
-  if (d.items.length) { renderItems(); heading(); footer(); }
-  else load(true);
+  if (d.items.length) {
+    renderItems();
+    heading();
+    footer();
+  } else load(true);
 
   return {
     update(structural) {
@@ -871,7 +1283,10 @@ function Discover(root) {
         if (badge && b) badge.outerHTML = stBadge(b);
       });
     },
-    destroy() { io.disconnect(); document.removeEventListener("click", outsideScope); },
+    destroy() {
+      io.disconnect();
+      document.removeEventListener("click", outsideScope);
+    },
   };
 }
 
@@ -883,17 +1298,35 @@ function libCardHTML(b, i) {
   const active = ACTIVE.includes(b.status);
   const listening = underway(b);
   const ebook = isEbook(b);
-  const quick = b.status !== "completed" ? ""
-    : canRead(b) ? `<button class="quick play-quick" data-play="${b.id}" aria-label="Read ${esc(b.title)}" title="Read">${I.book}</button>`
-    : ebook ? `<a class="quick" href="/api/library/${b.id}/ebook" download aria-label="Download the ebook of ${esc(b.title)}" title="Download ebook">${I.down}</a>`
-    : `<button class="quick play-quick" data-play="${b.id}" aria-label="Play ${esc(b.title)}" title="Play">${I.play}</button>`;
-  const facts = listening ? [ebook ? readLeft(b) : fmtLeft(b.listen_duration - b.listen_position)]
-    : b.status === "requested" ? [b.found_by_search ? "Found a release: awaiting approval" : b.requested_by_name ? `Asked by ${b.requested_by_name}` : "Awaiting approval"]
-    : b.status === "wanted" ? [b.last_searched ? `Looked ${ago(b.last_searched)}` : "Not looked for yet"]
-    : b.status === "failed" ? [(b.error || "Couldn’t download").slice(0, 70)]
-    : active ? [b.status === "queued" ? "Waiting for a free slot" : b.detail || STATUS[b.status]]
-    : b.finished ? [ebook ? "Read" : "Finished"]
-    : ebook ? [b.format, b.size] : [shortLength(b.length), b.size];
+  const quick =
+    b.status !== "completed"
+      ? ""
+      : canRead(b)
+        ? `<button class="quick play-quick" data-play="${b.id}" aria-label="Read ${esc(b.title)}" title="Read">${I.book}</button>`
+        : ebook
+          ? `<a class="quick" href="/api/library/${b.id}/ebook" download aria-label="Download the ebook of ${esc(b.title)}" title="Download ebook">${I.down}</a>`
+          : `<button class="quick play-quick" data-play="${b.id}" aria-label="Play ${esc(b.title)}" title="Play">${I.play}</button>`;
+  const facts = listening
+    ? [ebook ? readLeft(b) : fmtLeft(b.listen_duration - b.listen_position)]
+    : b.status === "requested"
+      ? [
+          b.found_by_search
+            ? "Found a release: awaiting approval"
+            : b.requested_by_name
+              ? `Asked by ${b.requested_by_name}`
+              : "Awaiting approval",
+        ]
+      : b.status === "wanted"
+        ? [b.last_searched ? `Looked ${ago(b.last_searched)}` : "Not looked for yet"]
+        : b.status === "failed"
+          ? [(b.error || "Couldn’t download").slice(0, 70)]
+          : active
+            ? [b.status === "queued" ? "Waiting for a free slot" : b.detail || STATUS[b.status]]
+            : b.finished
+              ? [ebook ? "Read" : "Finished"]
+              : ebook
+                ? [b.format, b.size]
+                : [shortLength(b.length), b.size];
   return `
     <article class="card" tabindex="0" data-id="${b.id}" style="--glow:hsl(${h} 80% 55%);animation-delay:${Math.min(i, 12) * 30}ms">
       <div class="cover-wrap">
@@ -907,7 +1340,10 @@ function libCardHTML(b, i) {
       <div class="meta">
         <div class="title">${esc(b.title)}</div>
         <div class="author">${esc(b.author || "Unknown author")}</div>
-        <div class="facts ${b.status === "failed" ? "bad" : ""}">${facts.filter(Boolean).map((f) => `<span>${esc(f)}</span>`).join("")}</div>
+        <div class="facts ${b.status === "failed" ? "bad" : ""}">${facts
+          .filter(Boolean)
+          .map((f) => `<span>${esc(f)}</span>`)
+          .join("")}</div>
         ${libRatingHTML(b)}
       </div>
     </article>`;
@@ -935,7 +1371,9 @@ async function loadLibRatings() {
 }
 
 function continueListening() {
-  return shelfHTML("Continue listening", (b) => !isEbook(b)) + shelfHTML("Continue reading", isEbook);
+  return (
+    shelfHTML("Continue listening", (b) => !isEbook(b)) + shelfHTML("Continue reading", isEbook)
+  );
 }
 
 function shelfHTML(title, which) {
@@ -946,7 +1384,9 @@ function shelfHTML(title, which) {
   if (!books.length) return "";
   return `
     <div class="section-head"><h2>${title}</h2></div>
-    <div class="shelf">${books.map((b, i) => `
+    <div class="shelf">${books
+      .map(
+        (b, i) => `
       <button class="resume" data-play="${b.id}" style="animation-delay:${i * 40}ms">
         ${coverHTML(b)}
         <span style="min-width:0">
@@ -955,7 +1395,9 @@ function shelfHTML(title, which) {
           <span class="progress"><i style="width:${(b.listen_position / b.listen_duration) * 100}%"></i></span>
         </span>
         <span class="go">${isEbook(b) ? I.book : I.play}</span>
-      </button>`).join("")}
+      </button>`,
+      )
+      .join("")}
     </div>`;
 }
 
@@ -979,60 +1421,85 @@ function downloadEbook(b) {
 // Requests waiting for approval: admins approve them right here; a listener sees their own.
 function requestsTrayHTML() {
   const admin = isAdmin();
-  const reqs = state.library.filter((b) => b.status === "requested" && (admin || mine(b)))
+  const reqs = state.library
+    .filter((b) => b.status === "requested" && (admin || mine(b)))
     .sort((a, b) => a.updated_at - b.updated_at);
   if (!reqs.length) return "";
   const n = reqs.length;
   return `
     <section class="req-tray" aria-labelledby="req-title">
       <div class="req-head">
-        <h2 id="req-title">${I.bell}${admin ? (n === 1 ? "A request is waiting for you" : `${n} requests are waiting for you`)
-          : n === 1 ? "Your request is waiting for approval" : `Your ${n} requests are waiting for approval`}</h2>
+        <h2 id="req-title">${I.bell}${
+          admin
+            ? n === 1
+              ? "A request is waiting for you"
+              : `${n} requests are waiting for you`
+            : n === 1
+              ? "Your request is waiting for approval"
+              : `Your ${n} requests are waiting for approval`
+        }</h2>
         <span>${admin ? "Nothing downloads until you approve" : "An admin approves requests before anything downloads"}</span>
       </div>
-      ${reqs.map((b) => {
-        const picked = !isCatalog(b.source);
-        const what = picked ? `picked “${esc(b.release || b.title)}”${b.size ? ` · ${esc(b.size)}` : ""}`
-          : admin ? "no release picked: approving starts the search" : "any good release";
-        if (b.found_by_search) {
-          return `
+      ${reqs
+        .map((b) => {
+          const picked = !isCatalog(b.source);
+          const what = picked
+            ? `picked “${esc(b.release || b.title)}”${b.size ? ` · ${esc(b.size)}` : ""}`
+            : admin
+              ? "no release picked: approving starts the search"
+              : "any good release";
+          if (b.found_by_search) {
+            return `
         <div class="req-row" data-id="${b.id}">
           ${coverHTML(b)}
           <div class="req-copy">
             <b>${esc(b.title)}</b> <span class="req-by">· ${esc(firstAuthor(b.author) || "Unknown author")}</span>${isEbook(b) ? ` <span class="kind-inline">${I.book}Ebook</span>` : ""}
             <small>Automatic search found “${esc(b.release || b.title)}”${b.size ? ` · ${esc(b.size)}` : ""} · ${esc(ago(b.updated_at))}${b.requested_by_name ? ` · wanted by ${esc(b.requested_by_name)}` : ""}</small>
           </div>
-          <div class="req-actions">${admin ? `
+          <div class="req-actions">${
+            admin
+              ? `
             <button class="btn primary sm" data-act="approve">${I.check} Approve</button>
             <button class="btn sm" data-act="releases">Pick another</button>
             <button class="btn sm ghost" data-act="keep-looking">Keep looking</button>`
-            : `<button class="btn sm ghost danger" data-act="remove" data-mine>Take back</button>`}
+              : `<button class="btn sm ghost danger" data-act="remove" data-mine>Take back</button>`
+          }
           </div>
         </div>`;
-        }
-        return `
+          }
+          return `
         <div class="req-row" data-id="${b.id}">
           ${coverHTML(b)}
           <div class="req-copy">
             <b>${esc(b.title)}</b> <span class="req-by">· ${esc(firstAuthor(b.author) || "Unknown author")}</span>${isEbook(b) ? ` <span class="kind-inline">${I.book}Ebook</span>` : ""}
             <small>${admin ? `<b>${esc(b.requested_by_name || "A listener")}</b> asked` : "Asked"} ${esc(ago(b.updated_at))} · ${what}</small>
           </div>
-          <div class="req-actions">${admin ? `
+          <div class="req-actions">${
+            admin
+              ? `
             <button class="btn primary sm" data-act="approve">${I.check} Approve</button>
             <button class="btn sm" data-act="releases">Pick a release</button>
             <button class="btn sm ghost danger" data-act="remove">Decline</button>`
-            : `<button class="btn sm ghost danger" data-act="remove" data-mine>Take back</button>`}
+              : `<button class="btn sm ghost danger" data-act="remove" data-mine>Take back</button>`
+          }
           </div>
         </div>`;
-      }).join("")}
+        })
+        .join("")}
     </section>`;
 }
 
 const LIB_SORTS = {
   added: ["Recently added", (a, b) => b.added_at - a.added_at],
-  listened: ["Recently listened", (a, b) => (b.listened_at || 0) - (a.listened_at || 0) || b.added_at - a.added_at],
+  listened: [
+    "Recently listened",
+    (a, b) => (b.listened_at || 0) - (a.listened_at || 0) || b.added_at - a.added_at,
+  ],
   title: ["Title A–Z", (a, b) => a.title.localeCompare(b.title)],
-  author: ["Author A–Z", (a, b) => (a.author || "").localeCompare(b.author || "") || a.title.localeCompare(b.title)],
+  author: [
+    "Author A–Z",
+    (a, b) => (a.author || "").localeCompare(b.author || "") || a.title.localeCompare(b.title),
+  ],
 };
 
 function Library(root) {
@@ -1065,8 +1532,12 @@ function Library(root) {
         <div class="lib-tools">
           <div class="segmented formats-filter" id="lib-format" hidden></div>
           <label class="lib-find">${I.search}<input id="lib-search" type="search" placeholder="Title or author" value="${esc(state.libSearch)}" aria-label="Filter by title or author" /></label>
-          <select class="select" id="lib-sort" aria-label="Sort">${Object.entries(LIB_SORTS).map(([k, [label]]) =>
-            `<option value="${k}" ${state.libSort === k ? "selected" : ""}>${label}</option>`).join("")}</select>
+          <select class="select" id="lib-sort" aria-label="Sort">${Object.entries(LIB_SORTS)
+            .map(
+              ([k, [label]]) =>
+                `<option value="${k}" ${state.libSort === k ? "selected" : ""}>${label}</option>`,
+            )
+            .join("")}</select>
         </div>
       </div>
       <div class="fpills" id="filters" role="tablist" aria-label="Show"></div>
@@ -1079,25 +1550,43 @@ function Library(root) {
     const shelf = count((b) => b.status === "completed");
     const done = count((b) => b.status === "completed" && b.finished);
     $("#lib-summary", root).textContent = lib.length
-      ? `${lib.length} book${lib.length === 1 ? "" : "s"} · ${shelf} on your shelf · ${done} finished` : "Nothing here yet.";
+      ? `${lib.length} book${lib.length === 1 ? "" : "s"} · ${shelf} on your shelf · ${done} finished`
+      : "Nothing here yet.";
     $("#req-tray", root).innerHTML = requestsTrayHTML();
     $("#shelf", root).innerHTML = continueListening();
 
-    $("#filters", root).innerHTML = filters.filter(([k, , fn]) => k === "all" || count(fn) || state.libFilter === k).map(([k, label, fn]) =>
-      `<button type="button" role="tab" aria-selected="${state.libFilter === k}" class="fpill ${state.libFilter === k ? "on" : ""}" data-f="${k}">${label} <small>${count(fn)}</small></button>`).join("");
+    $("#filters", root).innerHTML = filters
+      .filter(([k, , fn]) => k === "all" || count(fn) || state.libFilter === k)
+      .map(
+        ([k, label, fn]) =>
+          `<button type="button" role="tab" aria-selected="${state.libFilter === k}" class="fpill ${state.libFilter === k ? "on" : ""}" data-f="${k}">${label} <small>${count(fn)}</small></button>`,
+      )
+      .join("");
 
     // Audiobooks and ebooks side by side, or one at a time once there are ebooks to tell apart.
     const ebooks = count(isEbook);
     const fmtBox = $("#lib-format", root);
     fmtBox.hidden = !ebooks;
     if (!ebooks) state.libFormat = "";
-    fmtBox.innerHTML = [["", "All"], ["audiobook", `${I.headphones} Audiobooks`], ["ebook", `${I.book} Ebooks`]]
-      .map(([k, label]) => `<button class="${state.libFormat === k ? "on" : ""}" data-format="${k}" aria-pressed="${state.libFormat === k}">${label}</button>`).join("");
+    fmtBox.innerHTML = [
+      ["", "All"],
+      ["audiobook", `${I.headphones} Audiobooks`],
+      ["ebook", `${I.book} Ebooks`],
+    ]
+      .map(
+        ([k, label]) =>
+          `<button class="${state.libFormat === k ? "on" : ""}" data-format="${k}" aria-pressed="${state.libFormat === k}">${label}</button>`,
+      )
+      .join("");
 
     const fn = (filters.find((f) => f[0] === state.libFilter) || filters[0])[2];
     const q = state.libSearch.toLowerCase();
-    const books = lib.filter(fn).filter((b) => !state.libFormat || (b.kind || "audiobook") === state.libFormat)
-      .filter((b) => !q || `${b.title} ${b.author} ${b.narrators.join(" ")}`.toLowerCase().includes(q))
+    const books = lib
+      .filter(fn)
+      .filter((b) => !state.libFormat || (b.kind || "audiobook") === state.libFormat)
+      .filter(
+        (b) => !q || `${b.title} ${b.author} ${b.narrators.join(" ")}`.toLowerCase().includes(q),
+      )
       .sort(LIB_SORTS[state.libSort]?.[1] || LIB_SORTS.added[1]);
     const grid = $("#lib-grid", root);
 
@@ -1121,8 +1610,14 @@ function Library(root) {
     state.libFilter = b.dataset.f;
     render();
   };
-  $("#lib-search", root).oninput = (e) => { state.libSearch = e.target.value; render(); };
-  $("#lib-sort", root).onchange = (e) => { state.libSort = e.target.value; render(); };
+  $("#lib-search", root).oninput = (e) => {
+    state.libSearch = e.target.value;
+    render();
+  };
+  $("#lib-sort", root).onchange = (e) => {
+    state.libSort = e.target.value;
+    render();
+  };
   $("#lib-format", root).onclick = (e) => {
     const b = e.target.closest("[data-format]");
     if (!b) return;
@@ -1143,7 +1638,12 @@ function Library(root) {
         return;
       }
       spinBtn(act, true);
-      try { await bookAction(id, act.dataset.act); } catch (err) { toast(err.message, { kind: "err" }); spinBtn(act, false); }
+      try {
+        await bookAction(id, act.dataset.act);
+      } catch (err) {
+        toast(err.message, { kind: "err" });
+        spinBtn(act, false);
+      }
       return;
     }
     if (row) return openDrawer({ bookId: Number(row.dataset.id) });
@@ -1152,15 +1652,24 @@ function Library(root) {
     const card = e.target.closest(".card[data-id]");
     if (card) openDrawer({ bookId: Number(card.dataset.id) });
   };
-  root.onkeydown = (e) => { if (e.key === "Enter" && e.target.matches(".card")) e.target.click(); };
+  root.onkeydown = (e) => {
+    if (e.key === "Enter" && e.target.matches(".card")) e.target.click();
+  };
 
   let listenSig = "";
   render();
-  loadLibRatings().then((changed) => { if (changed && root.isConnected) render(); });
+  loadLibRatings().then((changed) => {
+    if (changed && root.isConnected) render();
+  });
   return {
     update(structural) {
-      const sig = state.library.map((b) => `${b.id}:${b.finished}:${Math.round(b.listen_position / 60)}`).join("|");
-      if (structural || sig !== listenSig) { listenSig = sig; return render(); }
+      const sig = state.library
+        .map((b) => `${b.id}:${b.finished}:${Math.round(b.listen_position / 60)}`)
+        .join("|");
+      if (structural || sig !== listenSig) {
+        listenSig = sig;
+        return render();
+      }
       for (const b of state.library) {
         const card = $(`.card[data-id="${b.id}"]`, root);
         if (!card) continue;
@@ -1178,18 +1687,32 @@ function Library(root) {
 
 // Enough Markdown for release notes: headings, lists, bold, code, links. Everything is escaped first.
 function md(text) {
-  const inline = (s) => esc(s)
-    .replace(/`([^`]+)`/g, "<code>$1</code>")
-    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+  const inline = (s) =>
+    esc(s)
+      .replace(/`([^`]+)`/g, "<code>$1</code>")
+      .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+      .replace(
+        /\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g,
+        '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>',
+      );
   const out = [];
   let list = false;
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.trimEnd();
     const h = /^(#{1,3})\s+(.*)/.exec(line);
     const li = /^\s*[-*]\s+(.*)/.exec(line);
-    if (li) { if (!list) { out.push("<ul>"); list = true; } out.push(`<li>${inline(li[1])}</li>`); continue; }
-    if (list) { out.push("</ul>"); list = false; }
+    if (li) {
+      if (!list) {
+        out.push("<ul>");
+        list = true;
+      }
+      out.push(`<li>${inline(li[1])}</li>`);
+      continue;
+    }
+    if (list) {
+      out.push("</ul>");
+      list = false;
+    }
     if (h) out.push(`<h${h[1].length}>${inline(h[2])}</h${h[1].length}>`);
     else if (line.trim()) out.push(`<p>${inline(line)}</p>`);
   }
@@ -1200,15 +1723,18 @@ function md(text) {
 // The changelog, with versions you already have folded under the new ones.
 function changelogHTML(markdown, current) {
   const sections = markdown.split(/^(?=## )/m);
-  return sections.map((sec) => {
-    const m = /^## (\d+\.\d+\.\d+)/.exec(sec);
-    const older = m && cmpVersion(m[1], current) <= 0;
-    return `<div class="${older ? "older" : ""}">${md(sec)}</div>`;
-  }).join("");
+  return sections
+    .map((sec) => {
+      const m = /^## (\d+\.\d+\.\d+)/.exec(sec);
+      const older = m && cmpVersion(m[1], current) <= 0;
+      return `<div class="${older ? "older" : ""}">${md(sec)}</div>`;
+    })
+    .join("");
 }
 
 const cmpVersion = (a, b) => {
-  const pa = String(a).split(".").map(Number), pb = String(b).split(".").map(Number);
+  const pa = String(a).split(".").map(Number),
+    pb = String(b).split(".").map(Number);
   for (let i = 0; i < 3; i++) if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) - (pb[i] || 0);
   return 0;
 };
@@ -1216,10 +1742,13 @@ const cmpVersion = (a, b) => {
 async function checkUpdates(force = false) {
   try {
     state.updates = await api(`/api/updates${force ? "?force=true" : ""}`);
-  } catch { return null; }
+  } catch {
+    return null;
+  }
   const pill = $("#update-pill");
   pill.hidden = !state.updates.update_available;
-  if (state.updates.update_available) $("span", pill).textContent = `Update to ${state.updates.latest.version}`;
+  if (state.updates.update_available)
+    $("span", pill).textContent = `Update to ${state.updates.latest.version}`;
   return state.updates;
 }
 $("#update-pill").onclick = () => openWhatsNew();
@@ -1243,15 +1772,24 @@ async function openWhatsNew() {
         ${newer && u.can_self_update ? `<button class="btn primary" data-act="update">${I.down} Update now</button>` : ""}
       </div>
     </div>`;
-  const close = () => { scrim.hidden = true; scrim.innerHTML = ""; document.removeEventListener("keydown", onKey, true); };
-  const onKey = (e) => { if (e.key === "Escape") { e.stopPropagation(); close(); } };
+  const close = () => {
+    scrim.hidden = true;
+    scrim.innerHTML = "";
+    document.removeEventListener("keydown", onKey, true);
+  };
+  const onKey = (e) => {
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      close();
+    }
+  };
   document.addEventListener("keydown", onKey, true);
 
   const notes = $("#wn-notes", scrim);
   try {
     // Release notes for the newer version come from GitHub; the bundled changelog covers the rest.
     const log = await api("/api/changelog");
-    const body = log.markdown.replace(/^[\s\S]*?(?=^## )/m, "");  // skip the preamble, start at the first version
+    const body = log.markdown.replace(/^[\s\S]*?(?=^## )/m, ""); // skip the preamble, start at the first version
     let head = "";
     if (newer && latest.notes && !body.includes(`## ${latest.version}`)) {
       const n = latest.notes.trim();
@@ -1262,13 +1800,20 @@ async function openWhatsNew() {
     notes.innerHTML = `<p>${esc(e.message)}</p>`;
   }
   if (newer && !u.can_self_update) {
-    const how = u.install === "docker" ? "This copy runs in Docker, so update it from the machine that runs it:"
-      : u.install === "source" ? "This copy runs from the source code. Update it in that folder:"
-      : "Update this copy by running the installer again:";
-    const cmd = u.install === "docker" ? "docker compose pull && docker compose up -d"
-      : u.install === "source" ? "git pull && uv sync"
-      : "curl -fsSL https://raw.githubusercontent.com/narratarr/narratarr/main/install.sh | bash";
-    $("#wn-progress", scrim).innerHTML = `<div class="update-progress"><div>${esc(how)}<code class="update-cmd">${esc(cmd)}</code></div></div>`;
+    const how =
+      u.install === "docker"
+        ? "This copy runs in Docker, so update it from the machine that runs it:"
+        : u.install === "source"
+          ? "This copy runs from the source code. Update it in that folder:"
+          : "Update this copy by running the installer again:";
+    const cmd =
+      u.install === "docker"
+        ? "docker compose pull && docker compose up -d"
+        : u.install === "source"
+          ? "git pull && uv sync"
+          : "curl -fsSL https://raw.githubusercontent.com/narratarr/narratarr/main/install.sh | bash";
+    $("#wn-progress", scrim).innerHTML =
+      `<div class="update-progress"><div>${esc(how)}<code class="update-cmd">${esc(cmd)}</code></div></div>`;
   }
 
   scrim.onclick = async (e) => {
@@ -1293,11 +1838,17 @@ async function openWhatsNew() {
       await new Promise((r) => setTimeout(r, 1500));
       try {
         const s = await api("/api/updates");
-        if (s.current !== before) { location.reload(); return; }
-        if (s.status === "failed") { prog.innerHTML = `<div class="update-progress bad">${esc(s.detail)}</div>`; return; }
+        if (s.current !== before) {
+          location.reload();
+          return;
+        }
+        if (s.status === "failed") {
+          prog.innerHTML = `<div class="update-progress bad">${esc(s.detail)}</div>`;
+          return;
+        }
         $("#wn-detail", scrim).textContent = s.detail || "Working…";
       } catch {
-        $("#wn-detail", scrim).textContent = "Restarting…";  // the old process is gone; the new one is starting
+        $("#wn-detail", scrim).textContent = "Restarting…"; // the old process is gone; the new one is starting
       }
     }
     prog.innerHTML = `<div class="update-progress bad">That took too long. Check the log, or run the installer again.</div>`;
@@ -1337,22 +1888,34 @@ function openImport(folder = "") {
     scrim.innerHTML = "";
     document.removeEventListener("keydown", onKey, true);
   };
-  const onKey = (e) => { if (e.key === "Escape") { e.stopPropagation(); close(); } };
+  const onKey = (e) => {
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      close();
+    }
+  };
   document.addEventListener("keydown", onKey, true);
 
   const results = $("#imp-results", scrim);
   const go = $('[data-act="import"]', scrim);
-  const chosen = () => $$("[data-pick]:checked", results).map((c) => imp.books[Number(c.dataset.pick)]);
+  const chosen = () =>
+    $$("[data-pick]:checked", results).map((c) => imp.books[Number(c.dataset.pick)]);
   const MODES = [
     ["copy", "Copy in", "Copies them into your library folder and leaves the originals alone."],
     ["move", "Move in", "Moves them into your library folder, organized as Author/Title."],
-    ["inplace", "Leave where they are", "Adds them to Narratarr without touching the files. Loose audio files are copied in."],
+    [
+      "inplace",
+      "Leave where they are",
+      "Adds them to Narratarr without touching the files. Loose audio files are copied in.",
+    ],
   ];
   const sync = () => {
     const n = chosen().length;
     go.disabled = !n;
     go.textContent = n ? `Import ${n} book${n === 1 ? "" : "s"}` : "Import";
-    $$(".imp-mode button", results).forEach((b) => b.classList.toggle("on", b.dataset.mode === imp.mode));
+    $$(".imp-mode button", results).forEach((b) =>
+      b.classList.toggle("on", b.dataset.mode === imp.mode),
+    );
     const hint = $(".imp-mode-hint", results);
     if (hint) hint.textContent = MODES.find((m) => m[0] === imp.mode)[2];
   };
@@ -1370,7 +1933,9 @@ function openImport(folder = "") {
       <div class="imp-head"><b>${res.books.length} book${res.books.length === 1 ? "" : "s"} found</b>
         <span class="muted">${fresh} new</span>
         <label class="imp-all"><input type="checkbox" id="imp-all" ${fresh ? "checked" : ""}> Select all new</label></div>
-      <div class="imp-list">${res.books.map((b, i) => `
+      <div class="imp-list">${res.books
+        .map(
+          (b, i) => `
         <label class="imp-row ${b.in_library ? "done" : ""}">
           <input type="checkbox" data-pick="${i}" ${b.in_library ? "disabled" : "checked"}>
           <span class="imp-meta">
@@ -1378,7 +1943,9 @@ function openImport(folder = "") {
             <input class="imp-author" data-edit="author" data-i="${i}" value="${esc(b.author)}" placeholder="Unknown author" aria-label="Author" ${b.in_library ? "disabled" : ""}>
             <small>${b.in_library ? "Already in your library · " : ""}${b.kind === "ebook" ? `<span class="kind-inline">${I.book}Ebook</span> · ` : `${b.files} file${b.files === 1 ? "" : "s"} · `}${esc(fmtBytes(b.bytes))}${b.format ? ` · ${esc(b.format)}` : ""}</small>
           </span>
-        </label>`).join("")}
+        </label>`,
+        )
+        .join("")}
       </div>
       <div class="imp-mode-row">
         <div class="segmented imp-mode">${MODES.map(([m, label]) => `<button type="button" data-mode="${m}">${label}</button>`).join("")}</div>
@@ -1400,37 +1967,57 @@ function openImport(folder = "") {
     spinBtn(btn, false);
   }
 
-  $("#imp-form", scrim).onsubmit = (e) => { e.preventDefault(); scan($("#imp-folder", scrim).value); };
+  $("#imp-form", scrim).onsubmit = (e) => {
+    e.preventDefault();
+    scan($("#imp-folder", scrim).value);
+  };
   scrim.oninput = (e) => {
     const ed = e.target.closest("[data-edit]");
     if (ed) imp.books[Number(ed.dataset.i)][ed.dataset.edit] = ed.value;
   };
   scrim.onchange = (e) => {
-    if (e.target.id === "imp-all") $$("[data-pick]:not(:disabled)", results).forEach((c) => { c.checked = e.target.checked; });
+    if (e.target.id === "imp-all")
+      $$("[data-pick]:not(:disabled)", results).forEach((c) => {
+        c.checked = e.target.checked;
+      });
     sync();
   };
   scrim.onclick = async (e) => {
     if (e.target === scrim || e.target.closest('[data-act="cancel"]')) return close();
     const quick = e.target.closest("[data-folder]");
-    if (quick) { $("#imp-folder", scrim).value = quick.dataset.folder; return scan(quick.dataset.folder); }
+    if (quick) {
+      $("#imp-folder", scrim).value = quick.dataset.folder;
+      return scan(quick.dataset.folder);
+    }
     const mode = e.target.closest("[data-mode]");
-    if (mode) { imp.mode = mode.dataset.mode; return sync(); }
+    if (mode) {
+      imp.mode = mode.dataset.mode;
+      return sync();
+    }
     if (e.target.closest('[data-act="import"]')) {
       const books = chosen().map((b) => ({ path: b.path, title: b.title, author: b.author }));
       spinBtn(go, true);
       try {
-        const r = await api("/api/import", { method: "POST", body: { folder: imp.folder, mode: imp.mode, books } });
+        const r = await api("/api/import", {
+          method: "POST",
+          body: { folder: imp.folder, mode: imp.mode, books },
+        });
         close();
         await refreshLibrary();
-        toast(r.added ? `${r.added} book${r.added === 1 ? "" : "s"} ${imp.mode === "inplace" ? "added to your library" : "on the way into your library"}` : "Those books are already in your library",
-          { kind: "ok" });
+        toast(
+          r.added
+            ? `${r.added} book${r.added === 1 ? "" : "s"} ${imp.mode === "inplace" ? "added to your library" : "on the way into your library"}`
+            : "Those books are already in your library",
+          { kind: "ok" },
+        );
       } catch (err) {
         toast(err.message, { kind: "err" });
         spinBtn(go, false);
       }
     }
   };
-  if (folder) scan(folder); else $("#imp-folder", scrim).focus();
+  if (folder) scan(folder);
+  else $("#imp-folder", scrim).focus();
 }
 
 // ---------------------------------------------------------------------------
@@ -1452,7 +2039,10 @@ const TIDY_STATES = [
 // The new path, with the folders that change picked out.
 function tidyPathHTML(to, from) {
   const was = from.split("/");
-  return to.split("/").map((part, i) => (part === was[i] ? esc(part) : `<b>${esc(part)}</b>`)).join('<i class="sep">/</i>');
+  return to
+    .split("/")
+    .map((part, i) => (part === was[i] ? esc(part) : `<b>${esc(part)}</b>`))
+    .join('<i class="sep">/</i>');
 }
 
 function openTidy({ onClose } = {}) {
@@ -1477,7 +2067,12 @@ function openTidy({ onClose } = {}) {
     document.removeEventListener("keydown", onKey, true);
     onClose?.();
   };
-  const onKey = (e) => { if (e.key === "Escape") { e.stopPropagation(); close(); } };
+  const onKey = (e) => {
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      close();
+    }
+  };
   document.addEventListener("keydown", onKey, true);
 
   const movable = () => t.plan.books.filter((b) => b.state === "move");
@@ -1485,17 +2080,24 @@ function openTidy({ onClose } = {}) {
 
   function rowHTML(b) {
     const can = b.state === "move";
-    const note = b.carries.length ? `<span class="tidy-tag">${I.book} Its ebook comes too</span>`
-      : b.joins && can ? `<span class="tidy-tag">${I.headphones} Joins its audiobook</span>` : "";
+    const note = b.carries.length
+      ? `<span class="tidy-tag">${I.book} Its ebook comes too</span>`
+      : b.joins && can
+        ? `<span class="tidy-tag">${I.headphones} Joins its audiobook</span>`
+        : "";
     return `
-      <label class="tidy-row ${b.state}" ${can ? "" : 'data-still'}>
+      <label class="tidy-row ${b.state}" ${can ? "" : "data-still"}>
         ${can ? `<input type="checkbox" data-pick="${b.id}" ${t.picked.has(b.id) ? "checked" : ""}>` : `<span class="tidy-mark">${b.state === "tidy" ? I.check : I.alert}</span>`}
         <span class="tidy-main">
           <span class="tidy-name"><b>${esc(b.title)}</b>${b.kind === "ebook" ? `<span class="kind-inline">${I.book}Ebook</span>` : ""}
             <small>${esc(b.author || "Unknown author")}</small></span>
-          ${b.state === "tidy" ? `<span class="tidy-path now">${esc(b.to)}</span>` : `
+          ${
+            b.state === "tidy"
+              ? `<span class="tidy-path now">${esc(b.to)}</span>`
+              : `
           <span class="tidy-path from">${esc(b.from)}</span>
-          <span class="tidy-path to"><span class="arrow" aria-hidden="true">→</span>${tidyPathHTML(b.to, b.from)}</span>`}
+          <span class="tidy-path to"><span class="arrow" aria-hidden="true">→</span>${tidyPathHTML(b.to, b.from)}</span>`
+          }
           <span class="tidy-foot">
             ${b.reason ? `<span class="tidy-why">${esc(b.reason)}</span>` : ""}
             ${b.state === "look" ? `<button class="btn ghost sm" type="button" data-fix="${b.id}">${I.pencil} Fix details</button>` : ""}
@@ -1518,28 +2120,40 @@ function openTidy({ onClose } = {}) {
     body.innerHTML = `
       <div class="tidy-layout"><span>Layout</span><code>${esc(p.template)}</code></div>
       <div class="tidy-stats" role="tablist" aria-label="Show">
-        ${TIDY_STATES.map(([k, label]) => `
+        ${TIDY_STATES.map(
+          ([k, label]) => `
           <button type="button" role="tab" class="tidy-stat ${k} ${t.filter === k ? "on" : ""}" data-filter="${k}" aria-selected="${t.filter === k}">
-            <b>${p.counts[k]}</b><span>${label}</span></button>`).join("")}
+            <b>${p.counts[k]}</b><span>${label}</span></button>`,
+        ).join("")}
       </div>
       <div class="imp-mode-row">
         <div class="segmented" role="radiogroup" aria-label="Name folders from">
           <button type="button" data-prefer="library" class="${t.prefer === "library" ? "on" : ""}">Narratarr’s details</button>
           <button type="button" data-prefer="tags" class="${t.prefer === "tags" ? "on" : ""}">The files’ own tags</button>
         </div>
-        <span class="hint">${t.prefer === "library"
-          ? "The title, author, series and narrator Narratarr shows, which come from Audible for matched books."
-          : "What the audio files’ tags say, where they say it. Handy when the files are tagged better than they were matched."}</span>
+        <span class="hint">${
+          t.prefer === "library"
+            ? "The title, author, series and narrator Narratarr shows, which come from Audible for matched books."
+            : "What the audio files’ tags say, where they say it. Handy when the files are tagged better than they were matched."
+        }</span>
       </div>
-      ${t.filter === "move" && shown.length ? `
+      ${
+        t.filter === "move" && shown.length
+          ? `
         <div class="imp-head"><b>${p.counts.move} book${p.counts.move === 1 ? "" : "s"} to move</b>
-          <label class="imp-all"><input type="checkbox" id="tidy-all" ${t.picked.size === p.counts.move ? "checked" : ""}> Select all</label></div>` : ""}
+          <label class="imp-all"><input type="checkbox" id="tidy-all" ${t.picked.size === p.counts.move ? "checked" : ""}> Select all</label></div>`
+          : ""
+      }
       <div class="imp-list tidy-list">${shown.length ? shown.map(rowHTML).join("") : `<div class="imp-empty">${I.check}<p>${esc(empty)}</p></div>`}</div>
-      ${p.counts.move ? `
+      ${
+        p.counts.move
+          ? `
       <div class="tidy-extras">
         <label class="switch"><input type="checkbox" id="tidy-sidecars" checked><i></i><span><b>Add the cover, description and narrator files</b><small>Only where a folder doesn’t have them. Audiobookshelf reads these.</small></span></label>
         <label class="switch"><input type="checkbox" id="tidy-tags"><i></i><span><b>Write these details into the audio files’ tags</b><small>Fills in and corrects the album, author, narrator and series, so every app agrees. This changes your audio files, and Undo won’t change the tags back.</small></span></label>
-      </div>` : ""}`;
+      </div>`
+          : ""
+      }`;
     sync();
   }
 
@@ -1559,7 +2173,8 @@ function openTidy({ onClose } = {}) {
       return;
     }
     t.picked = new Set(movable().map((b) => b.id));
-    if (!t.plan.counts.move) t.filter = t.plan.counts.look ? "look" : t.plan.counts.held ? "held" : "move";
+    if (!t.plan.counts.move)
+      t.filter = t.plan.counts.look ? "look" : t.plan.counts.held ? "held" : "move";
     render();
   }
 
@@ -1576,15 +2191,22 @@ function openTidy({ onClose } = {}) {
 
   function result(job) {
     const failed = job.failed || [];
-    const abs = state.settings?.audiobookshelf_token && state.settings?.audiobookshelf_url && job.moved ? " Audiobookshelf is rescanning, and keeps everyone’s place in each book." : "";
+    const abs =
+      state.settings?.audiobookshelf_token && state.settings?.audiobookshelf_url && job.moved
+        ? " Audiobookshelf is rescanning, and keeps everyone’s place in each book."
+        : "";
     body.innerHTML = `
       <div class="tidy-done ${job.moved ? "ok" : ""}">
         <span class="ic">${job.moved ? I.check : I.alert}</span>
         <div><b>${job.moved ? `Moved ${job.moved} book${job.moved === 1 ? "" : "s"}` : "Nothing moved"}</b>
           <p>${job.moved ? `Every book is in its new folder, and Narratarr plays and reads them from there.${abs}` : "Have a look at why below."}</p></div>
       </div>
-      ${failed.length ? `<div class="tidy-fails"><b>${failed.length} stayed where ${failed.length === 1 ? "it was" : "they were"}</b>
-        ${failed.map((f) => `<div><span>${esc(f.title)}</span><small>${esc(f.error)}</small></div>`).join("")}</div>` : ""}
+      ${
+        failed.length
+          ? `<div class="tidy-fails"><b>${failed.length} stayed where ${failed.length === 1 ? "it was" : "they were"}</b>
+        ${failed.map((f) => `<div><span>${esc(f.title)}</span><small>${esc(f.error)}</small></div>`).join("")}</div>`
+          : ""
+      }
       ${(job.notes || []).length ? `<div class="tidy-fails notes">${job.notes.map((n) => `<div><small>${esc(n)}</small></div>`).join("")}</div>` : ""}`;
     actions.innerHTML = `
       ${job.undo ? `<button class="btn ghost" type="button" data-act="undo">${I.retry} Undo</button>` : ""}
@@ -1593,8 +2215,17 @@ function openTidy({ onClose } = {}) {
 
   async function poll() {
     let job;
-    try { job = await api("/api/tidy/status"); } catch { t.timer = setTimeout(poll, 1500); return; }
-    if (job.running) { progress(job); t.timer = setTimeout(poll, 600); return; }
+    try {
+      job = await api("/api/tidy/status");
+    } catch {
+      t.timer = setTimeout(poll, 1500);
+      return;
+    }
+    if (job.running) {
+      progress(job);
+      t.timer = setTimeout(poll, 600);
+      return;
+    }
     result(job);
     refreshLibrary();
   }
@@ -1602,7 +2233,9 @@ function openTidy({ onClose } = {}) {
   scrim.onchange = (e) => {
     if (e.target.id === "tidy-all") {
       t.picked = e.target.checked ? new Set(movable().map((b) => b.id)) : new Set();
-      $$("[data-pick]", body).forEach((c) => { c.checked = e.target.checked; });
+      $$("[data-pick]", body).forEach((c) => {
+        c.checked = e.target.checked;
+      });
     } else if (e.target.dataset.pick) {
       const id = Number(e.target.dataset.pick);
       const on = e.target.checked;
@@ -1623,7 +2256,10 @@ function openTidy({ onClose } = {}) {
   scrim.onclick = async (e) => {
     if (e.target === scrim || e.target.closest('[data-act="cancel"]')) return close();
     const f = e.target.closest("[data-filter]");
-    if (f) { t.filter = f.dataset.filter; return render(); }
+    if (f) {
+      t.filter = f.dataset.filter;
+      return render();
+    }
     const pref = e.target.closest("[data-prefer]");
     if (pref && pref.dataset.prefer !== t.prefer) {
       t.prefer = pref.dataset.prefer;
@@ -1631,15 +2267,24 @@ function openTidy({ onClose } = {}) {
       return load();
     }
     const fix = e.target.closest("[data-fix]");
-    if (fix) { e.preventDefault(); close(); return openDrawer({ bookId: Number(fix.dataset.fix) }); }
+    if (fix) {
+      e.preventDefault();
+      close();
+      return openDrawer({ bookId: Number(fix.dataset.fix) });
+    }
     if (e.target.closest('[data-act="apply"]')) {
       const btn = e.target.closest('[data-act="apply"]');
       spinBtn(btn, true);
       try {
-        const job = await api("/api/tidy/apply", { method: "POST", body: {
-          prefer: t.prefer, books: [...t.picked],
-          sidecars: !!$("#tidy-sidecars", body)?.checked, tags: !!$("#tidy-tags", body)?.checked,
-        } });
+        const job = await api("/api/tidy/apply", {
+          method: "POST",
+          body: {
+            prefer: t.prefer,
+            books: [...t.picked],
+            sidecars: !!$("#tidy-sidecars", body)?.checked,
+            tags: !!$("#tidy-tags", body)?.checked,
+          },
+        });
         progress(job);
         poll();
       } catch (err) {
@@ -1653,8 +2298,12 @@ function openTidy({ onClose } = {}) {
       spinBtn(btn, true);
       try {
         const r = await api("/api/tidy/undo", { method: "POST" });
-        toast(r.back ? `Put ${r.back} folder${r.back === 1 ? "" : "s"} back where ${r.back === 1 ? "it was" : "they were"}` : "Nothing to put back",
-          { kind: r.failed.length ? "err" : "ok" });
+        toast(
+          r.back
+            ? `Put ${r.back} folder${r.back === 1 ? "" : "s"} back where ${r.back === 1 ? "it was" : "they were"}`
+            : "Nothing to put back",
+          { kind: r.failed.length ? "err" : "ok" },
+        );
         refreshLibrary();
         close();
       } catch (err) {
@@ -1665,16 +2314,24 @@ function openTidy({ onClose } = {}) {
   };
 
   // Already under way (opened again mid-move): show its progress instead of a new plan.
-  api("/api/tidy/status").then((job) => (job.running ? (progress(job), poll()) : load())).catch(load);
+  api("/api/tidy/status")
+    .then((job) => (job.running ? (progress(job), poll()) : load()))
+    .catch(load);
 }
 
 // ---------------------------------------------------------------------------
 // Authors & series you follow
 
 function portraitHTML(f, cls = "") {
-  const initials = (f.name || "?").split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
-  return `<div class="portrait ${f.kind} ${cls}" style="--h:${hue(f.name)}">${f.image
-    ? `<img src="${esc(f.image)}" alt="" loading="lazy" onerror="this.remove()">` : ""}<span>${esc(initials)}</span></div>`;
+  const initials = (f.name || "?")
+    .split(/\s+/)
+    .map((w) => w[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+  return `<div class="portrait ${f.kind} ${cls}" style="--h:${hue(f.name)}">${
+    f.image ? `<img src="${esc(f.image)}" alt="" loading="lazy" onerror="this.remove()">` : ""
+  }<span>${esc(initials)}</span></div>`;
 }
 
 function Authors(root, param) {
@@ -1687,12 +2344,16 @@ function Authors(root, param) {
       <p class="lede">Follow an author or a series and their new books go straight to Wanted, then download as soon as they turn up on your indexers.</p>
       <p class="lede asks-note">Ask an admin to follow someone new. You can still ask for any of their books.</p>
     </header>
-    ${!st.indexer_configured ? `
+    ${
+      !st.indexer_configured
+        ? `
       <div class="banner">
         <div class="ico">${I.key}</div>
         <div><strong>Connect Prowlarr or a Torznab indexer so Narratarr can find these books</strong><p>You can follow authors now. Their books will wait in Wanted until Prowlarr or a Torznab indexer is set up.</p></div>
         <a class="btn" href="#/settings">Open Settings</a>
-      </div>` : ""}
+      </div>`
+        : ""
+    }
     <div class="search-wrap follow-search">
       <form class="search" id="author-form" role="search">
         ${I.search}
@@ -1705,97 +2366,159 @@ function Authors(root, param) {
 
   // "9 of 12 in your library", and what's going on with the rest.
   const totalOf = (f) => Math.max(f.known || 0, f.in_library + f.wanted, 1);
-  const tagsOf = (f) => [
-    f.new && `<span class="tag accent">New book</span>`,
-    f.downloading && `<span class="tag info">Downloading</span>`,
-    f.requested && `<span class="tag accent">${f.requested} awaiting approval</span>`,
-    f.wanted - f.downloading - f.requested > 0 && `<span class="tag">${f.wanted - f.downloading - f.requested} wanted</span>`,
-    f.in_library && f.in_library >= totalOf(f) && `<span class="tag ok">All caught up</span>`,
-  ].filter(Boolean).join("");
-  const seriesNote = (f) => f.downloading ? ["info", "A book is downloading"]
-    : f.requested ? ["accent", `${f.requested} awaiting approval`]
-    : f.wanted ? ["", `${f.wanted} wanted`]
-    : f.in_library ? ["ok", `All ${f.in_library} in your library`] : ["", "Nothing in your library yet"];
-  const stack = (f) => `<span class="stack" aria-hidden="true">${[2, 1, 0].map((i) => {
-    const src = f.covers?.[i];
-    return `<span class="s${i}" style="--h:${hue(f.name + i)}">${src ? `<img src="${esc(src)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : ""}</span>`;
-  }).join("")}</span>`;
+  const tagsOf = (f) =>
+    [
+      f.new && `<span class="tag accent">New book</span>`,
+      f.downloading && `<span class="tag info">Downloading</span>`,
+      f.requested && `<span class="tag accent">${f.requested} awaiting approval</span>`,
+      f.wanted - f.downloading - f.requested > 0 &&
+        `<span class="tag">${f.wanted - f.downloading - f.requested} wanted</span>`,
+      f.in_library && f.in_library >= totalOf(f) && `<span class="tag ok">All caught up</span>`,
+    ]
+      .filter(Boolean)
+      .join("");
+  const seriesNote = (f) =>
+    f.downloading
+      ? ["info", "A book is downloading"]
+      : f.requested
+        ? ["accent", `${f.requested} awaiting approval`]
+        : f.wanted
+          ? ["", `${f.wanted} wanted`]
+          : f.in_library
+            ? ["ok", `All ${f.in_library} in your library`]
+            : ["", "Nothing in your library yet"];
+  const stack = (f) =>
+    `<span class="stack" aria-hidden="true">${[2, 1, 0]
+      .map((i) => {
+        const src = f.covers?.[i];
+        return `<span class="s${i}" style="--h:${hue(f.name + i)}">${src ? `<img src="${esc(src)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : ""}</span>`;
+      })
+      .join("")}</span>`;
 
   function render() {
     const authors = state.follows.filter((f) => f.kind === "author");
     const series = state.follows.filter((f) => f.kind === "series");
     const fresh = authors.filter((f) => f.new).length;
-    $("#follows", root).innerHTML = !state.follows.length ? `
+    $("#follows", root).innerHTML = !state.follows.length
+      ? `
       <div class="empty">
         <div class="art">${I.books}</div>
         <h3>Never miss a new release</h3>
         <p>Search for an author above, or open any book from the Audible catalog and choose Follow.</p>
-      </div>` : `
-      ${authors.length ? `
+      </div>`
+      : `
+      ${
+        authors.length
+          ? `
       <section aria-labelledby="au-title">
         <div class="section-head"><h2 id="au-title">Authors you follow</h2><span class="muted">${authors.length} author${authors.length === 1 ? "" : "s"}${fresh ? ` · ${fresh} with a new book` : ""}</span></div>
-        <div class="author-grid">${authors.map((f, i) => `
+        <div class="author-grid">${authors
+          .map(
+            (f, i) => `
           <a class="author-card" href="#/authors/${f.id}" style="animation-delay:${Math.min(i, 12) * 35}ms">
             <div class="ac-top">${portraitHTML(f)}<span><b>${esc(f.name)}</b><small>${f.in_library} of ${totalOf(f)} in your library</small></span></div>
             <span class="meter" aria-hidden="true"><i style="width:${Math.round((f.in_library / totalOf(f)) * 100)}%"></i></span>
             <span class="tags">${tagsOf(f)}</span>
-          </a>`).join("")}</div>
-      </section>` : ""}
-      ${series.length ? `
+          </a>`,
+          )
+          .join("")}</div>
+      </section>`
+          : ""
+      }
+      ${
+        series.length
+          ? `
       <section aria-labelledby="se-title">
         <div class="section-head"><h2 id="se-title">Series you follow</h2></div>
-        <div class="series-grid">${series.map((f) => {
-          const [tone, note] = seriesNote(f);
-          return `
+        <div class="series-grid">${series
+          .map((f) => {
+            const [tone, note] = seriesNote(f);
+            return `
           <a class="series-card" href="#/authors/${f.id}">
             ${stack(f)}
             <span class="sc-copy"><b>${esc(f.name)}</b><small class="${tone}">${esc(note)}</small></span>
           </a>`;
-        }).join("")}</div>
-      </section>` : ""}`;
+          })
+          .join("")}</div>
+      </section>`
+          : ""
+      }`;
   }
 
   const results = $("#author-results", root);
-  let timer = 0, token = 0;
+  let timer = 0,
+    token = 0;
   async function find(q) {
     const mine = ++token;
-    if (q.trim().length < 2) { results.hidden = true; return; }
+    if (q.trim().length < 2) {
+      results.hidden = true;
+      return;
+    }
     results.hidden = false;
     results.innerHTML = `<div class="label">Authors</div><div style="padding:14px;color:var(--text-3)"><span class="spinner"></span></div>`;
     try {
       const found = await api(`/api/authors/search?${new URLSearchParams({ q })}`);
       if (mine !== token) return;
-      results.innerHTML = found.length ? `<div class="label">Authors on Audible</div>` + found.map((a, i) => {
-        const f = state.follows.find((x) => x.kind === "author" && x.asin === a.asin);
-        return `<button type="button" data-author="${i}">
+      results.innerHTML = found.length
+        ? `<div class="label">Authors on Audible</div>` +
+          found
+            .map((a, i) => {
+              const f = state.follows.find((x) => x.kind === "author" && x.asin === a.asin);
+              return `<button type="button" data-author="${i}">
           ${a.image ? `<img src="${esc(a.image)}" alt="" style="border-radius:50%">` : `<span class="ph" style="border-radius:50%"></span>`}
           <span><b>${esc(a.name)}</b><small>${f ? "Following" : esc((a.description || "").slice(0, 90)) || "Follow"}</small></span>
         </button>`;
-      }).join("") : `<div style="padding:14px 16px;color:var(--text-3)">No authors by that name on Audible.</div>`;
+            })
+            .join("")
+        : `<div style="padding:14px 16px;color:var(--text-3)">No authors by that name on Audible.</div>`;
       results._found = found;
     } catch (e) {
       results.innerHTML = `<div style="padding:14px 16px;color:var(--err)">${esc(e.message)}</div>`;
     }
   }
-  $("#aq", root).oninput = (e) => { clearTimeout(timer); timer = setTimeout(() => find(e.target.value), 350); };
-  $("#author-form", root).onsubmit = (e) => { e.preventDefault(); find($("#aq", root).value); };
+  $("#aq", root).oninput = (e) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => find(e.target.value), 350);
+  };
+  $("#author-form", root).onsubmit = (e) => {
+    e.preventDefault();
+    find($("#aq", root).value);
+  };
   results.onclick = async (e) => {
     const b = e.target.closest("[data-author]");
     if (!b) return;
     const a = results._found[Number(b.dataset.author)];
     const existing = state.follows.find((x) => x.kind === "author" && x.asin === a.asin);
-    if (existing) { location.hash = `#/authors/${existing.id}`; return; }
+    if (existing) {
+      location.hash = `#/authors/${existing.id}`;
+      return;
+    }
     try {
       const f = await confirmFollow({ kind: "author", asin: a.asin, name: a.name });
-      if (f) { results.hidden = true; $("#aq", root).value = ""; render(); }
-    } catch (err) { toast(err.message, { kind: "err" }); }
+      if (f) {
+        results.hidden = true;
+        $("#aq", root).value = "";
+        render();
+      }
+    } catch (err) {
+      toast(err.message, { kind: "err" });
+    }
   };
-  const outside = (e) => { if (!e.target.closest(".follow-search")) results.hidden = true; };
+  const outside = (e) => {
+    if (!e.target.closest(".follow-search")) results.hidden = true;
+  };
   document.addEventListener("click", outside);
 
   render();
   refreshFollows().then(render);
-  return { destroy() { document.removeEventListener("click", outside); }, update(structural) { if (structural) refreshFollows().then(render); } };
+  return {
+    destroy() {
+      document.removeEventListener("click", outside);
+    },
+    update(structural) {
+      if (structural) refreshFollows().then(render);
+    },
+  };
 }
 
 function AuthorDetail(root, id) {
@@ -1820,14 +2543,16 @@ function AuthorDetail(root, id) {
     if (!data) return;
     const books = data.books.map((b) => ({ ...b, source: "audible", posted: b.released }));
     const have = books.filter((b) => libFor(b));
-    const onShelf = books.filter((b) => !libFor(b) && b.abs).length;  // already in Audiobookshelf
+    const onShelf = books.filter((b) => !libFor(b) && b.abs).length; // already in Audiobookshelf
     const missing = books.length - have.length - onShelf;
-    const mine = [...new Map(have.map((b) => [libFor(b).id, libFor(b)])).values()];  // one per library book
+    const mine = [...new Map(have.map((b) => [libFor(b).id, libFor(b)])).values()]; // one per library book
     $("#a-stats", root).innerHTML = [
       ["ok", mine.filter((b) => b.status === "completed").length + onShelf, "In your library"],
       ["info", mine.filter((b) => b.status !== "completed").length, "Wanted or downloading"],
       ["", missing, "Not added yet"],
-    ].map(([tone, n, l]) => `<div class="hstat ${tone}"><b>${n}</b><span>${l}</span></div>`).join("");
+    ]
+      .map(([tone, n, l]) => `<div class="hstat ${tone}"><b>${n}</b><span>${l}</span></div>`)
+      .join("");
     $("#hero-actions", root).innerHTML = `
       ${missing ? `<button class="btn primary" data-act="want-all">${I.bookmark} Add ${missing} missing to Wanted</button>` : ""}
       <button class="btn ghost danger" data-act="unfollow">Unfollow</button>`;
@@ -1841,17 +2566,23 @@ function AuthorDetail(root, id) {
     }
     const seq = (b) => parseFloat((b.series || [])[0]?.sequence) || 999;
     const ordered = [...groups.entries()].sort(([a], [b]) => (a === "") - (b === ""));
-    $("#a-books", root).innerHTML = books.length ? ordered.map(([name, list]) => {
-      if (name) list.sort((a, b) => seq(a) - seq(b));
-      const owned = list.filter((b) => libFor(b)?.status === "completed" || (!libFor(b) && b.abs)).length;
-      const notYet = list.filter((b) => !libFor(b) && !b.abs).length;
-      return `
+    $("#a-books", root).innerHTML = books.length
+      ? ordered
+          .map(([name, list]) => {
+            if (name) list.sort((a, b) => seq(a) - seq(b));
+            const owned = list.filter(
+              (b) => libFor(b)?.status === "completed" || (!libFor(b) && b.abs),
+            ).length;
+            const notYet = list.filter((b) => !libFor(b) && !b.abs).length;
+            return `
       <section class="book-group">
         <div class="section-head"><h2>${esc(name || (groups.size > 1 ? "Standalones and others" : "Books"))}</h2>
           <span class="muted">${owned} of ${list.length} in your library${notYet ? ` · ${notYet} not added yet` : ""}</span></div>
         <div class="grid">${list.map((b, i) => cardHTML(b, libFor(b), i).replace('class="card"', `class="card${libFor(b) || b.abs ? "" : " missing"}"`)).join("")}</div>
       </section>`;
-    }).join("") : `<div class="empty"><h3>No books yet</h3><p>Audible doesn't list any books here yet.</p></div>`;
+          })
+          .join("")
+      : `<div class="empty"><h3>No books yet</h3><p>Audible doesn't list any books here yet.</p></div>`;
     root._books = books;
   }
 
@@ -1859,12 +2590,14 @@ function AuthorDetail(root, id) {
     try {
       data = await api(`/api/follows/${id}`);
     } catch (e) {
-      $("#a-books", root).innerHTML = `<div class="empty" style="grid-column:1/-1"><div class="art">${I.alert}</div><h3>Couldn’t load this page</h3><p>${esc(e.message)}</p><a class="btn" href="#/authors">Back to Authors</a></div>`;
+      $("#a-books", root).innerHTML =
+        `<div class="empty" style="grid-column:1/-1"><div class="art">${I.alert}</div><h3>Couldn’t load this page</h3><p>${esc(e.message)}</p><a class="btn" href="#/authors">Back to Authors</a></div>`;
       return;
     }
     $(".author-hero", root).querySelector(".portrait").outerHTML = portraitHTML(data, "big");
     $(".author-hero h1", root).textContent = data.name;
-    $(".author-hero .eyebrow", root).textContent = data.kind === "series" ? "Series you follow" : "Author you follow";
+    $(".author-hero .eyebrow", root).textContent =
+      data.kind === "series" ? "Series you follow" : "Author you follow";
     const bio = $("#bio", root);
     bio.textContent = data.description || "";
     bio.classList.toggle("clamped", (data.description || "").length > 360);
@@ -1875,7 +2608,10 @@ function AuthorDetail(root, id) {
     const act = e.target.closest("[data-act]");
     if (act?.dataset.act === "unfollow") {
       const res = await modal({
-        title: `Unfollow ${data?.name || "this"}?`, body: "New books won't be added to Wanted any more.", confirm: "Unfollow", danger: true,
+        title: `Unfollow ${data?.name || "this"}?`,
+        body: "New books won't be added to Wanted any more.",
+        confirm: "Unfollow",
+        danger: true,
         extra: `<label class="switch"><input type="checkbox" name="purge"><i></i>Also remove their books that are still only Wanted</label>`,
       });
       if (!res) return;
@@ -1892,7 +2628,10 @@ function AuthorDetail(root, id) {
         await refreshLibrary();
         toast(`${r.added} book${r.added === 1 ? "" : "s"} added to Wanted`, { kind: "ok" });
         await load();
-      } catch (err) { toast(err.message, { kind: "err" }); spinBtn(act, false); }
+      } catch (err) {
+        toast(err.message, { kind: "err" });
+        spinBtn(act, false);
+      }
       return;
     }
     if (e.target.closest("a.quick")) return; // an ebook download: let the link do it
@@ -1905,17 +2644,28 @@ function AuthorDetail(root, id) {
     if (e.target.closest("[data-quick]")) {
       const q = e.target.closest("[data-quick]");
       spinBtn(q, true);
-      try { await addBook(b.url, { cover: b.cover_url, title: b.title, source: "audible" }); await load(); }
-      catch (err) { toast(err.message, { kind: "err" }); spinBtn(q, false); }
+      try {
+        await addBook(b.url, { cover: b.cover_url, title: b.title, source: "audible" });
+        await load();
+      } catch (err) {
+        toast(err.message, { kind: "err" });
+        spinBtn(q, false);
+      }
       return;
     }
     if (lib) openDrawer({ bookId: lib.id });
     else openDrawer({ url: b.url, preview: b, source: "audible" });
   };
-  root.onkeydown = (e) => { if (e.key === "Enter" && e.target.matches(".card")) e.target.click(); };
+  root.onkeydown = (e) => {
+    if (e.key === "Enter" && e.target.matches(".card")) e.target.click();
+  };
 
   load();
-  return { update(structural) { if (structural) render(); } };
+  return {
+    update(structural) {
+      if (structural) render();
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1925,7 +2675,8 @@ function jobDetail(b) {
   const parts = [];
   if (b.status === "queued") parts.push("Waiting for a free slot…");
   else if (b.detail) parts.push(esc(b.detail));
-  if (b.speed && ["caching", "downloading"].includes(b.status)) parts.push(`${fmtBytes(b.speed)}/s`);
+  if (b.speed && ["caching", "downloading"].includes(b.status))
+    parts.push(`${fmtBytes(b.speed)}/s`);
   if (["caching", "downloading"].includes(b.status)) parts.push(`${(b.progress || 0).toFixed(1)}%`);
   return parts.map((p) => `<span>${p}</span>`).join("");
 }
@@ -1933,18 +2684,25 @@ function jobDetail(b) {
 function stepsHTML(b) {
   const phases = phasesFor(b);
   const idx = phases.findIndex(([s]) => s === b.status);
-  return `<div class="steps">${phases.map(([, label], i) =>
-    `<span class="step ${idx > i ? "done" : idx === i ? "now" : ""}"><i></i>${label}</span>`).join("")}</div>`;
+  return `<div class="steps">${phases
+    .map(
+      ([, label], i) =>
+        `<span class="step ${idx > i ? "done" : idx === i ? "now" : ""}"><i></i>${label}</span>`,
+    )
+    .join("")}</div>`;
 }
 
 function dayLabel(ts) {
-  const d = new Date(ts * 1000), today = new Date();
-  const y = new Date(); y.setDate(today.getDate() - 1);
+  const d = new Date(ts * 1000),
+    today = new Date();
+  const y = new Date();
+  y.setDate(today.getDate() - 1);
   if (d.toDateString() === today.toDateString()) return "Today";
   if (d.toDateString() === y.toDateString()) return "Yesterday";
   return d.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
 }
-const clock = (ts) => new Date(ts * 1000).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+const clock = (ts) =>
+  new Date(ts * 1000).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 
 function Activity(root) {
   root.innerHTML = `
@@ -1973,44 +2731,91 @@ function Activity(root) {
     const wanted = state.library.filter((b) => b.status === "wanted");
     let next = "";
     if (st.auto_search && st.indexer_configured && wanted.length) {
-      const due = Math.min(...wanted.map((b) => (b.last_searched || 0) + (st.auto_search_hours || 12) * 3600)) - Date.now() / 1000;
-      next = due <= 600 ? "Narratarr looks again in a few minutes" : `Narratarr looks again in <b>${esc(fmtLeft(due).replace(" left", ""))}</b>`;
+      const due =
+        Math.min(
+          ...wanted.map((b) => (b.last_searched || 0) + (st.auto_search_hours || 12) * 3600),
+        ) -
+        Date.now() / 1000;
+      next =
+        due <= 600
+          ? "Narratarr looks again in a few minutes"
+          : `Narratarr looks again in <b>${esc(fmtLeft(due).replace(" left", ""))}</b>`;
     }
     return `
-      ${reqs.length ? `
+      ${
+        reqs.length
+          ? `
       <section class="side-card req" aria-labelledby="wait-title">
         <h2 id="wait-title">${I.bell}${isAdmin() ? "Waiting for your approval" : "Your requests"}</h2>
-        ${reqs.slice(0, 4).map((b) => `
-          <button type="button" class="side-row" data-id="${b.id}">${coverHTML(b)}<span><b>${esc(b.title)}</b><small>${esc(b.requested_by_name || "")}${b.requested_by_name ? " · " : ""}${esc(ago(b.updated_at))}</small></span></button>`).join("")}
+        ${reqs
+          .slice(0, 4)
+          .map(
+            (b) => `
+          <button type="button" class="side-row" data-id="${b.id}">${coverHTML(b)}<span><b>${esc(b.title)}</b><small>${esc(b.requested_by_name || "")}${b.requested_by_name ? " · " : ""}${esc(ago(b.updated_at))}</small></span></button>`,
+          )
+          .join("")}
         <a class="btn ${isAdmin() ? "primary" : ""} sm" href="#/library" data-review>${isAdmin() ? "Review requests" : "See in Library"}</a>
-      </section>` : ""}
+      </section>`
+          : ""
+      }
       <section class="side-card" aria-labelledby="want-title">
         <h2 id="want-title">Wanted</h2>
         <p>${wanted.length ? `${wanted.length} book${wanted.length === 1 ? "" : "s"}.` : "Nothing wanted right now."}
-          ${!st.indexer_configured ? "Connect an indexer in Settings so Narratarr can look for them."
-            : !st.auto_search ? "Automatic search is off." : next ? `${next}, a few at a time.` : ""}</p>
-        ${wanted.slice(0, 4).map((b) => `
-          <button type="button" class="side-line" data-id="${b.id}"><span>${esc(b.title)}</span><small>${b.last_searched ? `looked ${esc(ago(b.last_searched))}` : "not looked yet"}</small></button>`).join("")}
+          ${
+            !st.indexer_configured
+              ? "Connect an indexer in Settings so Narratarr can look for them."
+              : !st.auto_search
+                ? "Automatic search is off."
+                : next
+                  ? `${next}, a few at a time.`
+                  : ""
+          }</p>
+        ${wanted
+          .slice(0, 4)
+          .map(
+            (b) => `
+          <button type="button" class="side-line" data-id="${b.id}"><span>${esc(b.title)}</span><small>${b.last_searched ? `looked ${esc(ago(b.last_searched))}` : "not looked yet"}</small></button>`,
+          )
+          .join("")}
         ${wanted.length ? `<a class="side-link" href="#/library" data-wanted>See all Wanted</a>` : ""}
       </section>`;
   }
 
   function render() {
     const lib = state.library;
-    const active = lib.filter((b) => ACTIVE.includes(b.status))
-      .sort((a, b) => ACTIVE.indexOf(b.status) - ACTIVE.indexOf(a.status) || a.updated_at - b.updated_at);
-    const recent = lib.filter((b) => ["completed", "failed"].includes(b.status))
-      .sort((a, b) => (b.completed_at || b.updated_at) - (a.completed_at || a.updated_at)).slice(0, 30);
+    const active = lib
+      .filter((b) => ACTIVE.includes(b.status))
+      .sort(
+        (a, b) =>
+          ACTIVE.indexOf(b.status) - ACTIVE.indexOf(a.status) || a.updated_at - b.updated_at,
+      );
+    const recent = lib
+      .filter((b) => ["completed", "failed"].includes(b.status))
+      .sort((a, b) => (b.completed_at || b.updated_at) - (a.completed_at || a.updated_at))
+      .slice(0, 30);
     const today = new Date().toDateString();
-    const doneToday = lib.filter((b) => b.status === "completed" && b.completed_at && new Date(b.completed_at * 1000).toDateString() === today).length;
+    const doneToday = lib.filter(
+      (b) =>
+        b.status === "completed" &&
+        b.completed_at &&
+        new Date(b.completed_at * 1000).toDateString() === today,
+    ).length;
 
     $("#act-stats", root).innerHTML = [
       ["info", active.filter((b) => b.status !== "queued").length, "Downloading"],
       ["", active.filter((b) => b.status === "queued").length, "Waiting for a slot"],
       ["ok", doneToday, "Finished today"],
-    ].map(([tone, n, label]) => `<div class="hstat box ${tone}"><b>${n}</b><span>${label}</span></div>`).join("");
+    ]
+      .map(
+        ([tone, n, label]) =>
+          `<div class="hstat box ${tone}"><b>${n}</b><span>${label}</span></div>`,
+      )
+      .join("");
 
-    $("#jobs", root).innerHTML = active.length ? active.map((b, i) => `
+    $("#jobs", root).innerHTML = active.length
+      ? active
+          .map(
+            (b, i) => `
       <div class="job" data-id="${b.id}" style="animation-delay:${i * 40}ms">
         ${coverHTML(b)}
         <div style="min-width:0">
@@ -2025,7 +2830,10 @@ function Activity(root) {
           <div class="progress ${["caching", "downloading"].includes(b.status) ? "" : "indeterminate"}"><i style="width:${b.progress || 0}%"></i></div>
           <div class="detail">${jobDetail(b)}</div>
         </div>
-      </div>`).join("") : `
+      </div>`,
+          )
+          .join("")
+      : `
       <div class="empty" style="padding:50px 20px">
         <div class="art">${I.headphones}</div>
         <h3>All quiet</h3>
@@ -2039,16 +2847,27 @@ function Activity(root) {
       if (!days.has(label)) days.set(label, []);
       days.get(label).push(b);
     }
-    $("#hist-wrap", root).innerHTML = recent.length ? `
+    $("#hist-wrap", root).innerHTML = recent.length
+      ? `
       <section aria-labelledby="done-title">
         <div class="section-head"><h2 id="done-title">Recently finished</h2></div>
-        ${[...days.entries()].map(([label, list]) => `
+        ${[...days.entries()]
+          .map(
+            ([label, list]) => `
           <div class="day"><span class="day-label">${esc(label)}</span>
-          <div class="history">${list.map((b) => {
-            const failed = b.status === "failed";
-            const note = failed ? b.error || "Couldn’t download"
-              : [b.author, isEbook(b) ? "ebook" : "", b.requested_by_name ? `for ${b.requested_by_name}` : ""].filter(Boolean).join(" · ");
-            return `
+          <div class="history">${list
+            .map((b) => {
+              const failed = b.status === "failed";
+              const note = failed
+                ? b.error || "Couldn’t download"
+                : [
+                    b.author,
+                    isEbook(b) ? "ebook" : "",
+                    b.requested_by_name ? `for ${b.requested_by_name}` : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" · ");
+              return `
             <div class="row ${failed ? "bad" : ""}" data-id="${b.id}">
               ${coverHTML(b)}
               <div style="min-width:0"><div class="t">${esc(b.title)}</div><div class="s">${esc(note)}</div></div>
@@ -2058,22 +2877,37 @@ function Activity(root) {
                 <span class="tm">${esc(clock(b.completed_at || b.updated_at))}</span>
               </div>
             </div>`;
-          }).join("")}</div></div>`).join("")}
-      </section>` : "";
+            })
+            .join("")}</div></div>`,
+          )
+          .join("")}
+      </section>`
+      : "";
 
     $("#act-side", root).innerHTML = sideHTML();
   }
 
   root.onclick = async (e) => {
-    if (e.target.closest("[data-review]")) { state.libFilter = "requested"; return; }
-    if (e.target.closest("[data-wanted]")) { state.libFilter = "wanted"; return; }
+    if (e.target.closest("[data-review]")) {
+      state.libFilter = "requested";
+      return;
+    }
+    if (e.target.closest("[data-wanted]")) {
+      state.libFilter = "wanted";
+      return;
+    }
     const job = e.target.closest("[data-id]");
     if (!job) return;
     const id = Number(job.dataset.id);
     const btn = e.target.closest("[data-act]");
     if (btn) {
       spinBtn(btn, true);
-      try { await bookAction(id, btn.dataset.act); } catch (err) { toast(err.message, { kind: "err" }); spinBtn(btn, false); }
+      try {
+        await bookAction(id, btn.dataset.act);
+      } catch (err) {
+        toast(err.message, { kind: "err" });
+        spinBtn(btn, false);
+      }
       return;
     }
     openDrawer({ bookId: id });
@@ -2100,22 +2934,58 @@ function Activity(root) {
 // one form, so moving between pages keeps unsaved changes, and one Save covers them all.
 // The folder layout's variables, and the same fill-in rules as narratarr/layout.py, for the live preview.
 const LAYOUT_VARS = [
-  ["author", "The author"], ["title", "The book's title"], ["narrator", "The narrator (up to two)"],
-  ["series", "The series name"], ["series_number", "The book's number in its series, like 1 or 2.5"], ["year", "The year it came out"],
-  ["kind", "Audiobooks or Ebooks, to keep the two in separate folders (say, for separate Audiobookshelf libraries)"],
+  ["author", "The author"],
+  ["title", "The book's title"],
+  ["narrator", "The narrator (up to two)"],
+  ["series", "The series name"],
+  ["series_number", "The book's number in its series, like 1 or 2.5"],
+  ["year", "The year it came out"],
+  [
+    "kind",
+    "Audiobooks or Ebooks, to keep the two in separate folders (say, for separate Audiobookshelf libraries)",
+  ],
 ];
 // The languages offered under Settings → Search & sources (as narratarr/languages.py COMMON).
-const AUDIBLE_STORES = [["us", "United States"], ["uk", "United Kingdom"], ["ca", "Canada"], ["au", "Australia"], ["in", "India"],
-  ["de", "Germany"], ["fr", "France"], ["it", "Italy"], ["es", "Spain"], ["jp", "Japan"]];
-const storeName = (code) => (AUDIBLE_STORES.find(([v]) => v === code) || [code, code.toUpperCase()])[1];
+const AUDIBLE_STORES = [
+  ["us", "United States"],
+  ["uk", "United Kingdom"],
+  ["ca", "Canada"],
+  ["au", "Australia"],
+  ["in", "India"],
+  ["de", "Germany"],
+  ["fr", "France"],
+  ["it", "Italy"],
+  ["es", "Spain"],
+  ["jp", "Japan"],
+];
+const storeName = (code) =>
+  (AUDIBLE_STORES.find(([v]) => v === code) || [code, code.toUpperCase()])[1];
 // The Audible stores people can search: the main one first, then the ones an admin added.
 function audibleStores() {
   const main = state.settings?.audible_region || "us";
   return [main, ...(state.settings?.audible_extra_regions || []).filter((r) => r !== main)];
 }
 
-const LANGUAGES = ["English", "German", "French", "Spanish", "Italian", "Dutch", "Portuguese", "Polish", "Swedish", "Danish",
-  "Norwegian", "Finnish", "Czech", "Hungarian", "Russian", "Japanese", "Chinese", "Korean"];
+const LANGUAGES = [
+  "English",
+  "German",
+  "French",
+  "Spanish",
+  "Italian",
+  "Dutch",
+  "Portuguese",
+  "Polish",
+  "Swedish",
+  "Danish",
+  "Norwegian",
+  "Finnish",
+  "Czech",
+  "Hungarian",
+  "Russian",
+  "Japanese",
+  "Chinese",
+  "Korean",
+];
 
 // One click to a layout that works well: the default, by series, and the one Audiobookshelf reads most from.
 const LAYOUT_PRESETS = [
@@ -2124,12 +2994,39 @@ const LAYOUT_PRESETS = [
   ["Audiobookshelf style", "{author}/{series}/Vol {series_number} - {year} - {title} {{narrator}}"],
   ["Audiobooks and ebooks apart", "{kind}/{author}/{title}"],
 ];
-const LAYOUT_SAMPLE = { author: "Frank Herbert", title: "Dune", narrator: "Scott Brick", series: "Dune Chronicles", series_number: "1", year: "1965", kind: "Audiobooks" };
-const LAYOUT_SAMPLE_SOLO = { author: "Andy Weir", title: "Project Hail Mary", narrator: "Ray Porter", series: "", series_number: "", year: "2021", kind: "Audiobooks" };
+const LAYOUT_SAMPLE = {
+  author: "Frank Herbert",
+  title: "Dune",
+  narrator: "Scott Brick",
+  series: "Dune Chronicles",
+  series_number: "1",
+  year: "1965",
+  kind: "Audiobooks",
+};
+const LAYOUT_SAMPLE_SOLO = {
+  author: "Andy Weir",
+  title: "Project Hail Mary",
+  narrator: "Ray Porter",
+  series: "",
+  series_number: "",
+  year: "2021",
+  kind: "Audiobooks",
+};
 const LAYOUT_EDGES = /^[\s\-–—_.,;:#~]+|[\s\-–—_.,;:#~]+$/g;
 
 function layoutClean(part) {
-  return String(part).replace(/[<>:"/\\|?*\x00-\x1f]/g, "").trim().replace(/^\.+|\.+$/g, "").split(/\s+/).filter(Boolean).join(" ").slice(0, 150);
+  // Strip control characters as well as characters forbidden in filenames.
+  return (
+    String(part)
+      // eslint-disable-next-line no-control-regex
+      .replace(/[<>:"/\\|?*\x00-\x1f]/g, "")
+      .trim()
+      .replace(/^\.+|\.+$/g, "")
+      .split(/\s+/)
+      .filter(Boolean)
+      .join(" ")
+      .slice(0, 150)
+  );
 }
 
 function layoutFolders(template, book) {
@@ -2140,12 +3037,17 @@ function layoutFolders(template, book) {
     const bits = part.split(/\{([^{}]*)\}/);
     const literals = bits.filter((_, i) => i % 2 === 0);
     const alone = bits.length === 3 && !(bits[0] + bits[2]).trim(); // "{narrator}" alone may say "Unknown Narrator"
-    const vals = bits.filter((_, i) => i % 2 === 1).map((n) => layoutClean(book[n] || "") || (alone && fallback[n]) || "");
+    const vals = bits
+      .filter((_, i) => i % 2 === 1)
+      .map((n) => layoutClean(book[n] || "") || (alone && fallback[n]) || "");
     let text = part;
     if (vals.length) {
       const keep = literals.map(() => true);
       for (let i = 0; i < vals.length;) {
-        if (vals[i]) { i++; continue; }
+        if (vals[i]) {
+          i++;
+          continue;
+        }
         let j = i;
         while (j < vals.length && !vals[j]) j++;
         for (let k = i; k <= j; k++) keep[k] = false;
@@ -2162,16 +3064,42 @@ function layoutFolders(template, book) {
 }
 
 const SETTINGS_PAGES = [
-  ["general", "General", "Where your books live, how their folders are named, and what comes in by itself.",
-    '<svg viewBox="0 0 24 24"><path d="M3 7.5 12 3l9 4.5M5 9.5V19h14V9.5M9 19v-6h6v6"/></svg>'],
-  ["search", "Search & sources", "Where Narratarr looks for books, and how often it looks for the ones you want.", I.search],
-  ["downloads", "Downloads", "What fetches your books, and where Narratarr finds them when they’re done.", I.down],
-  ["abs", "Audiobookshelf", "Every book Narratarr files shows up in Audiobookshelf as soon as it’s done.",
-    '<svg viewBox="0 0 24 24"><path d="M4 19V6l8-3 8 3v13M4 19h16M9 19v-7h6v7"/></svg>'],
-  ["notifications", "Notifications", "Hear about new requests and finished downloads on your phone, in Discord, or anywhere a webhook goes.",
-    '<svg viewBox="0 0 24 24"><path d="M6 9.5a6 6 0 0 1 12 0c0 5 2 6.5 2 6.5H4s2-1.5 2-6.5M10 19.5a2.2 2.2 0 0 0 4 0"/></svg>'],
-  ["users", "Users", "Who can sign in. Admins run Narratarr; listeners browse, request and listen, each with their own place in every book.",
-    '<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.6a3.5 3.5 0 0 1 0 6.8M18.5 14.4A6.5 6.5 0 0 1 21.5 20"/></svg>'],
+  [
+    "general",
+    "General",
+    "Where your books live, how their folders are named, and what comes in by itself.",
+    '<svg viewBox="0 0 24 24"><path d="M3 7.5 12 3l9 4.5M5 9.5V19h14V9.5M9 19v-6h6v6"/></svg>',
+  ],
+  [
+    "search",
+    "Search & sources",
+    "Where Narratarr looks for books, and how often it looks for the ones you want.",
+    I.search,
+  ],
+  [
+    "downloads",
+    "Downloads",
+    "What fetches your books, and where Narratarr finds them when they’re done.",
+    I.down,
+  ],
+  [
+    "abs",
+    "Audiobookshelf",
+    "Every book Narratarr files shows up in Audiobookshelf as soon as it’s done.",
+    '<svg viewBox="0 0 24 24"><path d="M4 19V6l8-3 8 3v13M4 19h16M9 19v-7h6v7"/></svg>',
+  ],
+  [
+    "notifications",
+    "Notifications",
+    "Hear about new requests and finished downloads on your phone, in Discord, or anywhere a webhook goes.",
+    '<svg viewBox="0 0 24 24"><path d="M6 9.5a6 6 0 0 1 12 0c0 5 2 6.5 2 6.5H4s2-1.5 2-6.5M10 19.5a2.2 2.2 0 0 0 4 0"/></svg>',
+  ],
+  [
+    "users",
+    "Users",
+    "Who can sign in. Admins run Narratarr; listeners browse, request and listen, each with their own place in every book.",
+    '<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.6a3.5 3.5 0 0 1 0 6.8M18.5 14.4A6.5 6.5 0 0 1 21.5 20"/></svg>',
+  ],
   ["updates", "Updates", "Which version you have, and whether a newer one is out.", I.retry],
 ];
 const SETTINGS_PAGE = Object.fromEntries(SETTINGS_PAGES.map((p) => [p[0], p]));
@@ -2182,25 +3110,41 @@ function settingsStatus(key, users, notifiers) {
   const u = state.updates;
   if (key === "general") return [st.library_dir || "", ""];
   if (key === "search") {
-    const on = [st.prowlarr_configured && "Prowlarr", st.torznab_configured && "Torznab"].filter(Boolean);
+    const on = [st.prowlarr_configured && "Prowlarr", st.torznab_configured && "Torznab"].filter(
+      Boolean,
+    );
     return on.length ? [`${on.join(" · ")} connected`, "ok"] : ["No indexer connected", ""];
   }
   if (key === "downloads") {
     // Name the clients the list actually holds, not the flat setting it replaced.
-  const ready = (st.clients || []).filter((c) => c.configured).map((c) => c.label)
-    .concat([st.torrent_configured && !(st.clients || []).length && CLIENTS[st.torrent_client],
-             st.usenet_configured && !(st.clients || []).length && CLIENTS[st.usenet_client]]).filter(Boolean);
+    const ready = (st.clients || [])
+      .filter((c) => c.configured)
+      .map((c) => c.label)
+      .concat([
+        st.torrent_configured && !(st.clients || []).length && CLIENTS[st.torrent_client],
+        st.usenet_configured && !(st.clients || []).length && CLIENTS[st.usenet_client],
+      ])
+      .filter(Boolean);
     return ready.length ? [ready.join(" · "), "ok"] : ["Set up a download client", "warn"];
   }
-  if (key === "abs") return st.audiobookshelf_url && st.audiobookshelf_token ? ["Connected", "ok"] : ["Not connected", ""];
-  if (key === "users") return [users == null ? "" : `${users} ${users === 1 ? "person" : "people"}`, ""];
+  if (key === "abs")
+    return st.audiobookshelf_url && st.audiobookshelf_token
+      ? ["Connected", "ok"]
+      : ["Not connected", ""];
+  if (key === "users")
+    return [users == null ? "" : `${users} ${users === 1 ? "person" : "people"}`, ""];
   if (key === "notifications") {
     if (notifiers == null) return ["", ""];
-    return notifiers ? [`${notifiers} destination${notifiers === 1 ? "" : "s"}`, "ok"] : ["Not set up", ""];
+    return notifiers
+      ? [`${notifiers} destination${notifiers === 1 ? "" : "s"}`, "ok"]
+      : ["Not set up", ""];
   }
   if (key === "updates") {
     if (u?.update_available) return [`${u.latest.version} is out`, "warn"];
-    return [u?.current ? `${u.current}${u.latest ? " · up to date" : ""}` : "Version and what’s new", ""];
+    return [
+      u?.current ? `${u.current}${u.latest ? " · up to date" : ""}` : "Version and what’s new",
+      "",
+    ];
   }
   return ["", ""];
 }
@@ -2208,10 +3152,6 @@ function settingsStatus(key, users, notifiers) {
 // Signing in to a cloud service with a short code: AllDebrid's PIN, TorBox's device code.
 function Settings(root, page) {
   const s = state.settings || {};
-  const tile = (client, label, where) => {
-    const ready = s[`${SHORT[client] || client}_configured`];
-    return `<button type="button" role="radio" data-v="${client}"><b>${label}</b><small>${ready ? `<i class="dot ok"></i>Ready` : where}</small></button>`;
-  };
   root.innerHTML = `
     <div class="set-wrap" id="set-wrap">
       <a class="set-back" href="#/settings">${I.chevron}Settings</a>
@@ -2222,12 +3162,14 @@ function Settings(root, page) {
       </header>
       <div class="set-layout">
         <nav class="set-nav" aria-label="Settings">
-          ${SETTINGS_PAGES.map(([key, label, , icon]) => `
+          ${SETTINGS_PAGES.map(
+            ([key, label, , icon]) => `
             <a href="#/settings/${key}" data-page="${key}">
               <span class="ic" aria-hidden="true">${icon}</span>
               <span class="tx"><b>${esc(label)}</b><small><i class="dot"></i><span data-status></span></small></span>
               <span class="chev" aria-hidden="true">${I.chevron}</span>
-            </a>`).join("")}
+            </a>`,
+          ).join("")}
         </nav>
     <form id="settings" class="settings" autocomplete="off">
       <section class="panel" data-page="general">
@@ -2463,10 +3405,12 @@ function Settings(root, page) {
           <div class="field">
           <input type="hidden" name="languages" id="languages" value="${esc(s.languages)}" />
           <div class="lang-chips" id="lang-chips" role="group" aria-label="Languages">
-            ${[...new Set([...LANGUAGES, ...(s.languages ? s.languages.split(/,\s*/) : [])])].map((l) => {
-              const on = (s.languages || "").split(/,\s*/).includes(l);
-              return `<button type="button" class="fpill ${on ? "on" : ""}" data-lang="${esc(l)}" aria-pressed="${on}">${esc(l)}</button>`;
-            }).join("")}
+            ${[...new Set([...LANGUAGES, ...(s.languages ? s.languages.split(/,\s*/) : [])])]
+              .map((l) => {
+                const on = (s.languages || "").split(/,\s*/).includes(l);
+                return `<button type="button" class="fpill ${on ? "on" : ""}" data-lang="${esc(l)}" aria-pressed="${on}">${esc(l)}</button>`;
+              })
+              .join("")}
           </div>
           <span class="hint">Discover hides books in other languages (one click shows them), and automatic search won’t grab them. A book whose language Narratarr can’t tell is never hidden. For the Audible catalog, also choose the Audible store in that language under Wanted &amp; following.</span>
           </div>
@@ -2493,18 +3437,22 @@ function Settings(root, page) {
           <div class="set-row">
             <label for="audible_region"><b>Audible store for book details</b><small>Covers, series and release dates come from here. Nothing is downloaded from Audible.</small></label>
             <select class="select" id="audible_region" name="audible_region">
-              ${AUDIBLE_STORES
-                .map(([v, l]) => `<option value="${v}" ${s.audible_region === v ? "selected" : ""}>${l}</option>`).join("")}
+              ${AUDIBLE_STORES.map(
+                ([v, l]) =>
+                  `<option value="${v}" ${s.audible_region === v ? "selected" : ""}>${l}</option>`,
+              ).join("")}
             </select>
           </div>
           <div class="field">
             <label><b>More Audible stores to search</b></label>
             <input type="hidden" name="audible_extra_regions" id="audible_extra_regions" value="${esc((s.audible_extra_regions || []).join(", "))}" />
             <div class="lang-chips" id="store-chips" role="group" aria-label="More Audible stores">
-              ${AUDIBLE_STORES.filter(([v]) => v !== (s.audible_region || "us")).map(([v, l]) => {
-                const on = (s.audible_extra_regions || []).includes(v);
-                return `<button type="button" class="fpill ${on ? "on" : ""}" data-store="${v}" aria-pressed="${on}">${l}</button>`;
-              }).join("")}
+              ${AUDIBLE_STORES.filter(([v]) => v !== (s.audible_region || "us"))
+                .map(([v, l]) => {
+                  const on = (s.audible_extra_regions || []).includes(v);
+                  return `<button type="button" class="fpill ${on ? "on" : ""}" data-store="${v}" aria-pressed="${on}">${l}</button>`;
+                })
+                .join("")}
             </div>
             <span class="hint">Books that are only sold in another country, such as French titles on audible.fr, can be found there. Everyone, listeners too, can switch the Audible catalog to these stores for a search, and a search that finds nothing in your main store tries them in this order.</span>
           </div>
@@ -2531,8 +3479,16 @@ function Settings(root, page) {
             <div class="set-row">
               <label for="hardcover_format"><b>Add books as</b><small>What a book from your shelf is wanted as.</small></label>
               <select class="select" id="hardcover_format" name="hardcover_format">
-                ${[["audiobook", "Audiobook"], ["ebook", "Ebook"], ["both", "Audiobook and ebook"]]
-                  .map(([v, l]) => `<option value="${v}" ${s.hardcover_format === v ? "selected" : ""}>${l}</option>`).join("")}
+                ${[
+                  ["audiobook", "Audiobook"],
+                  ["ebook", "Ebook"],
+                  ["both", "Audiobook and ebook"],
+                ]
+                  .map(
+                    ([v, l]) =>
+                      `<option value="${v}" ${s.hardcover_format === v ? "selected" : ""}>${l}</option>`,
+                  )
+                  .join("")}
               </select>
             </div>
             <div class="set-row">
@@ -2698,7 +3654,9 @@ function Settings(root, page) {
     wrap.classList.toggle("home", !key);
     $("#set-title", root).textContent = label;
     $("#set-lede", root).textContent = lede;
-    $$("[data-page]", form).forEach((el) => { el.hidden = el.dataset.page !== shown || (el.id === "abs-check-panel" && !absConnected()); });
+    $$("[data-page]", form).forEach((el) => {
+      el.hidden = el.dataset.page !== shown || (el.id === "abs-check-panel" && !absConnected());
+    });
     $$(".set-nav a", root).forEach((a) => {
       const on = a.dataset.page === shown;
       a.classList.toggle("on", on);
@@ -2717,31 +3675,36 @@ function Settings(root, page) {
   const preview = () => {
     const dir = form.library_dir.value.replace(/\/+$/, "");
     const template = form.folder_template.value || "{author}/{title}";
-    const row = (label, book) => `<div><span>${label}</span>${esc(dir)}/<b>${esc(layoutFolders(template, book).join("/"))}</b></div>`;
+    const row = (label, book) =>
+      `<div><span>${label}</span>${esc(dir)}/<b>${esc(layoutFolders(template, book).join("/"))}</b></div>`;
     const usesSeries = /\{(series|series_number|year)\}/.test(template);
     $("#path-preview", root).innerHTML = template.includes("{kind}")
       ? row("Audiobook", LAYOUT_SAMPLE) + row("Ebook", { ...LAYOUT_SAMPLE, kind: "Ebooks" })
       : usesSeries
-      ? row("In a series", LAYOUT_SAMPLE) + row("On its own", LAYOUT_SAMPLE_SOLO)
-      : row("", LAYOUT_SAMPLE);
+        ? row("In a series", LAYOUT_SAMPLE) + row("On its own", LAYOUT_SAMPLE_SOLO)
+        : row("", LAYOUT_SAMPLE);
   };
-  $$(".layout-vars [data-var]", root).forEach((b) => b.addEventListener("click", () => {
-    const input = form.folder_template;
-    const at = input.selectionStart ?? input.value.length;
-    const end = input.selectionEnd ?? at;
-    const text = `{${b.dataset.var}}`;
-    input.value = input.value.slice(0, at) + text + input.value.slice(end);
-    input.focus();
-    input.setSelectionRange(at + text.length, at + text.length);
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-  }));
+  $$(".layout-vars [data-var]", root).forEach((b) =>
+    b.addEventListener("click", () => {
+      const input = form.folder_template;
+      const at = input.selectionStart ?? input.value.length;
+      const end = input.selectionEnd ?? at;
+      const text = `{${b.dataset.var}}`;
+      input.value = input.value.slice(0, at) + text + input.value.slice(end);
+      input.focus();
+      input.setSelectionRange(at + text.length, at + text.length);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    }),
+  );
   $("#store-chips", root).onclick = (e) => {
     const b = e.target.closest("[data-store]");
     if (!b) return;
     const on = b.getAttribute("aria-pressed") !== "true";
     b.classList.toggle("on", on);
     b.setAttribute("aria-pressed", String(on));
-    form.audible_extra_regions.value = $$("[data-store][aria-pressed=true]", root).map((x) => x.dataset.store).join(", ");
+    form.audible_extra_regions.value = $$("[data-store][aria-pressed=true]", root)
+      .map((x) => x.dataset.store)
+      .join(", ");
     form.audible_extra_regions.dispatchEvent(new Event("input", { bubbles: true }));
   };
 
@@ -2751,29 +3714,37 @@ function Settings(root, page) {
     const on = b.getAttribute("aria-pressed") !== "true";
     b.classList.toggle("on", on);
     b.setAttribute("aria-pressed", String(on));
-    form.languages.value = $$("[data-lang][aria-pressed=true]", root).map((x) => x.dataset.lang).join(", ");
+    form.languages.value = $$("[data-lang][aria-pressed=true]", root)
+      .map((x) => x.dataset.lang)
+      .join(", ");
     form.languages.dispatchEvent(new Event("input", { bubbles: true }));
   };
 
   const presetsBox = $(".layout-presets", root);
-  const markPreset = () => $$("[data-preset]", presetsBox).forEach((b) => {
-    const on = b.dataset.preset === form.folder_template.value.trim();
-    b.classList.toggle("on", on);
-    b.setAttribute("aria-pressed", String(on));
-  });
+  const markPreset = () =>
+    $$("[data-preset]", presetsBox).forEach((b) => {
+      const on = b.dataset.preset === form.folder_template.value.trim();
+      b.classList.toggle("on", on);
+      b.setAttribute("aria-pressed", String(on));
+    });
   presetsBox.onclick = (e) => {
     const b = e.target.closest("[data-preset]");
     if (!b) return;
     form.folder_template.value = b.dataset.preset;
     form.folder_template.dispatchEvent(new Event("input", { bubbles: true }));
   };
-  form.folder_template.oninput = () => { preview(); markPreset(); };
+  form.folder_template.oninput = () => {
+    preview();
+    markPreset();
+  };
   form.library_dir.oninput = preview;
   preview();
 
   const hints = {
-    audiobookbay: "Searches the site directly. Free, but needs exact spelling (smart search fixes that) and stops working when the site is down.",
-    brave: "Searches Brave’s copy of the site. Faster, fixes spelling on its own, and keeps working when AudiobookBay is slow. Very new uploads may not be indexed yet.",
+    audiobookbay:
+      "Searches the site directly. Free, but needs exact spelling (smart search fixes that) and stops working when the site is down.",
+    brave:
+      "Searches Brave’s copy of the site. Faster, fixes spelling on its own, and keeps working when AudiobookBay is slow. Very new uploads may not be indexed yet.",
   };
   const setProvider = (v) => {
     form.search_provider.value = v;
@@ -2786,7 +3757,10 @@ function Settings(root, page) {
     dirty();
   };
   setProvider(s.search_provider || "audiobookbay");
-  $("#provider", root).onclick = (e) => { const b = e.target.closest("[data-v]"); if (b) setProvider(b.dataset.v); };
+  $("#provider", root).onclick = (e) => {
+    const b = e.target.closest("[data-v]");
+    if (b) setProvider(b.dataset.v);
+  };
 
   // Client pickers: show the fields for the chosen client only.
   const choose = (group, v) => {
@@ -2795,7 +3769,9 @@ function Settings(root, page) {
       b.classList.toggle("on", b.dataset.v === v);
       b.setAttribute("aria-checked", b.dataset.v === v);
     });
-    $$(`[data-for^="${group}:"]`, root).forEach((el) => { el.hidden = el.dataset.for !== `${group}:${v}`; });
+    $$(`[data-for^="${group}:"]`, root).forEach((el) => {
+      el.hidden = el.dataset.for !== `${group}:${v}`;
+    });
     dirty();
   };
   // ---- download clients, as a list ---------------------------------------------------------
@@ -2805,60 +3781,191 @@ function Settings(root, page) {
   const clientBox = $("#client-list", root);
   const routeBox = $("#route-list", root);
   const coverageBox = $("#route-coverage", root);
-  const TYPE_LABEL = { sabnzbd: "SABnzbd", nzbget: "NZBGet", qbittorrent: "qBittorrent", transmission: "Transmission",
-    deluge: "Deluge", realdebrid: "Real-Debrid", alldebrid: "AllDebrid", torbox: "TorBox", premiumize: "Premiumize" };
+  const TYPE_LABEL = {
+    sabnzbd: "SABnzbd",
+    nzbget: "NZBGet",
+    qbittorrent: "qBittorrent",
+    transmission: "Transmission",
+    deluge: "Deluge",
+    realdebrid: "Real-Debrid",
+    alldebrid: "AllDebrid",
+    torbox: "TorBox",
+    premiumize: "Premiumize",
+  };
   const GROUPS = [
-    ["In the cloud", [["realdebrid", "Premium account"], ["alldebrid", "Premium account"], ["torbox", "TorBox account"], ["premiumize", "Premium account"]]],
-    ["On this machine", [["qbittorrent", "Seeds from here"], ["transmission", "Seeds from here"], ["deluge", "Seeds from here"]]],
-    ["Usenet", [["sabnzbd", "Usenet"], ["nzbget", "Usenet"]]],
+    [
+      "In the cloud",
+      [
+        ["realdebrid", "Premium account"],
+        ["alldebrid", "Premium account"],
+        ["torbox", "TorBox account"],
+        ["premiumize", "Premium account"],
+      ],
+    ],
+    [
+      "On this machine",
+      [
+        ["qbittorrent", "Seeds from here"],
+        ["transmission", "Seeds from here"],
+        ["deluge", "Seeds from here"],
+      ],
+    ],
+    [
+      "Usenet",
+      [
+        ["sabnzbd", "Usenet"],
+        ["nzbget", "Usenet"],
+      ],
+    ],
   ];
   const WHERE = Object.fromEntries(GROUPS.flatMap(([, list]) => list));
-  const link = (href, text) => `<a href="${href}" target="_blank" rel="noopener" style="color:var(--accent)">${text}</a>`;
+  const link = (href, text) =>
+    `<a href="${href}" target="_blank" rel="noopener" style="color:var(--accent)">${text}</a>`;
   // What each type needs, in the order a person fills it in: [field, label, placeholder, hint].
   const FIELDS = {
-    sabnzbd: [["url", "SABnzbd address", "http://localhost:8080"], ["api_key", "API key", "Config → General → API Key"],
-      ["category", "Category", "audiobooks", "Optional. Must already exist in SABnzbd. Leave it empty to use its default."]],
-    nzbget: [["url", "NZBGet address", "http://localhost:6789"], ["username", "Username", "nzbget"], ["password", "Password"],
-      ["category", "Category", "Audiobooks", "The username and password are NZBGet’s ControlUsername and ControlPassword (Settings → Security)."]],
-    qbittorrent: [["url", "qBittorrent Web UI address", "http://localhost:8080"], ["username", "Username"], ["password", "Password"],
+    sabnzbd: [
+      ["url", "SABnzbd address", "http://localhost:8080"],
+      ["api_key", "API key", "Config → General → API Key"],
+      [
+        "category",
+        "Category",
+        "audiobooks",
+        "Optional. Must already exist in SABnzbd. Leave it empty to use its default.",
+      ],
+    ],
+    nzbget: [
+      ["url", "NZBGet address", "http://localhost:6789"],
+      ["username", "Username", "nzbget"],
+      ["password", "Password"],
+      [
+        "category",
+        "Category",
+        "Audiobooks",
+        "The username and password are NZBGet’s ControlUsername and ControlPassword (Settings → Security).",
+      ],
+    ],
+    qbittorrent: [
+      ["url", "qBittorrent Web UI address", "http://localhost:8080"],
+      ["username", "Username"],
+      ["password", "Password"],
       ["category", "Category", "audiobooks"],
-      ["save_path", "Download folder", "qBittorrent’s default", "Optional. Where qBittorrent saves Narratarr’s books, as qBittorrent sees it, e.g. <code>/data/torrents/books</code>."]],
-    transmission: [["url", "Transmission address", "http://localhost:9091"], ["username", "Username", "If you set one"], ["password", "Password"],
-      ["category", "Label", "", "Optional. Added to every torrent Narratarr sends, so you can filter them in Transmission 3.0 or later."],
-      ["save_path", "Download folder", "Transmission’s default", "Optional. Where Transmission saves Narratarr’s books, as Transmission sees it."]],
-    deluge: [["url", "Deluge Web UI address", "http://localhost:8112"],
-      ["password", "Password", "", "Deluge’s web password (it has no username). Set it under Preferences → Interface → Password."],
-      ["save_path", "Download folder", "Deluge’s default", "Optional. Where Deluge saves Narratarr’s books, as Deluge sees it."]],
-    realdebrid: [["api_key", "Real-Debrid API key", "Paste your private API token", `Find it at ${link("https://real-debrid.com/apitoken", "real-debrid.com/apitoken")}.`]],
-    alldebrid: [["api_key", "AllDebrid API key", "Paste an API key", `Create one at ${link("https://alldebrid.com/apikeys", "alldebrid.com/apikeys")}.`]],
-    torbox: [["api_key", "TorBox API key", "Paste an API key", `Find it in TorBox under ${link("https://torbox.app/settings", "Settings → API key")}.`]],
-    premiumize: [["api_key", "Premiumize API key", "Paste your API key", `Find it at ${link("https://www.premiumize.me/account", "premiumize.me/account")}.`]],
+      [
+        "save_path",
+        "Download folder",
+        "qBittorrent’s default",
+        "Optional. Where qBittorrent saves Narratarr’s books, as qBittorrent sees it, e.g. <code>/data/torrents/books</code>.",
+      ],
+    ],
+    transmission: [
+      ["url", "Transmission address", "http://localhost:9091"],
+      ["username", "Username", "If you set one"],
+      ["password", "Password"],
+      [
+        "category",
+        "Label",
+        "",
+        "Optional. Added to every torrent Narratarr sends, so you can filter them in Transmission 3.0 or later.",
+      ],
+      [
+        "save_path",
+        "Download folder",
+        "Transmission’s default",
+        "Optional. Where Transmission saves Narratarr’s books, as Transmission sees it.",
+      ],
+    ],
+    deluge: [
+      ["url", "Deluge Web UI address", "http://localhost:8112"],
+      [
+        "password",
+        "Password",
+        "",
+        "Deluge’s web password (it has no username). Set it under Preferences → Interface → Password.",
+      ],
+      [
+        "save_path",
+        "Download folder",
+        "Deluge’s default",
+        "Optional. Where Deluge saves Narratarr’s books, as Deluge sees it.",
+      ],
+    ],
+    realdebrid: [
+      [
+        "api_key",
+        "Real-Debrid API key",
+        "Paste your private API token",
+        `Find it at ${link("https://real-debrid.com/apitoken", "real-debrid.com/apitoken")}.`,
+      ],
+    ],
+    alldebrid: [
+      [
+        "api_key",
+        "AllDebrid API key",
+        "Paste an API key",
+        `Create one at ${link("https://alldebrid.com/apikeys", "alldebrid.com/apikeys")}.`,
+      ],
+    ],
+    torbox: [
+      [
+        "api_key",
+        "TorBox API key",
+        "Paste an API key",
+        `Find it in TorBox under ${link("https://torbox.app/settings", "Settings → API key")}.`,
+      ],
+    ],
+    premiumize: [
+      [
+        "api_key",
+        "Premiumize API key",
+        "Paste your API key",
+        `Find it at ${link("https://www.premiumize.me/account", "premiumize.me/account")}.`,
+      ],
+    ],
   };
   const DELETE_AFTER = {
     realdebrid: ["delete_from_rd_after", "Remove torrents from Real-Debrid after downloading"],
     alldebrid: ["delete_from_ad_after", "Remove torrents from AllDebrid after downloading"],
     torbox: ["delete_from_tb_after", "Remove torrents from TorBox after downloading"],
-    premiumize: ["delete_from_pm_after", "Remove torrents and their files from Premiumize after downloading"],
+    premiumize: [
+      "delete_from_pm_after",
+      "Remove torrents and their files from Premiumize after downloading",
+    ],
   };
   // AllDebrid and TorBox can connect with a short code entered on their site instead of a pasted key.
   const PIN = {
-    alldebrid: { site: "alldebrid.com", where: "alldebrid.com/pin", start: "/api/settings/alldebrid/pin", check: "/api/settings/alldebrid/pin/check" },
-    torbox: { site: "TorBox", where: "TorBox’s sign-in page", start: "/api/settings/torbox/code", check: "/api/settings/torbox/code/check" },
+    alldebrid: {
+      site: "alldebrid.com",
+      where: "alldebrid.com/pin",
+      start: "/api/settings/alldebrid/pin",
+      check: "/api/settings/alldebrid/pin/check",
+    },
+    torbox: {
+      site: "TorBox",
+      where: "TorBox’s sign-in page",
+      start: "/api/settings/torbox/code",
+      check: "/api/settings/torbox/code/check",
+    },
   };
-  const deleteAfter = Object.fromEntries(Object.values(DELETE_AFTER).map(([name]) => [name, Boolean(s[name])]));
+  const deleteAfter = Object.fromEntries(
+    Object.values(DELETE_AFTER).map(([name]) => [name, Boolean(s[name])]),
+  );
   let clients = [];
   let routes = [];
   let advertised = [];
   let defaultClient = s.default_client || "";
   let fallbackClient = s.debrid_fallback_client || "";
-  let defaults = { torrent: "", usenet: "" };  // where a release no rule matches goes, per protocol
+  let defaults = { torrent: "", usenet: "" }; // where a release no rule matches goes, per protocol
   const DELIVERY = { sabnzbd: "usenet", nzbget: "usenet" };
   const deliveryOf = (c) => DELIVERY[c.type] || "torrent";
 
   const hidden = (name, value) => {
     // Inside the form, not the panel: save() posts FormData(form) and would never see it otherwise.
     let input = form.querySelector(`input[type=hidden][name=${name}]`);
-    if (!input) { input = document.createElement("input"); input.type = "hidden"; input.name = name; form.appendChild(input); }
+    if (!input) {
+      input = document.createElement("input");
+      input.type = "hidden";
+      input.name = name;
+      form.appendChild(input);
+    }
     input.value = value;
   };
   const sync = () => {
@@ -2868,7 +3975,8 @@ function Settings(root, page) {
     hidden("debrid_fallback_client", fallbackClient);
     dirty();
   };
-  const clientName = (c) => esc(TYPE_LABEL[c.type] || c.type) + (c.id === c.type ? "" : ` · ${esc(c.id)}`);
+  const clientName = (c) =>
+    esc(TYPE_LABEL[c.type] || c.type) + (c.id === c.type ? "" : ` · ${esc(c.id)}`);
   const hasKey = (c) => Boolean(c.api_key);
 
   const fieldHTML = (c, [k, label, placeholder = "", hint = ""]) => `
@@ -2885,8 +3993,11 @@ function Settings(root, page) {
     return `<div class="pin-card">
       <div class="pin-start" data-pin-start>
         <div><b>${on ? `${name} is connected` : "Connect with a code"}</b>
-          <p class="desc">${on ? "Test checks the account. To use a different one, connect again."
-            : `Narratarr shows a short code, you enter it on ${PIN[c.type].site}, and you’re connected. There’s no key to copy, and your password never comes here.`}</p></div>
+          <p class="desc">${
+            on
+              ? "Test checks the account. To use a different one, connect again."
+              : `Narratarr shows a short code, you enter it on ${PIN[c.type].site}, and you’re connected. There’s no key to copy, and your password never comes here.`
+          }</p></div>
         <div class="pin-actions"><button class="btn ${on ? "" : "primary"}" type="button" data-act="pin">${on ? "Connect again" : `Connect ${name}`}</button></div>
       </div>
       <div class="pin-wait" data-pin-wait hidden>
@@ -2908,9 +4019,12 @@ function Settings(root, page) {
     const firstOfType = new Set();
     // Only a local torrent client is a valid fallback: the point is to download and seed
     // on the user's own machine when a cloud service doesn't have the release cached.
-    const localTorrent = clients.filter((c) => deliveryOf(c) === "torrent" && !DEBRID.includes(c.type));
+    const localTorrent = clients.filter(
+      (c) => deliveryOf(c) === "torrent" && !DEBRID.includes(c.type),
+    );
     if (fallbackClient && !localTorrent.some((c) => c.id === fallbackClient)) fallbackClient = "";
-    const fallbackHTML = localTorrent.length ? `
+    const fallbackHTML = localTorrent.length
+      ? `
       <div class="field" style="margin-top:14px">
         <label>When your cloud service hasn't cached a torrent</label>
         <select class="input" data-fallback>
@@ -2918,36 +4032,53 @@ function Settings(root, page) {
           ${localTorrent.map((c) => `<option value="${esc(c.id)}" ${c.id === fallbackClient ? "selected" : ""}>Send it to ${clientName(c)} instead, so it downloads and seeds</option>`).join("")}
         </select>
         <span class="hint">Only when the service says it definitely doesn't have it. If it can't answer, or the service has no cache check, the release still goes to the cloud service.</span>
-      </div>` : "";
+      </div>`
+      : "";
 
-    clientBox.innerHTML = (clients.length ? clients.map((c, i) => {
-      const fields = FIELDS[c.type] || [];
-      const own = fields.filter(([k]) => ["url", "username", "password", "api_key"].includes(k));
-      const extra = fields.filter(([k]) => ["category", "save_path"].includes(k));
-      const del = DELETE_AFTER[c.type] && !firstOfType.has(c.type) ? DELETE_AFTER[c.type] : null;
-      firstOfType.add(c.type);
-      return `
+    clientBox.innerHTML =
+      (clients.length
+        ? clients
+            .map((c, i) => {
+              const fields = FIELDS[c.type] || [];
+              const own = fields.filter(([k]) =>
+                ["url", "username", "password", "api_key"].includes(k),
+              );
+              const extra = fields.filter(([k]) => ["category", "save_path"].includes(k));
+              const del =
+                DELETE_AFTER[c.type] && !firstOfType.has(c.type) ? DELETE_AFTER[c.type] : null;
+              firstOfType.add(c.type);
+              return `
       <div class="client-card" data-i="${i}">
         <div class="client-head">
           <span class="client-name"><b>${clientName(c)}</b>
             <small>${esc(WHERE[c.type] || "")}</small></span>
           <span class="client-tools">
-            ${defaults[deliveryOf(c)] === c.id
-              ? `<span class="client-default" title="Releases no routing rule matches go here">${I.check}Default for ${deliveryOf(c) === "usenet" ? "Usenet" : "torrents"}</span>`
-              : clients.filter((x) => deliveryOf(x) === deliveryOf(c)).length > 1 ? `<button class="btn sm ghost" type="button" data-act="default">Make default</button>` : ""}
+            ${
+              defaults[deliveryOf(c)] === c.id
+                ? `<span class="client-default" title="Releases no routing rule matches go here">${I.check}Default for ${deliveryOf(c) === "usenet" ? "Usenet" : "torrents"}</span>`
+                : clients.filter((x) => deliveryOf(x) === deliveryOf(c)).length > 1
+                  ? `<button class="btn sm ghost" type="button" data-act="default">Make default</button>`
+                  : ""
+            }
             <button class="btn sm" type="button" data-act="test">Test</button>
             <button class="btn sm ghost icon danger" type="button" data-act="remove" aria-label="Remove ${clientName(c)}">${I.trash}</button>
           </span>
         </div>
         ${PIN[c.type] ? pinHTML(c) : ""}
-        ${PIN[c.type] ? `<details class="set-more"${hasKey(c) ? "" : ""}><summary>Use an API key instead</summary>
+        ${
+          PIN[c.type]
+            ? `<details class="set-more"${hasKey(c) ? "" : ""}><summary>Use an API key instead</summary>
             <div class="set-grid">${own.map((f) => fieldHTML(c, f)).join("")}</div></details>`
-          : `<div class="set-grid ${own.length > 2 ? "three" : ""}">${own.map((f) => fieldHTML(c, f)).join("")}</div>`}
+            : `<div class="set-grid ${own.length > 2 ? "three" : ""}">${own.map((f) => fieldHTML(c, f)).join("")}</div>`
+        }
         ${extra.length ? `<div class="set-grid">${extra.map((f) => fieldHTML(c, f)).join("")}</div>` : ""}
         ${del ? `<label class="switch"><input type="checkbox" name="${del[0]}" ${deleteAfter[del[0]] ? "checked" : ""}><i></i>${del[1]}</label>` : ""}
         <div data-out></div>
       </div>`;
-    }).join("") : `<p class="muted client-empty">No download client yet. Add the one you already use.</p>`) + fallbackHTML;
+            })
+            .join("")
+        : `<p class="muted client-empty">No download client yet. Add the one you already use.</p>`) +
+      fallbackHTML;
   };
   // Until the server says otherwise, a protocol's default is its first client.
   const fillDefaults = () => {
@@ -2958,11 +4089,13 @@ function Settings(root, page) {
   };
 
   const drawRoutes = () => {
-    routeBox.innerHTML = routes.map((r, i) => {
-      const named = r.match.indexers || [];
-      // Indexers a rule names that this install no longer advertises still show, so they can be removed.
-      const offer = [...new Set([...advertised, ...named])];
-      return `
+    routeBox.innerHTML =
+      routes
+        .map((r, i) => {
+          const named = r.match.indexers || [];
+          // Indexers a rule names that this install no longer advertises still show, so they can be removed.
+          const offer = [...new Set([...advertised, ...named])];
+          return `
       <div class="route-card" data-i="${i}">
         <div class="route-head">
           <b><span class="route-num">${i + 1}</span>${i === 0 ? "Checked first" : `Then rule ${i + 1}`}</b>
@@ -2982,8 +4115,16 @@ function Settings(root, page) {
         </div>
         <div class="set-grid">
           <div class="field"><label>Kind of book</label><select class="select" data-f="categories">
-            ${[["", "Any"], ["audiobook", "Audiobooks"], ["ebook", "Ebooks"]].map(([v, l]) =>
-              `<option value="${v}" ${((r.match.categories || [])[0] || "") === v ? "selected" : ""}>${l}</option>`).join("")}
+            ${[
+              ["", "Any"],
+              ["audiobook", "Audiobooks"],
+              ["ebook", "Ebooks"],
+            ]
+              .map(
+                ([v, l]) =>
+                  `<option value="${v}" ${((r.match.categories || [])[0] || "") === v ? "selected" : ""}>${l}</option>`,
+              )
+              .join("")}
           </select></div>
           <div class="field"><label>Send to</label><select class="select" data-f="client">
             ${clients.map((c) => `<option value="${esc(c.id)}" ${r.client === c.id ? "selected" : ""}>${clientName(c)}</option>`).join("")}
@@ -2997,16 +4138,25 @@ function Settings(root, page) {
         </details>
         <div data-out></div>
       </div>`;
-    }).join("") || `<p class="muted client-empty">No rules yet: every release goes to the default client, exactly as before.</p>`;
+        })
+        .join("") ||
+      `<p class="muted client-empty">No rules yet: every release goes to the default client, exactly as before.</p>`;
   };
 
   clientBox.oninput = clientBox.onchange = (e) => {
     const card = e.target.closest(".client-card");
     if (!card) return;
     const i = Number(card.dataset.i);
-    if (e.target.type === "checkbox" && e.target.name in deleteAfter) { deleteAfter[e.target.name] = e.target.checked; dirty(); return; }
+    if (e.target.type === "checkbox" && e.target.name in deleteAfter) {
+      deleteAfter[e.target.name] = e.target.checked;
+      dirty();
+      return;
+    }
     const k = e.target.dataset.f;
-    if (k) { clients[i][k] = e.target.value; sync(); }
+    if (k) {
+      clients[i][k] = e.target.value;
+      sync();
+    }
   };
 
   let pinTimer = 0;
@@ -3051,7 +4201,10 @@ function Settings(root, page) {
       }
       $("[data-pin-left]", card).textContent = `Waiting for the code · expires in ${left} min`;
       try {
-        const r = await api(PIN[c.type].check, { method: "POST", body: got.pin ? { pin: code } : { code } });
+        const r = await api(PIN[c.type].check, {
+          method: "POST",
+          body: got.pin ? { pin: code } : { code },
+        });
         if (!wait.isConnected || wait.hidden) return;
         if (r.connected) {
           pinStop(card);
@@ -3061,8 +4214,13 @@ function Settings(root, page) {
           dirty();
           updateRdPill();
           statuses();
-          const fresh = $$(".client-card", clientBox).find((el) => clients[Number(el.dataset.i)]?.type === c.type);
-          if (fresh) $("[data-out]", fresh).innerHTML = r.warning ? badLine(r.warning) : okLine(`${esc(name)} is connected`);
+          const fresh = $$(".client-card", clientBox).find(
+            (el) => clients[Number(el.dataset.i)]?.type === c.type,
+          );
+          if (fresh)
+            $("[data-out]", fresh).innerHTML = r.warning
+              ? badLine(r.warning)
+              : okLine(`${esc(name)} is connected`);
           return;
         }
       } catch (err) {
@@ -3082,38 +4240,76 @@ function Settings(root, page) {
     const i = Number(card.dataset.i);
     const out = $("[data-out]", card);
     const act = btn.dataset.act;
-    if (act === "remove") { pinStop(); clients.splice(i, 1); fillDefaults(); drawClients(); drawRoutes(); sync(); return; }
-    if (act === "default") { defaultClient = clients[i].id; defaults[deliveryOf(clients[i])] = defaultClient; drawClients(); sync(); return; }
+    if (act === "remove") {
+      pinStop();
+      clients.splice(i, 1);
+      fillDefaults();
+      drawClients();
+      drawRoutes();
+      sync();
+      return;
+    }
+    if (act === "default") {
+      defaultClient = clients[i].id;
+      defaults[deliveryOf(clients[i])] = defaultClient;
+      drawClients();
+      sync();
+      return;
+    }
     if (act === "pin") return pinConnect(btn, card, clients[i]);
     if (act === "pin-cancel") return pinStop(card);
     if (act === "test") {
       spinBtn(btn, true);
       try {
-        const got = await api("/api/settings/test-download-client", { method: "POST", body: { entry: clients[i] } });
-        out.innerHTML = okLine(got.summary ? esc(got.summary) : `Connected to ${esc(got.label)} ${esc(got.version || "")}`);
-      } catch (err) { out.innerHTML = badLine(err.message); }
+        const got = await api("/api/settings/test-download-client", {
+          method: "POST",
+          body: { entry: clients[i] },
+        });
+        out.innerHTML = okLine(
+          got.summary
+            ? esc(got.summary)
+            : `Connected to ${esc(got.label)} ${esc(got.version || "")}`,
+        );
+      } catch (err) {
+        out.innerHTML = badLine(err.message);
+      }
       spinBtn(btn, false);
     }
   };
 
   // Adding a client: pick its kind from tiles, the way Downloads always looked.
   const picker = $("#client-picker", root);
-  picker.innerHTML = GROUPS.map(([group, list]) => `
+  picker.innerHTML = GROUPS.map(
+    ([group, list]) => `
     <div class="tile-group"><span class="tile-label" aria-hidden="true">${group}</span>
       <div class="choice-tiles">${list.map(([t, where]) => `<button type="button" data-add="${t}"><b>${TYPE_LABEL[t]}</b><small>${where}</small></button>`).join("")}</div>
-    </div>`).join("");
-  $("#add-client", root).onclick = () => { picker.hidden = !picker.hidden; };
+    </div>`,
+  ).join("");
+  $("#add-client", root).onclick = () => {
+    picker.hidden = !picker.hidden;
+  };
   picker.onclick = (e) => {
     const b = e.target.closest("[data-add]");
     if (!b) return;
     const type = b.dataset.add;
     let id = type;
     for (let n = 2; clients.some((c) => c.id === id); n++) id = `${type}-${n}`;
-    clients.push({ id, type, url: "", username: "", password: "", api_key: "", category: "", save_path: "" });
+    clients.push({
+      id,
+      type,
+      url: "",
+      username: "",
+      password: "",
+      api_key: "",
+      category: "",
+      save_path: "",
+    });
     if (!defaultClient) defaultClient = id;
     fillDefaults();
     picker.hidden = true;
-    drawClients(); drawRoutes(); sync();
+    drawClients();
+    drawRoutes();
+    sync();
     clientBox.lastElementChild?.querySelector("input:not([type=checkbox])")?.focus();
   };
 
@@ -3122,7 +4318,10 @@ function Settings(root, page) {
     const get = (k) => $(`[data-f=${k}]`, row);
     const category = get("categories").value;
     routes[i] = {
-      match: { indexers: $$(".fpill.on", row).map((b) => b.dataset.ix), categories: category ? [category] : [] },
+      match: {
+        indexers: $$(".fpill.on", row).map((b) => b.dataset.ix),
+        categories: category ? [category] : [],
+      },
       client: get("client").value,
       label: get("label").value,
       save_path: get("save_path").value,
@@ -3145,7 +4344,8 @@ function Settings(root, page) {
       const row = pill.closest(".route-card");
       readRoute(row);
       $(".field .hint", row).textContent = routes[Number(row.dataset.i)].match.indexers.length
-        ? "Only releases from these." : "None picked: releases from any indexer.";
+        ? "Only releases from these."
+        : "None picked: releases from any indexer.";
       sync();
       return;
     }
@@ -3154,9 +4354,24 @@ function Settings(root, page) {
     const row = btn.closest(".route-card");
     const i = Number(row.dataset.i);
     const act = btn.dataset.act;
-    if (act === "remove") { routes.splice(i, 1); drawRoutes(); sync(); return; }
-    if (act === "up" && i > 0) { [routes[i - 1], routes[i]] = [routes[i], routes[i - 1]]; drawRoutes(); sync(); return; }
-    if (act === "down" && i < routes.length - 1) { [routes[i + 1], routes[i]] = [routes[i], routes[i + 1]]; drawRoutes(); sync(); return; }
+    if (act === "remove") {
+      routes.splice(i, 1);
+      drawRoutes();
+      sync();
+      return;
+    }
+    if (act === "up" && i > 0) {
+      [routes[i - 1], routes[i]] = [routes[i], routes[i - 1]];
+      drawRoutes();
+      sync();
+      return;
+    }
+    if (act === "down" && i < routes.length - 1) {
+      [routes[i + 1], routes[i]] = [routes[i], routes[i + 1]];
+      drawRoutes();
+      sync();
+      return;
+    }
     if (act === "test") {
       const out = $("[data-out]", row);
       readRoute(row);
@@ -3168,53 +4383,97 @@ function Settings(root, page) {
         const r = routes[i];
         const got = await api("/api/routing/test", {
           method: "POST",
-          body: { indexer: (r.match.indexers || [])[0] || "", kind: (r.match.categories || [])[0] || "audiobook",
-                  protocol: deliveryOf(clients.find((c) => c.id === r.client) || {}) },
+          body: {
+            indexer: (r.match.indexers || [])[0] || "",
+            kind: (r.match.categories || [])[0] || "audiobook",
+            protocol: deliveryOf(clients.find((c) => c.id === r.client) || {}),
+          },
         });
-        const where = got.rule === null ? "No rule matched, so the default" : `Rule ${got.rule + 1} matched`;
-        out.innerHTML = (got.client
-          ? okLine(`${where}: <b>${esc(got.client_label || got.client)}</b> · category <code>${esc(got.args.category || "the client’s own")}</code> · folder <code>${esc(got.args.save_path || "the client’s own")}</code>`)
-          : badLine(got.reason)) + (got.problems || []).map((p) => badLine(p)).join("");
-      } catch (err) { out.innerHTML = badLine(err.message); }
+        const where =
+          got.rule === null ? "No rule matched, so the default" : `Rule ${got.rule + 1} matched`;
+        out.innerHTML =
+          (got.client
+            ? okLine(
+                `${where}: <b>${esc(got.client_label || got.client)}</b> · category <code>${esc(got.args.category || "the client’s own")}</code> · folder <code>${esc(got.args.save_path || "the client’s own")}</code>`,
+              )
+            : badLine(got.reason)) + (got.problems || []).map((p) => badLine(p)).join("");
+      } catch (err) {
+        out.innerHTML = badLine(err.message);
+      }
       spinBtn(btn, false);
     }
   };
 
   $("#add-route", root).onclick = () => {
-    if (!clients.length) { toast("Add a download client first.", { kind: "err" }); return; }
-    routes.push({ match: { indexers: [], categories: ["audiobook"] }, client: clients[0].id, label: "", save_path: "" });
-    drawRoutes(); sync();
+    if (!clients.length) {
+      toast("Add a download client first.", { kind: "err" });
+      return;
+    }
+    routes.push({
+      match: { indexers: [], categories: ["audiobook"] },
+      client: clients[0].id,
+      label: "",
+      save_path: "",
+    });
+    drawRoutes();
+    sync();
   };
 
   const adoptClients = (list) => {
-    clients = (list || []).map((x) => ({ id: x.id, type: x.type, url: x.url || "", username: x.username || "",
-      password: x.password || "", api_key: x.api_key || "", category: x.category || "", save_path: x.save_path || "" }));
+    clients = (list || []).map((x) => ({
+      id: x.id,
+      type: x.type,
+      url: x.url || "",
+      username: x.username || "",
+      password: x.password || "",
+      api_key: x.api_key || "",
+      category: x.category || "",
+      save_path: x.save_path || "",
+    }));
   };
   async function loadRouting() {
     try {
-      const [c, cov] = await Promise.all([api("/api/download-clients"), api("/api/routing/coverage")]);
+      const [c, cov] = await Promise.all([
+        api("/api/download-clients"),
+        api("/api/routing/coverage"),
+      ]);
       adoptClients(c.clients);
       defaultClient = c.default_client || "";
       fallbackClient = c.debrid_fallback_client || "";
       defaults = { torrent: "", usenet: "", ...(c.defaults || {}) };
       advertised = cov.indexers || [];
-      routes = (cov.rules || []).map((r) => ({ match: { indexers: r.match.indexers || [], categories: r.match.categories || [] },
-        client: r.client, label: r.label || "", save_path: r.save_path || "" }));
+      routes = (cov.rules || []).map((r) => ({
+        match: { indexers: r.match.indexers || [], categories: r.match.categories || [] },
+        client: r.client,
+        label: r.label || "",
+        save_path: r.save_path || "",
+      }));
       const uncovered = cov.uncovered || [];
       coverageBox.innerHTML = [
-        !routes.length ? "" : uncovered.length ? `No rule names <b>${uncovered.map(esc).join(", ")}</b>, so those go to the default client.` : "Every indexer you have is named in a rule.",
-        (cov.unknown_clients || []).length ? `<span class="bad-text">${cov.unknown_clients.map(esc).join("; ")}</span>` : "",
-      ].filter(Boolean).join("<br>");
+        !routes.length
+          ? ""
+          : uncovered.length
+            ? `No rule names <b>${uncovered.map(esc).join(", ")}</b>, so those go to the default client.`
+            : "Every indexer you have is named in a rule.",
+        (cov.unknown_clients || []).length
+          ? `<span class="bad-text">${cov.unknown_clients.map(esc).join("; ")}</span>`
+          : "",
+      ]
+        .filter(Boolean)
+        .join("<br>");
     } catch (err) {
       coverageBox.innerHTML = `<span class="bad-text">${esc(err.message)}</span>`;
     }
-    drawClients(); drawRoutes();
+    drawClients();
+    drawRoutes();
     // What was just read from the server is the saved state, not a change.
     const before = { ...collect() };
     sync();
     if (saved) {
       const now = collect();
-      for (const k of Object.keys(now)) if (JSON.stringify(now[k]) !== JSON.stringify(before[k]) || !(k in saved)) saved[k] = now[k];
+      for (const k of Object.keys(now))
+        if (JSON.stringify(now[k]) !== JSON.stringify(before[k]) || !(k in saved))
+          saved[k] = now[k];
     }
     dirty();
   }
@@ -3222,21 +4481,43 @@ function Settings(root, page) {
 
   $$("[data-choice]", root).forEach((seg) => {
     choose(seg.dataset.choice, form[seg.dataset.choice].value);
-    seg.onclick = (e) => { const b = e.target.closest("[data-v]"); if (b) choose(seg.dataset.choice, b.dataset.v); };
+    seg.onclick = (e) => {
+      const b = e.target.closest("[data-v]");
+      if (b) choose(seg.dataset.choice, b.dataset.v);
+    };
   });
 
   // Audible storefronts: an ordered list, because availability is per item and the order is the
   // search order. Up/down move a row, Test asks that storefront about one known book.
   const CODES = ["us", "uk", "ca", "au", "in", "de", "fr", "it", "es", "jp"];
-  const NAMES = { us: "United States", uk: "United Kingdom", ca: "Canada", au: "Australia",
-    in: "India", de: "Germany", fr: "France", it: "Italy", es: "Spain", jp: "Japan" };
+  const NAMES = {
+    us: "United States",
+    uk: "United Kingdom",
+    ca: "Canada",
+    au: "Australia",
+    in: "India",
+    de: "Germany",
+    fr: "France",
+    it: "Italy",
+    es: "Spain",
+    jp: "Japan",
+  };
   const regionBox = $("#audnex-regions", root);
-  const loadRegions = () => (String(form.audnex_regions.value || "uk").split(",").map((r) => r.trim()).filter(Boolean));
-  const storeRegions = (list) => { form.audnex_regions.value = list.join(","); dirty(); };
+  const loadRegions = () =>
+    String(form.audnex_regions.value || "uk")
+      .split(",")
+      .map((r) => r.trim())
+      .filter(Boolean);
+  const storeRegions = (list) => {
+    form.audnex_regions.value = list.join(",");
+    dirty();
+  };
 
   const drawRegions = () => {
     const list = loadRegions();
-    regionBox.innerHTML = list.map((code, i) => `
+    regionBox.innerHTML = list
+      .map(
+        (code, i) => `
       <div class="region-row" data-i="${i}" style="display:flex;align-items:center;gap:6px;margin:4px 0">
         <select class="select" data-region style="max-width:220px" aria-label="Storefront for row ${i + 1}">
           ${CODES.map((c) => `<option value="${c}" ${c === code ? "selected" : ""}>${esc(NAMES[c])} (${c})</option>`).join("")}
@@ -3246,7 +4527,9 @@ function Settings(root, page) {
         <button class="btn" type="button" data-act="test">Test</button>
         <button class="btn" type="button" data-act="del" aria-label="Remove">✕</button>
         <span class="hint" data-out></span>
-      </div>`).join("");
+      </div>`,
+      )
+      .join("");
   };
 
   regionBox.onclick = async (e) => {
@@ -3256,18 +4539,39 @@ function Settings(root, page) {
     const i = Number(row.dataset.i);
     const list = loadRegions();
     const act = btn.dataset.act;
-    if (act === "del") { list.splice(i, 1); storeRegions(list.length ? list : ["uk"]); drawRegions(); return; }
-    if (act === "up" && i > 0) { [list[i - 1], list[i]] = [list[i], list[i - 1]]; storeRegions(list); drawRegions(); return; }
-    if (act === "down" && i < list.length - 1) { [list[i + 1], list[i]] = [list[i], list[i + 1]]; storeRegions(list); drawRegions(); return; }
+    if (act === "del") {
+      list.splice(i, 1);
+      storeRegions(list.length ? list : ["uk"]);
+      drawRegions();
+      return;
+    }
+    if (act === "up" && i > 0) {
+      [list[i - 1], list[i]] = [list[i], list[i - 1]];
+      storeRegions(list);
+      drawRegions();
+      return;
+    }
+    if (act === "down" && i < list.length - 1) {
+      [list[i + 1], list[i]] = [list[i], list[i + 1]];
+      storeRegions(list);
+      drawRegions();
+      return;
+    }
     if (act === "test") {
       const out = $("[data-out]", row);
       spinBtn(btn, true);
       try {
-        const got = await api("/api/settings/test-audnex-region", { method: "POST", body: { region: list[i] } });
+        const got = await api("/api/settings/test-audnex-region", {
+          method: "POST",
+          body: { region: list[i] },
+        });
         out.innerHTML = got.ok
           ? `<div class="rd-result"><span>${got.rating ? `<b>${esc(got.rating)}</b> average` : "no ratings yet"}</span></div>`
-          : `<div class="rd-result bad">${got.reason === "region unavailable"
-              ? "Region unavailable, this book isn&#39;t sold here" : esc(got.reason)}</div>`;
+          : `<div class="rd-result bad">${
+              got.reason === "region unavailable"
+                ? "Region unavailable, this book isn&#39;t sold here"
+                : esc(got.reason)
+            }</div>`;
       } catch (err) {
         out.innerHTML = `<div class="rd-result bad">${esc(err.message)}</div>`;
       }
@@ -3280,7 +4584,10 @@ function Settings(root, page) {
     if (!sel) return;
     const list = loadRegions();
     const i = Number(sel.closest("[data-i]").dataset.i);
-    if (list.includes(sel.value)) { sel.value = list[i]; return; }  // no duplicates: it is an order
+    if (list.includes(sel.value)) {
+      sel.value = list[i];
+      return;
+    } // no duplicates: it is an order
     list[i] = sel.value;
     storeRegions(list);
     drawRegions();
@@ -3294,16 +4601,26 @@ function Settings(root, page) {
     drawRegions();
   };
   drawRegions();
-  $("#open-import", root).onclick = async () => { await save(true); openImport(form.import_folder.value); };
+  $("#open-import", root).onclick = async () => {
+    await save(true);
+    openImport(form.import_folder.value);
+  };
   $("#whats-new", root).onclick = () => openWhatsNew();
   $("#check-updates", root).onclick = async (e) => {
     spinBtn(e.currentTarget, true);
     const u = await checkUpdates(true);
     const out = $("#update-result", root);
-    out.innerHTML = !u?.latest ? `<div class="rd-result bad">Couldn’t reach GitHub to check.</div>`
-      : u.update_available ? okLine(`Narratarr <b>${esc(u.latest.version)}</b> is out · <a href="#" id="see-new" style="color:var(--accent)">see what’s new</a>`)
-      : okLine(`You have the latest version, <b>${esc(u.current)}</b>`);
-    $("#see-new", out)?.addEventListener("click", (ev) => { ev.preventDefault(); openWhatsNew(); });
+    out.innerHTML = !u?.latest
+      ? `<div class="rd-result bad">Couldn’t reach GitHub to check.</div>`
+      : u.update_available
+        ? okLine(
+            `Narratarr <b>${esc(u.latest.version)}</b> is out · <a href="#" id="see-new" style="color:var(--accent)">see what’s new</a>`,
+          )
+        : okLine(`You have the latest version, <b>${esc(u.current)}</b>`);
+    $("#see-new", out)?.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      openWhatsNew();
+    });
     spinBtn(e.currentTarget, false);
   };
 
@@ -3312,26 +4629,43 @@ function Settings(root, page) {
     // A form leaves an unticked box out and sends a ticked one as "on", so a switch could be turned on
     // but never off again. Every switch on the page says true or false instead. Only the ones on the
     // page: a switch that isn't shown (a client's own, say) keeps what's stored.
-    for (const box of form.querySelectorAll('input[type="checkbox"][name]')) data[box.name] = box.checked;
+    for (const box of form.querySelectorAll('input[type="checkbox"][name]'))
+      data[box.name] = box.checked;
     data.max_concurrent = Number(data.max_concurrent) || 1;
     data.auto_search_hours = Number(data.auto_search_hours) || 12;
     // A bare address ("abs.example.com") is something to Find, not a setting to save yet.
-    if (data.audiobookshelf_url && !/^https?:\/\//.test(data.audiobookshelf_url.trim())) delete data.audiobookshelf_url;
+    if (data.audiobookshelf_url && !/^https?:\/\//.test(data.audiobookshelf_url.trim()))
+      delete data.audiobookshelf_url;
     return data;
   };
 
   async function save(quiet) {
     state.settings = await api("/api/settings", { method: "PUT", body: collect() });
     state.libRatings = { at: 0, ratings: {} }; // ratings may have been switched on or off
-    for (const key of ["audiobookshelf_token", "brave_api_key", "prowlarr_api_key", "torznab_api_key"]) {
+    for (const key of [
+      "audiobookshelf_token",
+      "brave_api_key",
+      "prowlarr_api_key",
+      "torznab_api_key",
+    ]) {
       if (form[key]) form[key].value = state.settings[key];
     }
     // The list comes back with its secrets masked, so a typed password doesn't stay in the page.
     adoptClients(state.settings.clients);
     defaultClient = state.settings.default_client || "";
     fallbackClient = state.settings.debrid_fallback_client || "";
-    try { defaults = { torrent: "", usenet: "", ...((await api("/api/download-clients")).defaults || {}) }; } catch { fillDefaults(); }
-    drawClients(); drawRoutes(); sync();
+    try {
+      defaults = {
+        torrent: "",
+        usenet: "",
+        ...((await api("/api/download-clients")).defaults || {}),
+      };
+    } catch {
+      fillDefaults();
+    }
+    drawClients();
+    drawRoutes();
+    sync();
     state.sources = await api("/api/sources"); // the Prowlarr tab appears once it's set up
     updateRdPill();
     if (absConnected() === $("#abs-connected", root).hidden) absShow(); // a pasted API key just connected it
@@ -3348,29 +4682,42 @@ function Settings(root, page) {
   function dirty() {
     if (!saved) return;
     const now = collect();
-    const n = [...new Set([...Object.keys(now), ...Object.keys(saved)])]
-      .filter((k) => JSON.stringify(now[k]) !== JSON.stringify(saved[k])).length;
+    const n = [...new Set([...Object.keys(now), ...Object.keys(saved)])].filter(
+      (k) => JSON.stringify(now[k]) !== JSON.stringify(saved[k]),
+    ).length;
     $("#save-bar", root).hidden = !n;
     $("#save-count", root).textContent = `${n} unsaved change${n === 1 ? "" : "s"}`;
     // Tidy uses the saved layout, so it waits until the one on screen is saved.
-    const unsaved = ["library_dir", "folder_template"].some((k) => JSON.stringify(now[k]) !== JSON.stringify(saved[k]));
+    const unsaved = ["library_dir", "folder_template"].some(
+      (k) => JSON.stringify(now[k]) !== JSON.stringify(saved[k]),
+    );
     $("#tidy-gate", root).hidden = !unsaved;
     $("#tidy-open", root).disabled = unsaved;
   }
-  const tidyUndoState = () => api("/api/tidy/status").then((job) => {
-    const btn = $("#tidy-undo", root);
-    if (btn) btn.hidden = !job.undo;
-  }).catch(() => {});
+  const tidyUndoState = () =>
+    api("/api/tidy/status")
+      .then((job) => {
+        const btn = $("#tidy-undo", root);
+        if (btn) btn.hidden = !job.undo;
+      })
+      .catch(() => {});
   $("#tidy-open", root).onclick = () => openTidy({ onClose: tidyUndoState });
   $("#tidy-fill", root).onclick = async (e) => {
-    const btn = e.currentTarget, note = $("#tidy-fill-note", root);
+    const btn = e.currentTarget,
+      note = $("#tidy-fill-note", root);
     spinBtn(btn, true);
-    let checked = 0, filled = 0, fromAbs = 0;
+    let checked = 0,
+      filled = 0,
+      fromAbs = 0;
     try {
       for (;;) {
         const r = await api("/api/tidy/fill-details", { method: "POST", body: { batch: 12 } });
-        checked += r.checked; filled += r.filled; fromAbs += r.from_audiobookshelf || 0;
-        note.textContent = r.remaining ? `Looked up ${checked} books, filled in ${filled}. ${r.remaining} to go…` : "";
+        checked += r.checked;
+        filled += r.filled;
+        fromAbs += r.from_audiobookshelf || 0;
+        note.textContent = r.remaining
+          ? `Looked up ${checked} books, filled in ${filled}. ${r.remaining} to go…`
+          : "";
         if (!r.remaining || !root.isConnected) break;
       }
       const absNote = fromAbs ? ` ${fromAbs} of them came from your Audiobookshelf library.` : "";
@@ -3384,13 +4731,21 @@ function Settings(root, page) {
     spinBtn(btn, false);
   };
   $("#tidy-undo", root).onclick = async (e) => {
-    const ok = await modal({ title: "Undo the last tidy?", body: "Every folder it moved goes back where it was. Any covers, descriptions and tags it added stay.", confirm: "Undo" });
+    const ok = await modal({
+      title: "Undo the last tidy?",
+      body: "Every folder it moved goes back where it was. Any covers, descriptions and tags it added stay.",
+      confirm: "Undo",
+    });
     if (!ok) return;
     spinBtn(e.currentTarget, true);
     try {
       const r = await api("/api/tidy/undo", { method: "POST" });
-      toast(r.failed.length ? `Put ${r.back} back. ${r.failed.length} couldn’t move: ${r.failed[0].error}` : `Put ${r.back} folder${r.back === 1 ? "" : "s"} back`,
-        { kind: r.failed.length ? "err" : "ok" });
+      toast(
+        r.failed.length
+          ? `Put ${r.back} back. ${r.failed.length} couldn’t move: ${r.failed[0].error}`
+          : `Put ${r.back} folder${r.back === 1 ? "" : "s"} back`,
+        { kind: r.failed.length ? "err" : "ok" },
+      );
       refreshLibrary();
     } catch (err) {
       toast(err.message, { kind: "err" });
@@ -3407,7 +4762,9 @@ function Settings(root, page) {
     fallbackClient = pick.value;
     sync();
   });
-  $("#discard", root).onclick = () => { state.view = Settings(root, page); };
+  $("#discard", root).onclick = () => {
+    state.view = Settings(root, page);
+  };
   $$(".stepper [data-step]", form).forEach((b) => {
     b.onclick = () => {
       const input = form.max_concurrent;
@@ -3420,7 +4777,11 @@ function Settings(root, page) {
     e.preventDefault();
     const btn = $("#save", root);
     spinBtn(btn, true);
-    try { await save(); } catch (err) { toast(err.message, { kind: "err" }); }
+    try {
+      await save();
+    } catch (err) {
+      toast(err.message, { kind: "err" });
+    }
     spinBtn(btn, false);
   };
 
@@ -3439,7 +4800,8 @@ function Settings(root, page) {
     spinBtn(btn, false);
   };
 
-  const okLine = (html) => `<div class="rd-result">${I.check.replace("<svg", '<svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"')}<span>${html}</span></div>`;
+  const okLine = (html) =>
+    `<div class="rd-result">${I.check.replace("<svg", '<svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"')}<span>${html}</span></div>`;
   const tester = (name, describe) => {
     $(`#test-${name}`, root).onclick = async (e) => {
       const btn = e.currentTarget;
@@ -3447,7 +4809,9 @@ function Settings(root, page) {
       spinBtn(btn, true);
       try {
         await save(true);
-        out.innerHTML = okLine(describe(await api(`/api/settings/test-${name}`, { method: "POST" })));
+        out.innerHTML = okLine(
+          describe(await api(`/api/settings/test-${name}`, { method: "POST" })),
+        );
       } catch (err) {
         out.innerHTML = `<div class="rd-result bad">${esc(err.message)}</div>`;
       }
@@ -3461,36 +4825,65 @@ function Settings(root, page) {
       : `<br><small class="warn">None of them offer ebooks (category ${esc(cats)}). Add an indexer that does in Prowlarr to find ebooks.</small>`;
     return `Connected to Prowlarr ${esc(r.version)} · <b>${r.indexers}</b> indexer${r.indexers === 1 ? "" : "s"} enabled${ebooks}`;
   });
-  tester("torznab", (r) => `Connected to ${esc(r.title)} · book search ${r.book_search ? "<b>available</b>" : "not offered"} · <b>${r.categories}</b> categories`);
+  tester(
+    "torznab",
+    (r) =>
+      `Connected to ${esc(r.title)} · book search ${r.book_search ? "<b>available</b>" : "not offered"} · <b>${r.categories}</b> categories`,
+  );
   // Notifications: each destination saves on its own, like people on the Users page, not with the save bar.
   // The editor's fields have no names, so the Settings form (and its save bar) never sees them.
   const notifyList = $("#notify-list", root);
   const editor = $("#notify-editor", root);
   let notifyMeta = null; // events, kinds, fill-ins and the default webhook body, from the server
   const KIND_INFO = {
-    ntfy: { sub: "Phone and desktop", url: "https://ntfy.sh/your-topic", urlHint: "The server and the topic. ntfy.sh works, or your own server.",
-      token: "Access token (optional)", tokenHint: "Only for a protected topic: an access token (tk_…), or user:password." },
-    gotify: { sub: "Self-hosted", url: "https://gotify.example.com", urlHint: "Your Gotify server.",
-      token: "Application token", tokenHint: "In Gotify: Apps → Create application, then copy its token." },
-    discord: { sub: "A channel", url: "https://discord.com/api/webhooks/…",
-      urlHint: "In Discord: Server settings → Integrations → Webhooks → New webhook → Copy webhook URL." },
-    webhook: { sub: "Anything else", url: "https://",
-      urlHint: "Narratarr POSTs the JSON below: Home Assistant, Apprise, n8n, your own scripts…" },
+    ntfy: {
+      sub: "Phone and desktop",
+      url: "https://ntfy.sh/your-topic",
+      urlHint: "The server and the topic. ntfy.sh works, or your own server.",
+      token: "Access token (optional)",
+      tokenHint: "Only for a protected topic: an access token (tk_…), or user:password.",
+    },
+    gotify: {
+      sub: "Self-hosted",
+      url: "https://gotify.example.com",
+      urlHint: "Your Gotify server.",
+      token: "Application token",
+      tokenHint: "In Gotify: Apps → Create application, then copy its token.",
+    },
+    discord: {
+      sub: "A channel",
+      url: "https://discord.com/api/webhooks/…",
+      urlHint:
+        "In Discord: Server settings → Integrations → Webhooks → New webhook → Copy webhook URL.",
+    },
+    webhook: {
+      sub: "Anything else",
+      url: "https://",
+      urlHint: "Narratarr POSTs the JSON below: Home Assistant, Apprise, n8n, your own scripts…",
+    },
   };
   const KIND_ICON = {
-    ntfy: I.bell, gotify: I.bell,
+    ntfy: I.bell,
+    gotify: I.bell,
     discord: '<svg viewBox="0 0 24 24"><path d="M4 5.5h16v10H9l-5 4v-14Z"/></svg>',
     webhook: '<svg viewBox="0 0 24 24"><path d="M9 7 4 12l5 5M15 7l5 5-5 5"/></svg>',
   };
-  const lastLine = (n) => n.last_error ? `<span class="bad"><i class="dot warn"></i>Last one failed: ${esc(n.last_error)}</span>`
-    : n.last_at ? `<span><i class="dot ok"></i>Last sent ${esc(ago(n.last_at))}</span>` : "<span>Nothing sent yet</span>";
+  const lastLine = (n) =>
+    n.last_error
+      ? `<span class="bad"><i class="dot warn"></i>Last one failed: ${esc(n.last_error)}</span>`
+      : n.last_at
+        ? `<span><i class="dot ok"></i>Last sent ${esc(ago(n.last_at))}</span>`
+        : "<span>Nothing sent yet</span>";
   const renderNotifiers = async () => {
     try {
       notifyMeta = await api("/api/settings/notifications");
       const items = notifyMeta.items;
       notifyCount = items.length;
       statuses();
-      notifyList.innerHTML = items.length ? items.map((n) => `
+      notifyList.innerHTML = items.length
+        ? items
+            .map(
+              (n) => `
         <div class="notify-row ${n.enabled ? "" : "off"} ${n.enabled && n.last_error ? "failing" : ""}" data-id="${n.id}">
           <span class="kind-badge" aria-hidden="true">${KIND_ICON[n.kind]}</span>
           <span class="name"><b>${esc(n.name)}</b>
@@ -3502,7 +4895,9 @@ function Settings(root, page) {
             <button class="btn sm ghost" type="button" data-edit>Edit</button>
             <button class="btn sm ghost icon danger" type="button" data-remove aria-label="Remove ${esc(n.name)}">${I.trash}</button>
           </span>
-        </div>`).join("")
+        </div>`,
+            )
+            .join("")
         : `<p class="muted notify-empty">Nothing set up yet. Add ntfy, Gotify, Discord or a webhook to hear when someone adds a book to Wanted.</p>`;
     } catch (err) {
       notifyList.innerHTML = `<div class="rd-result bad">${esc(err.message)}</div>`;
@@ -3527,7 +4922,12 @@ function Settings(root, page) {
     editor.innerHTML = `
       <h4>${n ? `Edit ${esc(n.name)}` : "Add a destination"}</h4>
       <div class="choice-tiles" id="ne-kind" role="radiogroup" aria-label="Send to">
-        ${Object.entries(notifyMeta.kinds).map(([k, label]) => `<button type="button" role="radio" data-v="${k}"><b>${esc(label)}</b><small>${KIND_INFO[k].sub}</small></button>`).join("")}
+        ${Object.entries(notifyMeta.kinds)
+          .map(
+            ([k, label]) =>
+              `<button type="button" role="radio" data-v="${k}"><b>${esc(label)}</b><small>${KIND_INFO[k].sub}</small></button>`,
+          )
+          .join("")}
       </div>
       <div class="set-grid">
         <div class="field"><label for="ne-name">Name</label><input class="input" id="ne-name" maxlength="60" value="${esc(n?.name || "")}" placeholder="My phone" /></div>
@@ -3554,9 +4954,20 @@ function Settings(root, page) {
       </div>
       <fieldset class="ne-events">
         <legend>Tell me when</legend>
-        ${Object.entries(notifyMeta.events).map(([k, label]) => `<label class="switch"><input type="checkbox" value="${k}" ${events.includes(k) ? "checked" : ""}><i></i>${{
-          wanted: "Someone adds a book to Wanted", found: "Searching finds a release to approve", grabbed: "A download starts", completed: "A book is in the library", failed: "A download fails",
-        }[k] || esc(label)}</label>`).join("")}
+        ${Object.entries(notifyMeta.events)
+          .map(
+            ([k, label]) =>
+              `<label class="switch"><input type="checkbox" value="${k}" ${events.includes(k) ? "checked" : ""}><i></i>${
+                {
+                  wanted: "Someone adds a book to Wanted",
+                  found: "Searching finds a release to approve",
+                  grabbed: "A download starts",
+                  completed: "A book is in the library",
+                  failed: "A download fails",
+                }[k] || esc(label)
+              }</label>`,
+          )
+          .join("")}
       </fieldset>
       <div class="cta-row" style="justify-content:flex-start">
         <button class="btn primary" type="button" id="ne-save">Save</button>
@@ -3578,9 +4989,14 @@ function Settings(root, page) {
       $("#ne-webhook", editor).hidden = k !== "webhook";
     };
     setKind(kind);
-    $("#ne-kind", editor).onclick = (e) => { const b = e.target.closest("[data-v]"); if (b) setKind(b.dataset.v); };
-    $("#ne-add-header", editor).onclick = () => $("#ne-headers", editor).insertAdjacentHTML("beforeend", headerRow());
-    $("#ne-headers", editor).onclick = (e) => e.target.closest("[data-drop]")?.closest(".hrow").remove();
+    $("#ne-kind", editor).onclick = (e) => {
+      const b = e.target.closest("[data-v]");
+      if (b) setKind(b.dataset.v);
+    };
+    $("#ne-add-header", editor).onclick = () =>
+      $("#ne-headers", editor).insertAdjacentHTML("beforeend", headerRow());
+    $("#ne-headers", editor).onclick = (e) =>
+      e.target.closest("[data-drop]")?.closest(".hrow").remove();
     editor.onclick = (e) => {
       const fill = e.target.closest("[data-var]");
       if (!fill) return;
@@ -3590,7 +5006,9 @@ function Settings(root, page) {
       box.focus();
     };
     // Enter in a field here must not submit the Settings form around it.
-    editor.onkeydown = (e) => { if (e.key === "Enter" && e.target.tagName !== "TEXTAREA") e.preventDefault(); };
+    editor.onkeydown = (e) => {
+      if (e.key === "Enter" && e.target.tagName !== "TEXTAREA") e.preventDefault();
+    };
     $("#ne-cancel", editor).onclick = closeEditor;
     $("#ne-save", editor).onclick = async (e) => {
       const btn = e.currentTarget;
@@ -3599,16 +5017,24 @@ function Settings(root, page) {
         name: $("#ne-name", editor).value,
         url: $("#ne-url", editor).value,
         token: KIND_INFO[kind].token ? $("#ne-token", editor).value : "",
-        headers: $$("#ne-headers .hrow", editor).map((r) => ({ name: $('[data-h="name"]', r).value, value: $('[data-h="value"]', r).value })),
+        headers: $$("#ne-headers .hrow", editor).map((r) => ({
+          name: $('[data-h="name"]', r).value,
+          value: $('[data-h="value"]', r).value,
+        })),
         body: kind === "webhook" ? $("#ne-body", editor).value : "",
         events: $$(".ne-events input:checked", editor).map((i) => i.value),
       };
       spinBtn(btn, true);
       try {
-        await api(n ? `/api/settings/notifications/${n.id}` : "/api/settings/notifications", { method: n ? "PUT" : "POST", body });
+        await api(n ? `/api/settings/notifications/${n.id}` : "/api/settings/notifications", {
+          method: n ? "PUT" : "POST",
+          body,
+        });
         closeEditor();
         await renderNotifiers();
-        toast(n ? "Destination saved" : "Destination added. Choose Test to send one now.", { kind: "ok" });
+        toast(n ? "Destination saved" : "Destination added. Choose Test to send one now.", {
+          kind: "ok",
+        });
       } catch (err) {
         toast(err.message, { kind: "err" });
         spinBtn(btn, false);
@@ -3622,7 +5048,10 @@ function Settings(root, page) {
     if (!box) return;
     const id = box.closest(".notify-row").dataset.id;
     try {
-      await api(`/api/settings/notifications/${id}`, { method: "PUT", body: { enabled: box.checked } });
+      await api(`/api/settings/notifications/${id}`, {
+        method: "PUT",
+        body: { enabled: box.checked },
+      });
     } catch (err) {
       toast(err.message, { kind: "err" });
     }
@@ -3646,7 +5075,12 @@ function Settings(root, page) {
       return renderNotifiers();
     }
     if (e.target.closest("[data-remove]")) {
-      const ok = await modal({ title: `Remove ${n.name}?`, body: "Narratarr will stop sending notifications there.", confirm: "Remove", danger: true });
+      const ok = await modal({
+        title: `Remove ${n.name}?`,
+        body: "Narratarr will stop sending notifications there.",
+        confirm: "Remove",
+        danger: true,
+      });
       if (!ok) return;
       try {
         await api(`/api/settings/notifications/${n.id}`, { method: "DELETE" });
@@ -3660,37 +5094,71 @@ function Settings(root, page) {
   renderNotifiers();
 
   // The event log: what Narratarr announced, and where each event went. Refreshes itself while open.
-  const LOG_EVENTS = [["", "All", ""], ["wanted", "Requests", "accent"], ["found", "Found", "accent"], ["grabbed", "Started", "info"], ["completed", "Finished", "ok"], ["failed", "Failed", "bad"]];
-  const logState = { event: "", q: "", items: [], more: false, open: new Set(), counts: {}, kept: 500 };
+  const LOG_EVENTS = [
+    ["", "All", ""],
+    ["wanted", "Requests", "accent"],
+    ["found", "Found", "accent"],
+    ["grabbed", "Started", "info"],
+    ["completed", "Finished", "ok"],
+    ["failed", "Failed", "bad"],
+  ];
+  const logState = {
+    event: "",
+    q: "",
+    items: [],
+    more: false,
+    open: new Set(),
+    counts: {},
+    kept: 500,
+  };
   const logList = $("#log-list", root);
   const logStamp = (at) => {
     const d = new Date(at * 1000);
-    const time = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-    return d.toDateString() === new Date().toDateString() ? time : `${d.toLocaleDateString(undefined, { month: "short", day: "numeric" })} ${time}`;
+    const time = d.toLocaleTimeString(undefined, {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+    return d.toDateString() === new Date().toDateString()
+      ? time
+      : `${d.toLocaleDateString(undefined, { month: "short", day: "numeric" })} ${time}`;
   };
   const sentChip = (d) => {
-    const [cls, mark] = { sent: ["ok", "✓"], failed: ["bad", "✕"], sending: ["", "…"] }[d.state] || ["", "–"];
+    const [cls, mark] = { sent: ["ok", "✓"], failed: ["bad", "✕"], sending: ["", "…"] }[
+      d.state
+    ] || ["", "–"];
     return `<span class="sent-chip ${cls}">${esc(d.name)} ${mark}</span>`;
   };
   const detailLine = (d) => {
     const kind = notifyMeta?.kinds?.[d.kind] || d.kind;
-    const text = d.state === "sent" ? `Sent in ${(d.ms / 1000).toFixed(1)} s` : d.state === "failed" ? d.error
-      : d.state === "sending" ? "Sending…" : d.error || "Not sent";
+    const text =
+      d.state === "sent"
+        ? `Sent in ${(d.ms / 1000).toFixed(1)} s`
+        : d.state === "failed"
+          ? d.error
+          : d.state === "sending"
+            ? "Sending…"
+            : d.error || "Not sent";
     return `<div class="log-dest ${d.state === "failed" ? "bad" : d.state === "sent" ? "ok" : ""}"><i aria-hidden="true"></i>
       <span><b>${esc(d.name)}</b> <small>· ${esc(kind)}</small><br><span class="why">${esc(text)}</span></span>
       ${d.state === "failed" ? `<button class="btn sm" type="button" data-edit-dest="${d.id}">Edit destination</button>` : ""}</div>`;
   };
   const renderLog = () => {
     const total = Object.values(logState.counts).reduce((a, b) => a + b, 0);
-    $("#log-filters", root).innerHTML = LOG_EVENTS.map(([key, label, tone]) => `
+    $("#log-filters", root).innerHTML = LOG_EVENTS.map(
+      ([key, label, tone]) => `
       <button type="button" role="radio" aria-checked="${logState.event === key}" class="fpill ${logState.event === key ? "on" : ""}" data-log-event="${key}">
-        ${tone ? `<i class="dot ${tone}" aria-hidden="true"></i>` : ""}${label} <small>${key ? logState.counts[key] || 0 : total}</small></button>`).join("");
-    $("#log-kept", root).textContent = `Narratarr keeps the most recent ${logState.kept} events here. Older ones are still in docker logs.`;
+        ${tone ? `<i class="dot ${tone}" aria-hidden="true"></i>` : ""}${label} <small>${key ? logState.counts[key] || 0 : total}</small></button>`,
+    ).join("");
+    $("#log-kept", root).textContent =
+      `Narratarr keeps the most recent ${logState.kept} events here. Older ones are still in docker logs.`;
     $("#log-more", root).hidden = !logState.more;
-    logList.innerHTML = logState.items.length ? logState.items.map((e) => {
-      const open = logState.open.has(e.id);
-      const inLib = e.book_id && state.library.some((b) => b.id === e.book_id);
-      return `
+    logList.innerHTML = logState.items.length
+      ? logState.items
+          .map((e) => {
+            const open = logState.open.has(e.id);
+            const inLib = e.book_id && state.library.some((b) => b.id === e.book_id);
+            return `
       <li class="log-row ${open ? "open" : ""}" data-eid="${e.id}">
         <button type="button" class="log-line" aria-expanded="${open}">
           <time>${esc(logStamp(e.at))}</time>
@@ -3699,17 +5167,24 @@ function Settings(root, page) {
           <span class="sent">${e.deliveries.length ? e.deliveries.map(sentChip).join("") : '<span class="sent-chip">Log only</span>'}</span>
           ${I.chevron}
         </button>
-        ${open ? `<div class="log-detail">
+        ${
+          open
+            ? `<div class="log-detail">
           <pre>${esc(e.line)}</pre>
           ${e.deliveries.map(detailLine).join("")}
           ${inLib ? `<button type="button" class="link" data-open-book="${e.book_id}">Open the book</button>` : ""}
-        </div>` : ""}
+        </div>`
+            : ""
+        }
       </li>`;
-    }).join("") : `<li class="log-empty">${logState.q || logState.event ? "Nothing matches." : "Nothing has happened yet. Requests, downloads and failures show up here as they happen."}</li>`;
+          })
+          .join("")
+      : `<li class="log-empty">${logState.q || logState.event ? "Nothing matches." : "Nothing has happened yet. Requests, downloads and failures show up here as they happen."}</li>`;
   };
   const loadLog = async (older = false) => {
     const params = new URLSearchParams({ event: logState.event, q: logState.q, limit: "50" });
-    if (older && logState.items.length) params.set("before", logState.items[logState.items.length - 1].id);
+    if (older && logState.items.length)
+      params.set("before", logState.items[logState.items.length - 1].id);
     try {
       const r = await api(`/api/settings/notifications/events?${params}`);
       logState.items = older ? [...logState.items, ...r.items] : r.items;
@@ -3729,13 +5204,23 @@ function Settings(root, page) {
   };
   let logTimer = 0;
   const logQ = $("#log-q", root);
-  logQ.oninput = () => { clearTimeout(logTimer); logTimer = setTimeout(() => { logState.q = logQ.value.trim(); loadLog(); }, 300); };
-  logQ.onkeydown = (e) => { if (e.key === "Enter") e.preventDefault(); }; // it lives inside the settings form
+  logQ.oninput = () => {
+    clearTimeout(logTimer);
+    logTimer = setTimeout(() => {
+      logState.q = logQ.value.trim();
+      loadLog();
+    }, 300);
+  };
+  logQ.onkeydown = (e) => {
+    if (e.key === "Enter") e.preventDefault();
+  }; // it lives inside the settings form
   $("#log-more", root).onclick = () => loadLog(true);
   $("#log-copy", root).onclick = async (e) => {
     const btn = e.currentTarget;
     try {
-      const text = await fetch("/api/settings/notifications/events.log", { credentials: "same-origin" }).then((r) => {
+      const text = await fetch("/api/settings/notifications/events.log", {
+        credentials: "same-origin",
+      }).then((r) => {
         if (!r.ok) throw new Error("Couldn’t read the event log.");
         return r.text();
       });
@@ -3750,8 +5235,10 @@ function Settings(root, page) {
     const edit = e.target.closest("[data-edit-dest]");
     if (edit) {
       const n = notifyMeta?.items.find((x) => x.id === Number(edit.dataset.editDest));
-      if (n) { openEditor(n); editor.scrollIntoView({ behavior: "smooth", block: "center" }); }
-      else toast("That destination has been removed.", { kind: "err" });
+      if (n) {
+        openEditor(n);
+        editor.scrollIntoView({ behavior: "smooth", block: "center" });
+      } else toast("That destination has been removed.", { kind: "err" });
       return;
     }
     const book = e.target.closest("[data-open-book]");
@@ -3759,7 +5246,8 @@ function Settings(root, page) {
     const row = e.target.closest(".log-line");
     if (!row) return;
     const id = Number(row.closest("[data-eid]").dataset.eid);
-    if (logState.open.has(id)) logState.open.delete(id); else logState.open.add(id);
+    if (logState.open.has(id)) logState.open.delete(id);
+    else logState.open.add(id);
     renderLog();
   };
   loadLog();
@@ -3774,7 +5262,8 @@ function Settings(root, page) {
 
   // Audiobookshelf: find the server, sign in once (which creates an API key), pick a library.
   let absServer = null; // what Find last found: {url, version, ready, password_login, insecure}
-  const absConnected = () => Boolean(state.settings.audiobookshelf_url && state.settings.audiobookshelf_token);
+  const absConnected = () =>
+    Boolean(state.settings.audiobookshelf_url && state.settings.audiobookshelf_token);
   const absShow = async (libs) => {
     const on = absConnected();
     $("#abs-connected", root).hidden = !on;
@@ -3791,12 +5280,24 @@ function Settings(root, page) {
       const r = libs || (await api("/api/audiobookshelf/libraries"));
       const sel = form.audiobookshelf_library_id;
       const known = r.libraries.some((l) => l.id === r.library_id);
-      sel.innerHTML = (known ? "" : `<option value="">Choose a library</option>`)
-        + r.libraries.map((l) => `<option value="${esc(l.id)}" ${l.id === r.library_id ? "selected" : ""}>${esc(l.name)}</option>`).join("");
+      sel.innerHTML =
+        (known ? "" : `<option value="">Choose a library</option>`) +
+        r.libraries
+          .map(
+            (l) =>
+              `<option value="${esc(l.id)}" ${l.id === r.library_id ? "selected" : ""}>${esc(l.name)}</option>`,
+          )
+          .join("");
       const ebookId = r.ebook_library_id || "";
-      form.audiobookshelf_ebook_library_id.innerHTML = `<option value="">The same library</option>`
-        + r.libraries.filter((l) => l.id !== r.library_id)
-          .map((l) => `<option value="${esc(l.id)}" ${l.id === ebookId ? "selected" : ""}>${esc(l.name)}</option>`).join("");
+      form.audiobookshelf_ebook_library_id.innerHTML =
+        `<option value="">The same library</option>` +
+        r.libraries
+          .filter((l) => l.id !== r.library_id)
+          .map(
+            (l) =>
+              `<option value="${esc(l.id)}" ${l.id === ebookId ? "selected" : ""}>${esc(l.name)}</option>`,
+          )
+          .join("");
     } catch (err) {
       $("#audiobookshelf-result", root).innerHTML = badLine(err.message);
     }
@@ -3804,10 +5305,19 @@ function Settings(root, page) {
   const absFound = (server) => {
     absServer = server;
     form.audiobookshelf_url.value = server.url;
-    $("#abs-found", root).innerHTML = okLine(`Found Audiobookshelf <b>${esc(server.version)}</b> at <code>${esc(server.url)}</code>`)
-      + (server.note ? `<span class="hint">${esc(server.note)}</span>` : "")
-      + (server.ready ? "" : badLine("Finish setting up Audiobookshelf first: it doesn’t have an admin account yet."))
-      + (server.password_login ? "" : badLine("This server only allows single sign-on, so paste an API key below instead."));
+    $("#abs-found", root).innerHTML =
+      okLine(
+        `Found Audiobookshelf <b>${esc(server.version)}</b> at <code>${esc(server.url)}</code>`,
+      ) +
+      (server.note ? `<span class="hint">${esc(server.note)}</span>` : "") +
+      (server.ready
+        ? ""
+        : badLine(
+            "Finish setting up Audiobookshelf first: it doesn’t have an admin account yet.",
+          )) +
+      (server.password_login
+        ? ""
+        : badLine("This server only allows single sign-on, so paste an API key below instead."));
     $("#abs-insecure", root).hidden = !server.insecure;
     $("#abs-insecure-ok", root).checked = false;
     if (!server.password_login) $("#abs-manual", root).open = true;
@@ -3824,17 +5334,25 @@ function Settings(root, page) {
     spinBtn(btn, true);
     out.innerHTML = `<span class="hint">${address ? `Looking for Audiobookshelf at ${esc(address)}…` : "Looking on this computer, in Docker, then across your home network…"}</span>`;
     try {
-      const { servers, reason } = await api("/api/audiobookshelf/find", { method: "POST", body: { address } });
+      const { servers, reason } = await api("/api/audiobookshelf/find", {
+        method: "POST",
+        body: { address },
+      });
       if (servers.length === 1) {
         absFound(servers[0]);
       } else if (servers.length) {
         out.innerHTML = `<span class="hint">Found ${servers.length} Audiobookshelf servers. Which one?</span>
           <div class="abs-pick">${servers.map((sv, i) => `<button class="btn" type="button" data-i="${i}"><span class="mono">${esc(sv.url)}</span><small>${esc(sv.version)}</small></button>`).join("")}</div>`;
-        $$(".abs-pick [data-i]", out).forEach((b) => { b.onclick = () => absFound(servers[b.dataset.i]); });
+        $$(".abs-pick [data-i]", out).forEach((b) => {
+          b.onclick = () => absFound(servers[b.dataset.i]);
+        });
       } else {
-        out.innerHTML = badLine(reason || (address
-          ? `Audiobookshelf didn’t answer at ${address}. Check the address, and that this machine can reach it.`
-          : "No Audiobookshelf found nearby. Type its address and press Find."));
+        out.innerHTML = badLine(
+          reason ||
+            (address
+              ? `Audiobookshelf didn’t answer at ${address}. Check the address, and that this machine can reach it.`
+              : "No Audiobookshelf found nearby. Type its address and press Find."),
+        );
       }
     } catch (err) {
       out.innerHTML = badLine(err.message);
@@ -3842,7 +5360,10 @@ function Settings(root, page) {
     spinBtn(btn, false);
   };
   form.audiobookshelf_url.onkeydown = (e) => {
-    if (e.key === "Enter") { e.preventDefault(); $("#abs-find", root).click(); }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      $("#abs-find", root).click();
+    }
   };
 
   $("#abs-sign-in", root).onclick = async (e) => {
@@ -3850,21 +5371,33 @@ function Settings(root, page) {
     const out = $("#abs-signin-result", root);
     const insecure = Boolean(absServer?.insecure);
     if (insecure && !$("#abs-insecure-ok", root).checked) {
-      out.innerHTML = badLine("Use an https address, or tick the box above to send the password anyway.");
+      out.innerHTML = badLine(
+        "Use an https address, or tick the box above to send the password anyway.",
+      );
       return;
     }
     spinBtn(btn, true);
     try {
       const r = await api("/api/audiobookshelf/sign-in", {
         method: "POST",
-        body: { url: absServer.url, username: $("#abs-user", root).value.trim(), password: $("#abs-pass", root).value, allow_insecure: insecure },
+        body: {
+          url: absServer.url,
+          username: $("#abs-user", root).value.trim(),
+          password: $("#abs-pass", root).value,
+          allow_insecure: insecure,
+        },
       });
       state.settings = r.settings;
       form.audiobookshelf_token.value = r.settings.audiobookshelf_token;
       absServer = null;
       out.innerHTML = $("#abs-found", root).innerHTML = "";
       await absShow(r);
-      toast(r.library_id ? "Connected to Audiobookshelf" : "Connected. Now pick the library Narratarr’s books go into.", { kind: "ok" });
+      toast(
+        r.library_id
+          ? "Connected to Audiobookshelf"
+          : "Connected. Now pick the library Narratarr’s books go into.",
+        { kind: "ok" },
+      );
     } catch (err) {
       out.innerHTML = badLine(err.message);
     }
@@ -3872,15 +5405,27 @@ function Settings(root, page) {
     spinBtn(btn, false);
   };
   $("#abs-pass", root).onkeydown = (e) => {
-    if (e.key === "Enter") { e.preventDefault(); $("#abs-sign-in", root).click(); }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      $("#abs-sign-in", root).click();
+    }
   };
 
   form.audiobookshelf_library_id.onchange = async () => {
     $("#audiobookshelf-result", root).innerHTML = "";
-    try { await save(true); absShow(); } catch (err) { toast(err.message, { kind: "err" }); }
+    try {
+      await save(true);
+      absShow();
+    } catch (err) {
+      toast(err.message, { kind: "err" });
+    }
   };
   form.audiobookshelf_ebook_library_id.onchange = async () => {
-    try { await save(true); } catch (err) { toast(err.message, { kind: "err" }); }
+    try {
+      await save(true);
+    } catch (err) {
+      toast(err.message, { kind: "err" });
+    }
   };
   $("#abs-check", root).onclick = async (e) => {
     const btn = e.currentTarget;
@@ -3892,34 +5437,62 @@ function Settings(root, page) {
       const r = await api("/api/audiobookshelf/check", { method: "POST", body: { scan: true } });
       const all = r.seen === r.books;
       out.innerHTML = `<div class="abs-count ${all ? "ok" : ""}"><b>${r.seen}<small> / ${r.books}</small></b>
-        <span>${!r.books ? "Narratarr hasn’t downloaded any books yet."
-          : all ? "All of your books are in Audiobookshelf."
-          : `Audiobookshelf can’t see ${r.books - r.seen} of them yet, such as ${r.missing.slice(0, 3).map((t) => `“${esc(t)}”`).join(", ")}. The setup guide shows how to fix that.`}</span></div>`;
+        <span>${
+          !r.books
+            ? "Narratarr hasn’t downloaded any books yet."
+            : all
+              ? "All of your books are in Audiobookshelf."
+              : `Audiobookshelf can’t see ${r.books - r.seen} of them yet, such as ${r.missing
+                  .slice(0, 3)
+                  .map((t) => `“${esc(t)}”`)
+                  .join(", ")}. The setup guide shows how to fix that.`
+        }</span></div>`;
     } catch (err) {
       out.innerHTML = badLine(err.message);
     }
     spinBtn(btn, false);
   };
-  tester("audiobookshelf", (r) => `Connected to Audiobookshelf ${esc(r.version)} · rescans <b>${esc(r.library)}</b> after each download`);
+  tester(
+    "audiobookshelf",
+    (r) =>
+      `Connected to Audiobookshelf ${esc(r.version)} · rescans <b>${esc(r.library)}</b> after each download`,
+  );
   $("#abs-disconnect", root).onclick = async (e) => {
     e.preventDefault();
-    state.settings = await api("/api/settings", { method: "PUT", body: { audiobookshelf_token: "", audiobookshelf_library_id: "", audiobookshelf_ebook_library_id: "" } });
+    state.settings = await api("/api/settings", {
+      method: "PUT",
+      body: {
+        audiobookshelf_token: "",
+        audiobookshelf_library_id: "",
+        audiobookshelf_ebook_library_id: "",
+      },
+    });
     form.audiobookshelf_token.value = "";
     $("#audiobookshelf-result", root).innerHTML = "";
     $("#abs-check-result", root).hidden = true;
     absShow();
     saved = snapshot();
     dirty();
-    toast("Disconnected. Narratarr’s key is still listed in Audiobookshelf, where you can revoke it.");
+    toast(
+      "Disconnected. Narratarr’s key is still listed in Audiobookshelf, where you can revoke it.",
+    );
   };
   absShow();
 
   // ---- Hardcover (see narratarr/hardcover.py): connect with a code, then the shelf comes to Wanted ----
-  const HC_OUTCOME = { added: ["Added to Wanted", "ok"], in_library: ["Already in your library", ""], not_found: ["Not found on Audible", "warn"] };
-  let hcWaiting = 0;  // which sign-in the polling belongs to, so Cancel or a new one stops the old loop
+  const HC_OUTCOME = {
+    added: ["Added to Wanted", "ok"],
+    in_library: ["Already in your library", ""],
+    not_found: ["Not found on Audible", "warn"],
+  };
+  let hcWaiting = 0; // which sign-in the polling belongs to, so Cancel or a new one stops the old loop
   const hcShow = async () => {
     let r;
-    try { r = await api("/api/hardcover"); } catch { return; }
+    try {
+      r = await api("/api/hardcover");
+    } catch {
+      return;
+    }
     if (!root.isConnected) return;
     $("#hc-panel", root).hidden = !r.available;
     if (!r.available) return;
@@ -3929,13 +5502,17 @@ function Settings(root, page) {
     $("#hc-on", root).hidden = !r.connected;
     $("#hc-user", root).textContent = r.user || "your account";
     const last = r.last_sync || {};
-    $("#hc-last", root).innerHTML = last.error ? `<span class="bad-text">${esc(last.error)}</span>`
-      : last.at ? `Looked ${esc(ago(last.at))}: ${last.added || 0} added${last.not_found ? `, ${last.not_found} not found on Audible` : ""}${last.more ? ", more next time" : ""}.`
-      : "It looks a few minutes after Narratarr starts, then every six hours.";
-    $("#hc-recent", root).innerHTML = (r.recent || []).map((b) => {
-      const [label, tone] = HC_OUTCOME[b.outcome] || [b.outcome, ""];
-      return `<li><span><b>${esc(b.title || "Untitled")}</b><small>${esc(b.author || "")}</small></span><em class="${tone}">${esc(label)}</em></li>`;
-    }).join("");
+    $("#hc-last", root).innerHTML = last.error
+      ? `<span class="bad-text">${esc(last.error)}</span>`
+      : last.at
+        ? `Looked ${esc(ago(last.at))}: ${last.added || 0} added${last.not_found ? `, ${last.not_found} not found on Audible` : ""}${last.more ? ", more next time" : ""}.`
+        : "It looks a few minutes after Narratarr starts, then every six hours.";
+    $("#hc-recent", root).innerHTML = (r.recent || [])
+      .map((b) => {
+        const [label, tone] = HC_OUTCOME[b.outcome] || [b.outcome, ""];
+        return `<li><span><b>${esc(b.title || "Untitled")}</b><small>${esc(b.author || "")}</small></span><em class="${tone}">${esc(label)}</em></li>`;
+      })
+      .join("");
     $("#hc-retry", root).hidden = !(r.recent || []).some((b) => b.outcome === "not_found");
   };
   $("#hc-retry", root).onclick = async (e) => {
@@ -3944,7 +5521,12 @@ function Settings(root, page) {
     try {
       await api("/api/hardcover/retry", { method: "POST" });
       const r = await api("/api/hardcover/sync", { method: "POST" });
-      toast(r.added ? `Found ${r.added} more on Audible` : "Audible still doesn’t have them. Narratarr looks again each month.", { kind: "ok" });
+      toast(
+        r.added
+          ? `Found ${r.added} more on Audible`
+          : "Audible still doesn’t have them. Narratarr looks again each month.",
+        { kind: "ok" },
+      );
       refreshLibrary();
     } catch (err) {
       toast(err.message, { kind: "err" });
@@ -3957,12 +5539,22 @@ function Settings(root, page) {
       await new Promise((ok) => setTimeout(ok, every * 1000));
       if (mine !== hcWaiting || !root.isConnected) return;
       let r;
-      try { r = await api("/api/hardcover/poll", { method: "POST" }); } catch { continue; }
+      try {
+        r = await api("/api/hardcover/poll", { method: "POST" });
+      } catch {
+        continue;
+      }
       if (r.state === "pending") continue;
       hcWaiting++;
       $("#hc-start", root).hidden = false;
-      $("#hc-code", root).innerHTML = r.state === "connected" ? ""
-        : badLine(r.state === "denied" ? "Access wasn't approved on Hardcover." : "The code ran out before it was approved. Connect again for a new one.");
+      $("#hc-code", root).innerHTML =
+        r.state === "connected"
+          ? ""
+          : badLine(
+              r.state === "denied"
+                ? "Access wasn't approved on Hardcover."
+                : "The code ran out before it was approved. Connect again for a new one.",
+            );
       if (r.state === "connected") {
         toast(`Connected to Hardcover${r.user ? ` as ${r.user}` : ""}`, { kind: "ok" });
         state.settings = await api("/api/settings");
@@ -3982,8 +5574,12 @@ function Settings(root, page) {
           <small><span class="spinner"></span> Waiting for you to approve it. Or go to <code>${esc(r.verification_uri)}</code> and type the code in.</small>
           <button class="btn ghost sm" type="button" data-hc-cancel>Cancel</button>
         </div>`;
-      btn.hidden = true;  // one sign-in at a time; Cancel or the end of this one brings it back
-      $("[data-hc-cancel]", root).onclick = () => { hcWaiting++; $("#hc-code", root).innerHTML = ""; btn.hidden = false; };
+      btn.hidden = true; // one sign-in at a time; Cancel or the end of this one brings it back
+      $("[data-hc-cancel]", root).onclick = () => {
+        hcWaiting++;
+        $("#hc-code", root).innerHTML = "";
+        btn.hidden = false;
+      };
       hcWait(mine, Math.max(3, r.interval || 5));
     } catch (err) {
       $("#hc-code", root).innerHTML = badLine(err.message);
@@ -3995,7 +5591,12 @@ function Settings(root, page) {
     spinBtn(btn, true);
     try {
       const r = await api("/api/hardcover/sync", { method: "POST" });
-      toast(r.added ? `Added ${r.added} book${r.added === 1 ? "" : "s"} from Hardcover to Wanted` : "Nothing new on your shelf", { kind: "ok" });
+      toast(
+        r.added
+          ? `Added ${r.added} book${r.added === 1 ? "" : "s"} from Hardcover to Wanted`
+          : "Nothing new on your shelf",
+        { kind: "ok" },
+      );
       refreshLibrary();
     } catch (err) {
       toast(err.message, { kind: "err" });
@@ -4004,9 +5605,17 @@ function Settings(root, page) {
     hcShow();
   };
   $("#hc-disconnect", root).onclick = async () => {
-    const ok = await modal({ title: "Disconnect Hardcover?", body: "Narratarr stops looking at your shelf and is signed out on Hardcover. Books it already added stay in Wanted.", confirm: "Disconnect" });
+    const ok = await modal({
+      title: "Disconnect Hardcover?",
+      body: "Narratarr stops looking at your shelf and is signed out on Hardcover. Books it already added stay in Wanted.",
+      confirm: "Disconnect",
+    });
     if (!ok) return;
-    try { await api("/api/hardcover/disconnect", { method: "POST" }); } catch (err) { toast(err.message, { kind: "err" }); }
+    try {
+      await api("/api/hardcover/disconnect", { method: "POST" });
+    } catch (err) {
+      toast(err.message, { kind: "err" });
+    }
     hcWaiting++;
     hcShow();
   };
@@ -4031,7 +5640,9 @@ function Settings(root, page) {
       const all = await api("/api/users");
       userCount = all.length;
       statuses();
-      userList.innerHTML = all.map((u) => `
+      userList.innerHTML = all
+        .map(
+          (u) => `
         <div class="user-row" data-id="${u.id}" data-name="${esc(u.username)}">
           <span class="avatar">${esc(u.username.slice(0, 1))}</span>
           <span class="name"><b>${esc(u.username)}</b><small>${u.id === state.user.id ? "You · " : ""}${u.role === "admin" ? "Admin" : "Listener"}</small></span>
@@ -4043,7 +5654,9 @@ function Settings(root, page) {
             <button class="btn sm ghost" type="button" data-reset>Reset password</button>
             <button class="btn sm ghost icon danger" type="button" data-remove aria-label="Remove ${esc(u.username)}">${I.trash}</button>
           </span>
-        </div>`).join("");
+        </div>`,
+        )
+        .join("");
     } catch (err) {
       userList.innerHTML = `<div class="rd-result bad">${esc(err.message)}</div>`;
     }
@@ -4055,7 +5668,9 @@ function Settings(root, page) {
     try {
       await api(`/api/users/${row.dataset.id}`, { method: "PATCH", body: { role: sel.value } });
       if (Number(row.dataset.id) === state.user.id) return location.reload(); // you just changed what you can do
-      toast(`${row.dataset.name} is now ${sel.value === "admin" ? "an admin" : "a listener"}`, { kind: "ok" });
+      toast(`${row.dataset.name} is now ${sel.value === "admin" ? "an admin" : "a listener"}`, {
+        kind: "ok",
+      });
     } catch (err) {
       toast(err.message, { kind: "err" });
     }
@@ -4073,12 +5688,20 @@ function Settings(root, page) {
         confirm: "Set password",
         onSubmit: async (f) => {
           matching(f);
-          await api(`/api/users/${row.dataset.id}`, { method: "PATCH", body: { password: f.password.value } });
+          await api(`/api/users/${row.dataset.id}`, {
+            method: "PATCH",
+            body: { password: f.password.value },
+          });
           toast(`New password set for ${name}`, { kind: "ok" });
         },
       });
     } else if (e.target.closest("[data-remove]")) {
-      const ok = await modal({ title: `Remove ${name}?`, body: "They won’t be able to sign in, and their listening progress is deleted. Books stay in the library.", confirm: "Remove", danger: true });
+      const ok = await modal({
+        title: `Remove ${name}?`,
+        body: "They won’t be able to sign in, and their listening progress is deleted. Books stay in the library.",
+        confirm: "Remove",
+        danger: true,
+      });
       if (!ok) return;
       try {
         await api(`/api/users/${row.dataset.id}`, { method: "DELETE" });
@@ -4089,10 +5712,11 @@ function Settings(root, page) {
       renderUsers();
     }
   };
-  $("#add-user", root).onclick = () => formModal({
-    title: "Add someone",
-    body: "Give them the username and password; they can change the password themselves.",
-    fields: `
+  $("#add-user", root).onclick = () =>
+    formModal({
+      title: "Add someone",
+      body: "Give them the username and password; they can change the password themselves.",
+      fields: `
       <div class="field"><label for="nu-name">Username</label><input class="input" id="nu-name" name="username" autocomplete="off" autocapitalize="off" spellcheck="false" /></div>
       ${passwordFields()}
       <div class="field"><label for="nu-role">Role</label>
@@ -4101,14 +5725,21 @@ function Settings(root, page) {
           <option value="admin">Admin: also runs settings and users</option>
         </select>
       </div>`,
-    confirm: `${I.plus} Add`,
-    onSubmit: async (f) => {
-      matching(f);
-      const u = await api("/api/users", { method: "POST", body: { username: f.username.value.trim(), password: f.password.value, role: f.role.value } });
-      toast(`Added ${u.username}`, { kind: "ok" });
-      renderUsers();
-    },
-  });
+      confirm: `${I.plus} Add`,
+      onSubmit: async (f) => {
+        matching(f);
+        const u = await api("/api/users", {
+          method: "POST",
+          body: {
+            username: f.username.value.trim(),
+            password: f.password.value,
+            role: f.role.value,
+          },
+        });
+        toast(`Added ${u.username}`, { kind: "ok" });
+        renderUsers();
+      },
+    });
   renderUsers();
 
   go(page);
@@ -4140,10 +5771,16 @@ function drawerBook() {
 function wantedNote(lib) {
   const st = state.settings || {};
   const out = Date.parse(lib.released || "");
-  if (out > Date.now()) return `Comes out ${releaseLabel(lib.released, true).replace(/^Out /, "")}. Narratarr will start looking then.`;
-  if (!st.indexer_configured) return "Connect Prowlarr or a Torznab indexer in Settings so Narratarr can look for this book.";
-  const last = lib.last_searched ? `Last looked ${ago(lib.last_searched)}. ${lib.search_note || ""}` : "";
-  const next = st.auto_search ? `Narratarr looks again every ${st.auto_search_hours} hours.` : "Automatic search is off.";
+  if (out > Date.now())
+    return `Comes out ${releaseLabel(lib.released, true).replace(/^Out /, "")}. Narratarr will start looking then.`;
+  if (!st.indexer_configured)
+    return "Connect Prowlarr or a Torznab indexer in Settings so Narratarr can look for this book.";
+  const last = lib.last_searched
+    ? `Last looked ${ago(lib.last_searched)}. ${lib.search_note || ""}`
+    : "";
+  const next = st.auto_search
+    ? `Narratarr looks again every ${st.auto_search_hours} hours.`
+    : "Automatic search is off.";
   return `${last} ${next}`.trim();
 }
 
@@ -4151,15 +5788,20 @@ function wantedNote(lib) {
 function formatPickHTML() {
   const format = formatFor(state.drawer?.source);
   const notes = {
-    audiobook: "Narratarr will look for the audiobook on your indexers and download it when it turns up.",
+    audiobook:
+      "Narratarr will look for the audiobook on your indexers and download it when it turns up.",
     ebook: "Narratarr will look for the ebook on your indexers and download it when it turns up.",
     both: "Narratarr will look for both, and file the ebook next to the audiobook so Audiobookshelf shows them together.",
   };
   return `<div class="format-pick" role="radiogroup" aria-label="Want it as">
-      ${Object.entries(FORMATS).map(([k, f]) => `
+      ${Object.entries(FORMATS)
+        .map(
+          ([k, f]) => `
         <button type="button" role="radio" aria-checked="${format === k}" class="${format === k ? "on" : ""}" data-format="${k}">
           <span class="ic">${f.icon ? I[f.icon] : I.headphones + I.book}</span><b>${f.label}</b>
-        </button>`).join("")}
+        </button>`,
+        )
+        .join("")}
     </div>
     <div class="cta"><button class="btn primary" data-act="add">${I.bookmark} Add to Wanted</button></div>
     <p class="cta-note">${notes[format]}</p>`;
@@ -4170,7 +5812,8 @@ function formatsHTML(lib) {
   const other = lib.companion_id ? state.library.find((b) => b.id === lib.companion_id) : null;
   const pair = { audiobook: isEbook(lib) ? other : lib, ebook: isEbook(lib) ? lib : other };
   const tile = (kind) => {
-    const b = pair[kind], f = FORMATS[kind];
+    const b = pair[kind],
+      f = FORMATS[kind];
     if (!b) {
       return `<button class="fmt add" data-act="other-format" title="Add the ${f.label.toLowerCase()} to Wanted too">
         ${I[f.icon]}<span><b>${f.label}</b><small>Want it too</small></span><i class="plus">${I.plus}</i></button>`;
@@ -4225,8 +5868,11 @@ function libraryLiveHTML(lib) {
       return `<div class="state requested">
           <div class="top"><span>${I.bell} ${who} asked for this</span><span>${esc(ago(lib.updated_at || lib.added_at))}</span></div>
           ${reqStepsHTML(lib)}
-          <p>${picked ? `They picked <b>${esc(picked)}</b>${lib.size ? ` (${esc(lib.size)})` : ""}. Approve it to download that release, or pick another.`
-            : "Approve it and Narratarr starts looking for a release, or pick one yourself."}</p>
+          <p>${
+            picked
+              ? `They picked <b>${esc(picked)}</b>${lib.size ? ` (${esc(lib.size)})` : ""}. Approve it to download that release, or pick another.`
+              : "Approve it and Narratarr starts looking for a release, or pick one yourself."
+          }</p>
         </div>
         <div class="cta">
           <button class="btn primary" data-act="approve">${I.check} Approve</button>
@@ -4265,16 +5911,24 @@ function libraryLiveHTML(lib) {
   }
   if (lib.status === "completed" && isEbook(lib)) {
     const local = lib.source === "local";
-    const label = !lib.finished && underway(lib) ? `${I.book} Continue reading · ${esc(readLeft(lib))}`
-      : `${I.book} ${lib.finished ? "Read again" : "Read"}`;
+    const label =
+      !lib.finished && underway(lib)
+        ? `${I.book} Continue reading · ${esc(readLeft(lib))}`
+        : `${I.book} ${lib.finished ? "Read again" : "Read"}`;
     return `<div class="cta">
-        ${canRead(lib) ? `<button class="btn primary" data-act="play">${label}</button>
+        ${
+          canRead(lib)
+            ? `<button class="btn primary" data-act="play">${label}</button>
         <a class="btn" href="/api/library/${lib.id}/ebook" download>${I.down} Download</a>`
-        : `<a class="btn primary" href="/api/library/${lib.id}/ebook" download>${I.down} Download ebook</a>`}
+            : `<a class="btn primary" href="/api/library/${lib.id}/ebook" download>${I.down} Download ebook</a>`
+        }
         <button class="btn ghost" data-act="toggle-finished">${lib.finished ? "Mark unread" : "Mark read"}</button>
       </div>
-      <p class="cta-note">${canRead(lib) ? `Reads right here, and opens in Audiobookshelf or any reading app too.`
-        : `${esc(lib.format || "This format")} doesn’t open in Narratarr. It works with ${esc(readers(lib.format))}.`}</p>
+      <p class="cta-note">${
+        canRead(lib)
+          ? `Reads right here, and opens in Audiobookshelf or any reading app too.`
+          : `${esc(lib.format || "This format")} doesn’t open in Narratarr. It works with ${esc(readers(lib.format))}.`
+      }</p>
       <div class="state done">${local ? "Imported" : "Downloaded"} ${esc(ago(lib.completed_at))}${local && lib.import_mode === "inplace" ? ", left where it was," : ""} to<code>${esc(lib.path)}</code></div>
       <div class="cta" style="margin-top:14px">
         ${local ? "" : `<button class="btn sm ghost" data-act="download">${I.retry} Download again</button>`}
@@ -4287,9 +5941,12 @@ function libraryLiveHTML(lib) {
     const current = player.book?.id === lib.id;
     const local = lib.source === "local";
     const left = lib.listen_duration - lib.listen_position;
-    const label = current && player.playing ? `${I.pause} Pause`
-      : !lib.finished && lib.listen_position > 30 && lib.listen_duration ? `${I.play} Resume · ${esc(fmtLeft(left))}`
-      : `${I.play} ${lib.finished ? "Listen again" : "Play"}`;
+    const label =
+      current && player.playing
+        ? `${I.pause} Pause`
+        : !lib.finished && lib.listen_position > 30 && lib.listen_duration
+          ? `${I.play} Resume · ${esc(fmtLeft(left))}`
+          : `${I.play} ${lib.finished ? "Listen again" : "Play"}`;
     return `<div class="cta">
         <button class="btn primary" data-act="play">${label}</button>
         <button class="btn ghost" data-act="toggle-finished">${lib.finished ? "Mark unfinished" : "Mark finished"}</button>
@@ -4318,44 +5975,64 @@ function libraryLiveHTML(lib) {
 }
 
 function readers(format) {
-  return {
-    EPUB: "Apple Books, Google Play Books, Kobo and most e-readers",
-    AZW3: "Kindle devices and the Kindle app",
-    AZW: "Kindle devices and the Kindle app",
-    MOBI: "older Kindles and Calibre",
-    PDF: "any PDF viewer",
-    CBZ: "comic readers",
-    CBR: "comic readers",
-  }[(format || "").toUpperCase()] || "Calibre and most reading apps";
+  return (
+    {
+      EPUB: "Apple Books, Google Play Books, Kobo and most e-readers",
+      AZW3: "Kindle devices and the Kindle app",
+      AZW: "Kindle devices and the Kindle app",
+      MOBI: "older Kindles and Calibre",
+      PDF: "any PDF viewer",
+      CBZ: "comic readers",
+      CBR: "comic readers",
+    }[(format || "").toUpperCase()] || "Calibre and most reading apps"
+  );
 }
 
 // ---- releases (pick one yourself) ----
 
 function releasesHTML(res) {
   if (!res.items.length) {
-    return `<div class="releases"><h4>Releases</h4><p class="muted">${isEbook(drawerBook())
-      ? "Nothing in your indexers’ ebook categories looks like this book yet."
-      : "Nothing on your indexers or LibriVox looks like this book yet."}</p></div>`;
+    return `<div class="releases"><h4>Releases</h4><p class="muted">${
+      isEbook(drawerBook())
+        ? "Nothing in your indexers’ ebook categories looks like this book yet."
+        : "Nothing on your indexers or LibriVox looks like this book yet."
+    }</p></div>`;
   }
-  const label = (r) => r.source === "prowlarr" || r.source === "torznab" ? r.indexer || sourceInfo(r.source).label : sourceInfo(r.source).label;
+  const label = (r) =>
+    r.source === "prowlarr" || r.source === "torznab"
+      ? r.indexer || sourceInfo(r.source).label
+      : sourceInfo(r.source).label;
   return `<div class="releases">
     <h4>Releases <small>${res.items.length} found · best matches first</small></h4>
-    ${res.items.map((r, i) => {
-      const quality = r.match >= res.auto_match ? "good" : r.match >= 75 ? "ok" : "weak";
-      const facts = [label(r), r.protocol === "usenet" ? "Usenet" : r.protocol === "torrent" ? "Torrent" : "Direct",
-        r.format, r.size, r.language, r.seeders != null ? `${r.seeders} seeder${r.seeders === 1 ? "" : "s"}` : "", r.posted].filter(Boolean);
-      // A release that failed for this book, or that an admin turned down: still there to grab on
-      // purpose, but marked, so nobody picks it again by accident. Automatic picking skips both.
-      const flag = r.failed ? `<span class="rel-flag bad" title="${esc(r.failed)}">${I.alert}Failed before</span>`
-        : r.turned_down ? `<span class="rel-flag" title="Turned down for this book. Automatic search won’t pick it again.">Turned down</span>` : "";
-      const dim = r.failed || r.turned_down ? "spent" : r.language_ok === false ? "other-lang" : "";
-      return `<div class="rel ${dim}" ${r.language_ok === false && !dim.includes("spent") ? 'title="Not in your languages: automatic search skips it, but you can still grab it"' : ""}>
+    ${res.items
+      .map((r, i) => {
+        const quality = r.match >= res.auto_match ? "good" : r.match >= 75 ? "ok" : "weak";
+        const facts = [
+          label(r),
+          r.protocol === "usenet" ? "Usenet" : r.protocol === "torrent" ? "Torrent" : "Direct",
+          r.format,
+          r.size,
+          r.language,
+          r.seeders != null ? `${r.seeders} seeder${r.seeders === 1 ? "" : "s"}` : "",
+          r.posted,
+        ].filter(Boolean);
+        // A release that failed for this book, or that an admin turned down: still there to grab on
+        // purpose, but marked, so nobody picks it again by accident. Automatic picking skips both.
+        const flag = r.failed
+          ? `<span class="rel-flag bad" title="${esc(r.failed)}">${I.alert}Failed before</span>`
+          : r.turned_down
+            ? `<span class="rel-flag" title="Turned down for this book. Automatic search won’t pick it again.">Turned down</span>`
+            : "";
+        const dim =
+          r.failed || r.turned_down ? "spent" : r.language_ok === false ? "other-lang" : "";
+        return `<div class="rel ${dim}" ${r.language_ok === false && !dim.includes("spent") ? 'title="Not in your languages: automatic search skips it, but you can still grab it"' : ""}>
         <div class="rel-main"><b title="${esc(r.release || r.title)}">${esc(r.release || r.title)}</b>
           <small>${flag}${facts.map(esc).join(" · ")}</small></div>
         <span class="match ${quality}" title="How closely it matches the title and author">${r.match}%</span>
         <button class="btn sm" data-grab="${i}" ${r.usable ? "" : `disabled title="Set up a download client for ${r.protocol === "usenet" ? "Usenet" : "torrents"} first"`}>Grab</button>
       </div>`;
-    }).join("")}
+      })
+      .join("")}
   </div>`;
 }
 
@@ -4398,7 +6075,9 @@ function editDetails(lib) {
   const form = $("#meta-edit", head);
   const f = form.elements;
   f.title.focus();
-  $("[data-cancel]", form).onclick = () => { head.innerHTML = shown; };
+  $("[data-cancel]", form).onclick = () => {
+    head.innerHTML = shown;
+  };
   // Audible's record of the book fills the empty fields, for you to check before saving.
   $("[data-audible]", form).onclick = async (e) => {
     const btn = e.currentTarget;
@@ -4406,14 +6085,27 @@ function editDetails(lib) {
     try {
       const a = await api(`/api/library/${lib.id}/audible-match`);
       const filled = [];
-      const put = (name, value) => { if (value && !f[name].value.trim()) { f[name].value = value; filled.push(name); } };
+      const put = (name, value) => {
+        if (value && !f[name].value.trim()) {
+          f[name].value = value;
+          filled.push(name);
+        }
+      };
       put("narrators", (a.narrators || []).join(", "));
       put("series", a.series);
       put("series_number", a.series_number);
       put("year", a.year);
       // A name that led with its series ("Playing for Keeps #1 - Consider Me"): the series fields hold that now.
-      if (a.series_first && f.title && f.series.value.trim()) { f.title.value = a.series_first; filled.push("title"); }
-      toast(filled.length ? "Filled in from Audible. Check them, then save." : "Audible has nothing these fields are missing.", { kind: "ok" });
+      if (a.series_first && f.title && f.series.value.trim()) {
+        f.title.value = a.series_first;
+        filled.push("title");
+      }
+      toast(
+        filled.length
+          ? "Filled in from Audible. Check them, then save."
+          : "Audible has nothing these fields are missing.",
+        { kind: "ok" },
+      );
     } catch (err) {
       toast(err.message, { kind: "err" });
     }
@@ -4427,7 +6119,10 @@ function editDetails(lib) {
       const body = {
         title: f.title.value,
         author: f.author.value,
-        narrators: f.narrators.value.split(/[,;]/).map((n) => n.trim()).filter(Boolean),
+        narrators: f.narrators.value
+          .split(/[,;]/)
+          .map((n) => n.trim())
+          .filter(Boolean),
         series: f.series.value,
         series_number: f.series_number.value,
         year: f.year.value,
@@ -4451,9 +6146,17 @@ async function tidyOne(lib, btn) {
   spinBtn(btn, true);
   try {
     const r = await api(`/api/tidy/book/${lib.id}`);
-    if (r.state === "tidy") { toast("This book is already where your folder layout puts it.", { kind: "ok" }); return; }
-    if (r.state !== "move") { toast(r.reason || "Tidy can't move this book yet.", { kind: "err" }); return; }
-    const carries = r.carries.length ? `<p class="tidy-one-note">Its ebook ${r.carries.map((t) => `“${esc(t)}”`).join(", ")} moves with it.</p>` : "";
+    if (r.state === "tidy") {
+      toast("This book is already where your folder layout puts it.", { kind: "ok" });
+      return;
+    }
+    if (r.state !== "move") {
+      toast(r.reason || "Tidy can't move this book yet.", { kind: "err" });
+      return;
+    }
+    const carries = r.carries.length
+      ? `<p class="tidy-one-note">Its ebook ${r.carries.map((t) => `“${esc(t)}”`).join(", ")} moves with it.</p>`
+      : "";
     const ok = await modal({
       title: "Tidy this book?",
       body: "It moves into the folder your layout gives it. Nothing else in your library changes, and Undo in Settings → General puts it back.",
@@ -4478,10 +6181,14 @@ function followHTML(b) {
   if (!(b.source === "audible" || b.asin) || asksFirst()) return "";
   const series = (b.series || [])[0];
   const author = (b.author || "").split(",")[0].trim();
-  const followed = (kind, key) => state.follows.find((f) => f.kind === kind && (kind === "series" ? f.asin === key : f.name === key));
+  const followed = (kind, key) =>
+    state.follows.find(
+      (f) => f.kind === kind && (kind === "series" ? f.asin === key : f.name === key),
+    );
   const btn = (kind, key, label, data) => {
     const f = followed(kind, key);
-    return f ? `<a class="btn sm ghost" href="#/authors/${f.id}">${I.check} Following ${esc(label)}</a>`
+    return f
+      ? `<a class="btn sm ghost" href="#/authors/${f.id}">${I.check} Following ${esc(label)}</a>`
       : `<button class="btn sm ghost" data-act="follow-${kind}" ${data}>${I.plus} Follow ${esc(label)}</button>`;
   };
   return `<div class="follow-row">
@@ -4491,7 +6198,8 @@ function followHTML(b) {
 }
 
 async function followFromDrawer(kind, el) {
-  let asin = el.dataset.asin, name = el.dataset.name;
+  let asin = el.dataset.asin,
+    name = el.dataset.name;
   if (kind === "author") {
     const found = await api(`/api/authors/search?${new URLSearchParams({ q: name })}`);
     const hit = found.find((a) => a.name.toLowerCase() === name.toLowerCase()) || found[0];
@@ -4505,16 +6213,23 @@ async function followFromDrawer(kind, el) {
 async function confirmFollow({ kind, asin, name }) {
   const res = await modal({
     title: `Follow ${name}?`,
-    body: kind === "author"
-      ? "Their new books will be added to Wanted and downloaded as soon as they show up on your indexers."
-      : "New books in this series will be added to Wanted and downloaded as soon as they show up on your indexers.",
+    body:
+      kind === "author"
+        ? "Their new books will be added to Wanted and downloaded as soon as they show up on your indexers."
+        : "New books in this series will be added to Wanted and downloaded as soon as they show up on your indexers.",
     confirm: "Follow",
     extra: `<label class="switch"><input type="checkbox" name="existing"><i></i>Also add the books already out to Wanted</label>`,
   });
   if (!res) return null;
-  const f = await api("/api/follows", { method: "POST", body: { kind, asin, name, add_existing: !!res.existing } });
+  const f = await api("/api/follows", {
+    method: "POST",
+    body: { kind, asin, name, add_existing: !!res.existing },
+  });
   await Promise.all([refreshFollows(), refreshLibrary()]);
-  toast(`Following ${f.name}${f.added ? ` · ${f.added} book${f.added === 1 ? "" : "s"} added to Wanted` : ""}`, { kind: "ok", cover: f.image });
+  toast(
+    `Following ${f.name}${f.added ? ` · ${f.added} book${f.added === 1 ? "" : "s"} added to Wanted` : ""}`,
+    { kind: "ok", cover: f.image },
+  );
   return f;
 }
 
@@ -4530,26 +6245,41 @@ function updateDrawerLive() {
 // Where a request is: Asked → Approval → Downloading → In your library.
 function reqStepsHTML(lib) {
   const at = lib.status === "requested" ? 1 : lib.status === "completed" ? 4 : 2;
-  return `<ol class="req-steps" aria-label="Where this request is">${["Asked", "Approval", "Downloading", "In your library"].map((label, i) =>
-    `<li class="${i < at ? "done" : i === at ? "now" : ""}"${i === at ? ' aria-current="step"' : ""}><i aria-hidden="true"></i>${label}</li>`).join("")}</ol>`;
+  return `<ol class="req-steps" aria-label="Where this request is">${[
+    "Asked",
+    "Approval",
+    "Downloading",
+    "In your library",
+  ]
+    .map(
+      (label, i) =>
+        `<li class="${i < at ? "done" : i === at ? "now" : ""}"${i === at ? ' aria-current="step"' : ""}><i aria-hidden="true"></i>${label}</li>`,
+    )
+    .join("")}</ol>`;
 }
 
 // The rest of the series, as far as the library knows it.
 function seriesShelfHTML(b) {
   const ser = (b.series || [])[0];
   if (!ser?.title) return "";
-  const same = (x) => (x.series || []).some((s) => (ser.asin && s.asin === ser.asin) || s.title === ser.title);
-  const seq = (x) => parseFloat((x.series || []).find((s) => s.title === ser.title || s.asin === ser.asin)?.sequence) || 999;
+  const same = (x) =>
+    (x.series || []).some((s) => (ser.asin && s.asin === ser.asin) || s.title === ser.title);
+  const seq = (x) =>
+    parseFloat(
+      (x.series || []).find((s) => s.title === ser.title || s.asin === ser.asin)?.sequence,
+    ) || 999;
   const here = b.id || b.source_url || b.url;
   const books = state.library.filter((x) => same(x) && !isEbook(x)).sort((a, c) => seq(a) - seq(c));
   if (books.length < (books.some((x) => x.id === b.id || x.source_url === here) ? 2 : 1)) return "";
-  return `<div class="series-shelf"><h4>${esc(ser.title)}</h4>${books.map((x) => {
-    const mineHere = x.id === b.id || x.source_url === here;
-    const n = seq(x);
-    return `<button type="button" class="series-row ${mineHere ? "here" : ""}" data-open-book="${x.id}">${coverHTML(x)}
+  return `<div class="series-shelf"><h4>${esc(ser.title)}</h4>${books
+    .map((x) => {
+      const mineHere = x.id === b.id || x.source_url === here;
+      const n = seq(x);
+      return `<button type="button" class="series-row ${mineHere ? "here" : ""}" data-open-book="${x.id}">${coverHTML(x)}
       <span><b>${esc(x.title)}</b><small>${n !== 999 ? `Book ${n}` : "In the series"}${mineHere ? " · this one" : ""}</small></span>
       ${stBadge(x).replace("st-badge", "st-badge inline")}</button>`;
-  }).join("")}</div>`;
+    })
+    .join("")}</div>`;
 }
 
 function drawerHTML(b, loading) {
@@ -4564,7 +6294,10 @@ function drawerHTML(b, loading) {
     isDirect(b.source) && [I.check, "Free & legal"],
     releaseLabel(b.released) && [I.clock, releaseLabel(b.released)],
     b.protocol === "usenet" && [I.down, "Usenet"],
-    b.protocol === "torrent" && [I.down, b.seeders != null ? `Torrent · ${b.seeders} seeder${b.seeders === 1 ? "" : "s"}` : "Torrent"],
+    b.protocol === "torrent" && [
+      I.down,
+      b.seeders != null ? `Torrent · ${b.seeders} seeder${b.seeders === 1 ? "" : "s"}` : "Torrent",
+    ],
   ].filter(Boolean);
   const desc = (b.description || "").trim();
   return `
@@ -4583,7 +6316,9 @@ function drawerHTML(b, loading) {
       <div id="drawer-releases"></div>
       ${!loading ? seriesShelfHTML(b) : ""}
       ${desc ? `<div class="about"><h4>About this book</h4><p class="${desc.length > 520 ? "clamped" : ""}">${esc(desc)}</p>${desc.length > 520 ? '<button class="more" data-more>Read more</button>' : ""}</div>` : ""}
-      ${!loading ? `<dl>
+      ${
+        !loading
+          ? `<dl>
         ${(b.series || []).length ? `<dt>Series</dt><dd>${b.series.map((x) => esc(x.sequence ? `${x.title} #${x.sequence}` : x.title)).join(" · ")}</dd>` : ""}
         ${(b.categories || []).length && b.source !== "audible" ? `<dt>${b.source === "openlibrary" ? "Subjects" : "Genres"}</dt><dd>${esc(b.categories.join(", "))}</dd>` : ""}
         ${b.released ? `<dt>Released</dt><dd>${esc(releaseLabel(b.released, true))}</dd>` : ""}
@@ -4592,18 +6327,24 @@ function drawerHTML(b, loading) {
         ${(b.files || []).length ? `<dt>Files</dt><dd>${b.files.length} ${esc(b.format || "audio")} file${b.files.length === 1 ? "" : "s"}${b.size ? ` · ${esc(b.size)}` : ""}</dd>` : ""}
         ${b.release ? `<dt>Release</dt><dd class="mono">${esc(b.release)}</dd>` : ""}
         ${b.indexer ? `<dt>Indexer</dt><dd>${esc(b.indexer)}</dd>` : ""}
-        <dt>Source</dt><dd>${b.source === "local" ? `Your files${b.import_mode === "inplace" ? " (left in place)" : ""}`
-          : /^https?:/.test(b.url || b.source_url || "")
-          ? `<a href="${esc((b.url || b.source_url).split("#")[0])}" target="_blank" rel="noopener noreferrer">${esc(sourceInfo(b.source).label)}${isDirect(b.source) ? " on Internet Archive" : ""} ↗</a>`
-          : esc(sourceInfo(b.source).label)}</dd>
-      </dl>` : ""}
+        <dt>Source</dt><dd>${
+          b.source === "local"
+            ? `Your files${b.import_mode === "inplace" ? " (left in place)" : ""}`
+            : /^https?:/.test(b.url || b.source_url || "")
+              ? `<a href="${esc((b.url || b.source_url).split("#")[0])}" target="_blank" rel="noopener noreferrer">${esc(sourceInfo(b.source).label)}${isDirect(b.source) ? " on Internet Archive" : ""} ↗</a>`
+              : esc(sourceInfo(b.source).label)
+        }</dd>
+      </dl>`
+          : ""
+      }
     </div>`;
 }
 
 function paintDrawer(b, loading) {
   drawer.innerHTML = drawerHTML(b, loading);
   const bg = $(".backdrop div", drawer);
-  if (/^https?:\/\//.test(b.cover_url || "")) bg.style.backgroundImage = `url(${JSON.stringify(b.cover_url)})`;
+  if (/^https?:\/\//.test(b.cover_url || ""))
+    bg.style.backgroundImage = `url(${JSON.stringify(b.cover_url)})`;
   else bg.style.background = `hsl(${hue(b.title + b.author)} 60% 40%)`;
   if (!loading) updateDrawerLive();
 }
@@ -4635,7 +6376,8 @@ async function openDrawer({ url, bookId, preview, source, format }) {
     state.drawer.loading = false;
     // Keep listing facts (like size) when the book page leaves them blank.
     const merged = { ...preview };
-    for (const [k, v] of Object.entries(details)) if (v !== "" && !(Array.isArray(v) && !v.length)) merged[k] = v;
+    for (const [k, v] of Object.entries(details))
+      if (v !== "" && !(Array.isArray(v) && !v.length)) merged[k] = v;
     merged.library = details.library;
     state.drawer.details = merged;
     paintDrawer(merged, false);
@@ -4660,11 +6402,18 @@ drawer.onclick = async (e) => {
     const lib = drawerBook();
     spinBtn(grabBtn, true);
     try {
-      const got = await api(`/api/library/${lib.id}/grab`, { method: "POST", body: { url: r.url, source: r.source } });
+      const got = await api(`/api/library/${lib.id}/grab`, {
+        method: "POST",
+        body: { url: r.url, source: r.source },
+      });
       $("#drawer-releases").innerHTML = "";
       await refreshLibrary();
-      toast(got.status === "requested" ? `Asked for ${r.release || r.title}. It’ll download once an admin approves it.`
-        : `Grabbed ${r.release || r.title}`, { kind: "ok", cover: lib.cover_url });
+      toast(
+        got.status === "requested"
+          ? `Asked for ${r.release || r.title}. It’ll download once an admin approves it.`
+          : `Grabbed ${r.release || r.title}`,
+        { kind: "ok", cover: lib.cover_url },
+      );
     } catch (err) {
       toast(err.message, { kind: "err" });
       spinBtn(grabBtn, false);
@@ -4674,7 +6423,11 @@ drawer.onclick = async (e) => {
   const pick = e.target.closest("[data-format]");
   if (pick && state.drawer) {
     state.format = pick.dataset.format;
-    try { localStorage.setItem("narratarr.format", state.format); } catch { /* private mode */ }
+    try {
+      localStorage.setItem("narratarr.format", state.format);
+    } catch {
+      /* private mode */
+    }
     return updateDrawerLive();
   }
   const open = e.target.closest("[data-open-book]");
@@ -4690,32 +6443,60 @@ drawer.onclick = async (e) => {
     if (act === "add" || act === "want") {
       const url = state.drawer.url;
       if (act === "want") {
-        const saved = await api("/api/library", { method: "POST", body: { url, download: false, source: state.drawer.source, ...(state.drawer.format ? { format: state.drawer.format } : {}) } });
+        const saved = await api("/api/library", {
+          method: "POST",
+          body: {
+            url,
+            download: false,
+            source: state.drawer.source,
+            ...(state.drawer.format ? { format: state.drawer.format } : {}),
+          },
+        });
         await refreshLibrary();
-        toast(saved.status === "requested" ? "Asked an admin to approve it" : "Saved to Wanted", { kind: "ok" });
+        toast(saved.status === "requested" ? "Asked an admin to approve it" : "Saved to Wanted", {
+          kind: "ok",
+        });
       } else {
-        await addBook(url, { cover: $(".hero-cover img:not(.blur)", drawer)?.src, source: state.drawer.source, protocol: state.drawer.protocol, format: state.drawer.format });
+        await addBook(url, {
+          cover: $(".hero-cover img:not(.blur)", drawer)?.src,
+          source: state.drawer.source,
+          protocol: state.drawer.protocol,
+          format: state.drawer.format,
+        });
       }
     } else if (act === "other-format") {
       const lib = drawerBook();
       const other = await api(`/api/library/${lib.id}/other-format`, { method: "POST" });
       await refreshLibrary();
-      toast(other.status === "requested" ? `Asked for the ${isEbook(other) ? "ebook" : "audiobook"} of ${other.title} too`
-        : `Looking for the ${isEbook(other) ? "ebook" : "audiobook"} of ${other.title} too`, { kind: "ok", cover: other.cover_url });
+      toast(
+        other.status === "requested"
+          ? `Asked for the ${isEbook(other) ? "ebook" : "audiobook"} of ${other.title} too`
+          : `Looking for the ${isEbook(other) ? "ebook" : "audiobook"} of ${other.title} too`,
+        { kind: "ok", cover: other.cover_url },
+      );
     } else if (act === "follow-author" || act === "follow-series") {
       spinBtn(btn, false);
       if (await followFromDrawer(act.slice(7), btn)) {
         const lib = drawerBook();
         const fr = $(".follow-row", drawer);
-        if (fr) fr.outerHTML = followHTML(lib || { ...state.drawer.details, source: state.drawer.source });
+        if (fr)
+          fr.outerHTML = followHTML(
+            lib || { ...state.drawer.details, source: state.drawer.source },
+          );
       }
     } else if (act === "play") {
       spinBtn(btn, false);
       await playBook(drawerBook()?.id);
     } else if (act === "toggle-finished") {
       const lib = drawerBook();
-      await api(`/api/library/${lib.id}/progress`, { method: "PUT", body: { position: 0, finished: !lib.finished } });
-      if (player.book?.id === lib.id) { player.book.finished = !lib.finished; player.render(); }
+      await api(`/api/library/${lib.id}/progress`, {
+        method: "PUT",
+        body: { position: 0, finished: !lib.finished },
+      });
+      if (player.book?.id === lib.id) {
+        player.book.finished = !lib.finished;
+        player.render();
+      }
       await refreshLibrary();
     } else {
       const lib = drawerBook();
@@ -4754,9 +6535,11 @@ function showGate(status) {
     <form class="gate-card" autocomplete="on" novalidate>
       <img src="/static/icon.svg" alt="" width="56" height="56" />
       <h1>${setup ? "Welcome to Narrat<em>arr</em>" : "Sign in"}</h1>
-      <p>${setup
-        ? "Create the admin account. It runs Narratarr: settings, downloads, and who else can sign in. Add family and friends as listeners afterwards."
-        : "Narratarr needs to know who’s listening."}</p>
+      <p>${
+        setup
+          ? "Create the admin account. It runs Narratarr: settings, downloads, and who else can sign in. Add family and friends as listeners afterwards."
+          : "Narratarr needs to know who’s listening."
+      }</p>
       <div class="field">
         <label for="g-user">Username</label>
         <input class="input" id="g-user" name="username" autocomplete="username" autocapitalize="off" spellcheck="false" required />
@@ -4766,15 +6549,23 @@ function showGate(status) {
         <input class="input" id="g-pass" name="password" type="password" autocomplete="${setup ? "new-password" : "current-password"}" required />
         ${setup ? `<span class="hint">At least 8 characters.</span>` : ""}
       </div>
-      ${setup ? `<div class="field">
+      ${
+        setup
+          ? `<div class="field">
         <label for="g-again">Password again</label>
         <input class="input" id="g-again" type="password" autocomplete="new-password" required />
-      </div>` : ""}
-      ${status.setup_code_needed ? `<div class="field">
+      </div>`
+          : ""
+      }
+      ${
+        status.setup_code_needed
+          ? `<div class="field">
         <label for="g-code">Setup code</label>
         <input class="input mono" id="g-code" name="code" inputmode="numeric" placeholder="1234-5678" autocomplete="off" />
         <span class="hint">You’re not on Narratarr’s network, so it asks for the code it printed when it started. Find it with <code>docker logs narratarr</code>, or in <code>~/.narratarr/narratarr.log</code>.</span>
-      </div>` : ""}
+      </div>`
+          : ""
+      }
       <div class="form-error" id="g-error" role="alert"></div>
       <button class="btn primary" type="submit">${setup ? `${I.check} Create admin account` : "Sign in"}</button>
     </form>`;
@@ -4784,8 +6575,15 @@ function showGate(status) {
   form.onsubmit = async (e) => {
     e.preventDefault();
     const err = $("#g-error", gate);
-    const body = { username: form.username.value.trim(), password: form.password.value, code: form.code?.value || "" };
-    if (setup && body.password !== $("#g-again", gate).value) { err.textContent = "The passwords don’t match."; return; }
+    const body = {
+      username: form.username.value.trim(),
+      password: form.password.value,
+      code: form.code?.value || "",
+    };
+    if (setup && body.password !== $("#g-again", gate).value) {
+      err.textContent = "The passwords don’t match.";
+      return;
+    }
     const btn = $('button[type="submit"]', gate);
     spinBtn(btn, true);
     try {
@@ -4825,10 +6623,21 @@ function formModal({ title, body = "", fields, confirm, danger = false, onSubmit
       </div>
     </form>`;
   const form = $("form", scrim);
-  const close = () => { scrim.hidden = true; scrim.innerHTML = ""; document.removeEventListener("keydown", onKey, true); };
-  const onKey = (e) => { if (e.key === "Escape") { e.stopPropagation(); close(); } };
+  const close = () => {
+    scrim.hidden = true;
+    scrim.innerHTML = "";
+    document.removeEventListener("keydown", onKey, true);
+  };
+  const onKey = (e) => {
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      close();
+    }
+  };
   document.addEventListener("keydown", onKey, true);
-  scrim.onclick = (e) => { if (e.target === scrim || e.target.closest('[data-act="cancel"]')) close(); };
+  scrim.onclick = (e) => {
+    if (e.target === scrim || e.target.closest('[data-act="cancel"]')) close();
+  };
   form.onsubmit = async (e) => {
     e.preventDefault();
     const btn = $('button[type="submit"]', form);
@@ -4857,9 +6666,10 @@ function openAccount() {
   const u = state.user;
   const form = formModal({
     title: u.username,
-    body: u.role === "admin"
-      ? "Admin: runs settings, downloads and who can sign in."
-      : "Listener: browses, requests and listens. Your place in every book is your own.",
+    body:
+      u.role === "admin"
+        ? "Admin: runs settings, downloads and who can sign in."
+        : "Listener: browses, requests and listens. Your place in every book is your own.",
     fields: `<a class="community-row" href="${DISCORD_URL}" target="_blank" rel="noopener noreferrer">${I.chat}
         <span><b>Join the Narratarr Discord</b><small>Help, ideas and news about new versions</small></span><span class="go" aria-hidden="true">↗</span></a>
       <div class="apps-block" id="my-apps" hidden>
@@ -4872,7 +6682,10 @@ function openAccount() {
     extra: `<button class="btn ghost danger" type="button" id="sign-out" style="margin-right:auto">Sign out</button>`,
     onSubmit: async (f) => {
       matching(f);
-      await api("/api/auth/password", { method: "PUT", body: { current: f.current.value, password: f.password.value } });
+      await api("/api/auth/password", {
+        method: "PUT",
+        body: { current: f.current.value, password: f.password.value },
+      });
       toast("Password changed. You’re signed out on your other devices.", { kind: "ok" });
     },
   });
@@ -4887,15 +6700,23 @@ function openAccount() {
 async function renderApps(form) {
   const block = $("#my-apps", form);
   let apps;
-  try { apps = await api("/api/auth/apps"); } catch { return; }
+  try {
+    apps = await api("/api/auth/apps");
+  } catch {
+    return;
+  }
   if (!block.isConnected) return;
   block.hidden = !apps.length;
-  $("#app-list", form).innerHTML = apps.map((a) => `
+  $("#app-list", form).innerHTML = apps
+    .map(
+      (a) => `
     <div class="app-row" title="Signed in ${esc(new Date(a.created_at * 1000).toLocaleString())}">
       <span class="app-icon">${I.headphones}</span>
       <span class="app-who"><b>${esc(a.name)}</b><small>Used ${esc(ago(a.last_used_at))}${a.last_ip ? ` from ${esc(a.last_ip)}` : ""}</small></span>
       <button class="btn sm ghost danger" type="button" data-revoke="${a.id}">Disconnect</button>
-    </div>`).join("");
+    </div>`,
+    )
+    .join("");
   $$("[data-revoke]", form).forEach((b) => {
     b.onclick = async () => {
       spinBtn(b, true);
@@ -4944,7 +6765,9 @@ async function boot() {
   window.addEventListener("hashchange", route);
   route();
   player.onChange = () => updateDrawerLive();
-  reader.onChange = () => { if (!reader.book) refreshLibrary(); }; // the shelf and cards show how far you got
+  reader.onChange = () => {
+    if (!reader.book) refreshLibrary();
+  }; // the shelf and cards show how far you got
   player.restore(state.library);
   setInterval(refreshLibrary, 2000);
   checkUpdates();

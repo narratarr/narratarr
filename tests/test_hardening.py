@@ -68,15 +68,32 @@ async def test_move_import_finishes_even_if_source_is_gone(isolated_data):
     await Worker().process(book["id"])
 
     done = db.get(book["id"])
-    assert done["status"] == "completed" and (Path(done["path"]) / "Dune.m4b").read_bytes() == b"audio"
+    assert (
+        done["status"] == "completed" and (Path(done["path"]) / "Dune.m4b").read_bytes() == b"audio"
+    )
 
 
 def test_two_books_never_share_a_folder(isolated_data):
     s = config.load()
-    first = db.insert({"source": "local", "source_url": "file:///a", "title": "Dune", "author": "Frank Herbert",
-                       "status": "completed", "path": str(Path(s.library_dir).resolve() / "Frank Herbert" / "Dune")})
-    second = db.insert({"source": "local", "source_url": "file:///b", "title": "Dune", "author": "Frank Herbert",
-                        "status": "queued"})
+    first = db.insert(
+        {
+            "source": "local",
+            "source_url": "file:///a",
+            "title": "Dune",
+            "author": "Frank Herbert",
+            "status": "completed",
+            "path": str(Path(s.library_dir).resolve() / "Frank Herbert" / "Dune"),
+        }
+    )
+    second = db.insert(
+        {
+            "source": "local",
+            "source_url": "file:///b",
+            "title": "Dune",
+            "author": "Frank Herbert",
+            "status": "queued",
+        }
+    )
     assert unique_destination(second, s).name == "Dune (2)"
     assert unique_destination(first, s).name == "Dune"  # a book keeps its own folder
 
@@ -89,10 +106,33 @@ def test_remove_never_deletes_a_folder_another_book_lives_in(client, isolated_da
     folder = root / "Frank Herbert" / "Dune"
     folder.mkdir(parents=True)
     (folder / "Dune.m4b").write_bytes(b"audio")
-    a = db.insert({"source": "local", "source_url": "file:///a", "title": "Dune", "status": "completed", "path": str(folder)})
-    b = db.insert({"source": "local", "source_url": "file:///b", "title": "Dune", "status": "completed", "path": str(folder)})
-    parent = db.insert({"source": "local", "source_url": "file:///c", "title": "Herbert", "status": "completed",
-                        "path": str(folder.parent)})
+    a = db.insert(
+        {
+            "source": "local",
+            "source_url": "file:///a",
+            "title": "Dune",
+            "status": "completed",
+            "path": str(folder),
+        }
+    )
+    b = db.insert(
+        {
+            "source": "local",
+            "source_url": "file:///b",
+            "title": "Dune",
+            "status": "completed",
+            "path": str(folder),
+        }
+    )
+    parent = db.insert(
+        {
+            "source": "local",
+            "source_url": "file:///c",
+            "title": "Herbert",
+            "status": "completed",
+            "path": str(folder.parent),
+        }
+    )
 
     client.delete(f"/api/library/{parent['id']}?delete_files=true")
     assert folder.exists()  # the author folder holds other books
@@ -106,8 +146,16 @@ def test_remove_never_deletes_outside_the_library(client, isolated_data):
     outside = isolated_data / "elsewhere" / "Dune"
     outside.mkdir(parents=True)
     (outside / "Dune.m4b").write_bytes(b"audio")
-    book = db.insert({"source": "local", "source_url": "file:///x", "title": "Dune", "status": "completed",
-                      "path": str(outside), "import_mode": "inplace"})
+    book = db.insert(
+        {
+            "source": "local",
+            "source_url": "file:///x",
+            "title": "Dune",
+            "status": "completed",
+            "path": str(outside),
+            "import_mode": "inplace",
+        }
+    )
     client.delete(f"/api/library/{book['id']}?delete_files=true")
     assert (outside / "Dune.m4b").exists()
 
@@ -155,7 +203,9 @@ async def test_transmission_only_deletes_files_it_added():
         body = json.loads(request.content)
         if body["method"] == "torrent-get":
             labels = ["narratarr-7"] if body["arguments"]["ids"] == ["ours"] else ["seedbox"]
-            return httpx.Response(200, json={"result": "success", "arguments": {"torrents": [{"labels": labels}]}})
+            return httpx.Response(
+                200, json={"result": "success", "arguments": {"torrents": [{"labels": labels}]}}
+            )
         calls.append(body["arguments"])
         return httpx.Response(200, json={"result": "success", "arguments": {}})
 
@@ -206,24 +256,50 @@ def test_error_messages_carry_no_urls():
 
 
 def test_cross_site_requests_are_refused(client):
-    book = db.insert({"source": "librivox", "source_url": "https://archive.org/details/x", "title": "X", "status": "wanted"})
+    book = db.insert(
+        {
+            "source": "librivox",
+            "source_url": "https://archive.org/details/x",
+            "title": "X",
+            "status": "wanted",
+        }
+    )
     url = f"/api/library/{book['id']}/download"
     assert client.post(url, headers={"Origin": "https://evil.example"}).status_code == 403
     assert client.post(url, headers={"Sec-Fetch-Site": "cross-site"}).status_code == 403
-    assert client.post(url, headers={"Origin": "http://testserver", "Sec-Fetch-Site": "same-origin"}).status_code == 200
+    assert (
+        client.post(
+            url, headers={"Origin": "http://testserver", "Sec-Fetch-Site": "same-origin"}
+        ).status_code
+        == 200
+    )
     assert client.post(url).status_code == 200  # curl and scripts send no Origin
-    assert client.get("/api/library", headers={"Origin": "https://evil.example"}).status_code == 200  # reads are fine
+    assert (
+        client.get("/api/library", headers={"Origin": "https://evil.example"}).status_code == 200
+    )  # reads are fine
 
 
 # ---- hostnames, proxies and costly reads --------------------------------------------------------
 
 
 def test_only_local_hostnames_are_answered(client, monkeypatch):
-    ok = ["localhost:8484", "127.0.0.1:8484", "[::1]:8484", "192.168.1.20:8484", "mymac", "nas.local", "mac.tail1234.ts.net"]
+    ok = [
+        "localhost:8484",
+        "127.0.0.1:8484",
+        "[::1]:8484",
+        "192.168.1.20:8484",
+        "mymac",
+        "nas.local",
+        "mac.tail1234.ts.net",
+    ]
     for host in ok:
         assert client.get("/api/library", headers={"Host": host}).status_code == 200, host
-    assert client.get("/api/library", headers={"Host": "evil.example"}).status_code == 421  # DNS rebinding
-    assert client.get("/api/health", headers={"Host": "evil.example"}).status_code == 200  # health checks still work
+    assert (
+        client.get("/api/library", headers={"Host": "evil.example"}).status_code == 421
+    )  # DNS rebinding
+    assert (
+        client.get("/api/health", headers={"Host": "evil.example"}).status_code == 200
+    )  # health checks still work
     monkeypatch.setenv("NARRATARR_HOSTS", "books.example.com, *.home.example")
     assert client.get("/api/library", headers={"Host": "books.example.com"}).status_code == 200
     assert client.get("/api/library", headers={"Host": "narratarr.home.example"}).status_code == 200
@@ -231,13 +307,32 @@ def test_only_local_hostnames_are_answered(client, monkeypatch):
 
 
 def test_reverse_proxy_users_are_not_locked_out(client):
-    book = db.insert({"source": "librivox", "source_url": "https://archive.org/details/y", "title": "Y", "status": "wanted"})
+    book = db.insert(
+        {
+            "source": "librivox",
+            "source_url": "https://archive.org/details/y",
+            "title": "Y",
+            "status": "wanted",
+        }
+    )
     # nginx forwards Host: 127.0.0.1 while the browser's Origin is the public name: Sec-Fetch-Site decides.
-    r = client.post(f"/api/library/{book['id']}/download", headers={
-        "Host": "127.0.0.1:8484", "Origin": "https://books.example.com", "Sec-Fetch-Site": "same-origin"})
+    r = client.post(
+        f"/api/library/{book['id']}/download",
+        headers={
+            "Host": "127.0.0.1:8484",
+            "Origin": "https://books.example.com",
+            "Sec-Fetch-Site": "same-origin",
+        },
+    )
     assert r.status_code == 200
-    r = client.post(f"/api/library/{book['id']}/download", headers={
-        "Host": "127.0.0.1:8484", "Origin": "https://books.example.com", "X-Forwarded-Host": "books.example.com"})
+    r = client.post(
+        f"/api/library/{book['id']}/download",
+        headers={
+            "Host": "127.0.0.1:8484",
+            "Origin": "https://books.example.com",
+            "X-Forwarded-Host": "books.example.com",
+        },
+    )
     assert r.status_code == 200
 
 
@@ -253,13 +348,22 @@ def test_other_sites_cannot_spend_search_quota(client):
 
 def test_repointing_a_service_drops_its_secret(isolated_data):
     config.update({"prowlarr_url": "http://prowlarr:9696", "prowlarr_api_key": "REALKEY123"})
-    assert config.update({"prowlarr_url": "http://prowlarr:9696/"}).prowlarr_api_key == "REALKEY123"  # same host
-    assert config.update({"prowlarr_url": "http://attacker:9"}).prowlarr_api_key == ""  # new host: key gone
+    assert (
+        config.update({"prowlarr_url": "http://prowlarr:9696/"}).prowlarr_api_key == "REALKEY123"
+    )  # same host
+    assert (
+        config.update({"prowlarr_url": "http://attacker:9"}).prowlarr_api_key == ""
+    )  # new host: key gone
     s = config.update({"prowlarr_url": "http://prowlarr2:9696", "prowlarr_api_key": "NEWKEY456"})
     assert s.prowlarr_api_key == "NEWKEY456"  # new host with a freshly typed key is fine
     config.update({"nzbget_url": "http://nzbget:6789", "nzbget_password": "pw"})
     masked = config.load().public()["nzbget_password"]
-    assert config.update({"nzbget_url": "http://other:6789", "nzbget_password": masked}).nzbget_password == ""
+    assert (
+        config.update(
+            {"nzbget_url": "http://other:6789", "nzbget_password": masked}
+        ).nzbget_password
+        == ""
+    )
     with pytest.raises(ValueError):
         config.update({"sabnzbd_url": "ftp://sab:8080"})
 
@@ -293,7 +397,12 @@ def test_remove_returns_a_stopped_move_import_to_its_folder(client, isolated_dat
     src = isolated_data / "inbox" / "Frank Herbert - Dune"
     src.mkdir(parents=True)
     (src / "01.mp3").write_bytes(b"one")
-    book = db.insert({**importer.as_book(importer.read_meta(src, src.parent), "move", "queued"), "status": "wanted"})
+    book = db.insert(
+        {
+            **importer.as_book(importer.read_meta(src, src.parent), "move", "queued"),
+            "status": "wanted",
+        }
+    )
     tmp = tmp_dir(book, config.load())
     tmp.mkdir(parents=True)
     (src / "01.mp3").rename(tmp / "01.mp3")  # stopped half way: the only copy is in tmp
@@ -305,8 +414,17 @@ def test_remove_returns_a_stopped_move_import_to_its_folder(client, isolated_dat
 
 
 def test_remove_keeps_a_half_imported_usenet_download(client, isolated_data):
-    book = db.insert({"source": "prowlarr", "source_url": "https://n.example/1", "title": "Dune", "status": "failed",
-                      "protocol": "usenet", "download_client": "sabnzbd", "client_job_id": "nzo1"})
+    book = db.insert(
+        {
+            "source": "prowlarr",
+            "source_url": "https://n.example/1",
+            "title": "Dune",
+            "status": "failed",
+            "protocol": "usenet",
+            "download_client": "sabnzbd",
+            "client_job_id": "nzo1",
+        }
+    )
     tmp = tmp_dir(book, config.load())
     tmp.mkdir(parents=True)
     (tmp / "Dune.m4b").write_bytes(b"audio")
@@ -316,7 +434,14 @@ def test_remove_keeps_a_half_imported_usenet_download(client, isolated_data):
 
 
 def test_remove_drops_tmp_of_a_plain_download(client, isolated_data):
-    book = db.insert({"source": "librivox", "source_url": "https://archive.org/details/z", "title": "Z", "status": "failed"})
+    book = db.insert(
+        {
+            "source": "librivox",
+            "source_url": "https://archive.org/details/z",
+            "title": "Z",
+            "status": "failed",
+        }
+    )
     tmp = tmp_dir(book, config.load())
     tmp.mkdir(parents=True)
     (tmp / "part.mp3").write_bytes(b"x")
@@ -341,7 +466,9 @@ async def test_download_never_overwrites_a_folder_narratarr_did_not_make(isolate
 
     done = db.get(book["id"])
     assert done["status"] == "completed" and Path(done["path"]).name == "Dune (2)"
-    assert (mine / "CD1" / "01.mp3").read_bytes() == b"my rip" and (mine / "desc.txt").read_text() == "my notes"
+    assert (mine / "CD1" / "01.mp3").read_bytes() == b"my rip" and (
+        mine / "desc.txt"
+    ).read_text() == "my notes"
 
 
 async def test_downloading_again_reuses_the_books_own_folder(isolated_data):
@@ -365,7 +492,9 @@ async def test_two_books_queued_together_get_separate_folders(isolated_data):
         src = isolated_data / "inbox" / f"Jane Austen - Book {i}"
         src.mkdir(parents=True)
         (src / "01.mp3").write_bytes(b"x")
-        books.append(db.insert(importer.as_book(importer.read_meta(src, src.parent), "copy", "queued")))
+        books.append(
+            db.insert(importer.as_book(importer.read_meta(src, src.parent), "copy", "queued"))
+        )
     w = Worker()
     await asyncio.gather(w.process(books[0]["id"]), w.process(books[1]["id"]))
     paths = {db.get(b["id"])["path"] for b in books}
@@ -383,12 +512,24 @@ async def test_real_debrid_files_with_the_same_name_both_survive(isolated_data):
                 self.info_calls += 1
                 if self.info_calls < 3:
                     return httpx.Response(200, json={"status": "downloading", "progress": 50})
-                links = ["https://real-debrid.com/d/CD1/01.mp3", "https://real-debrid.com/d/CD2/01.mp3"]
-                return httpx.Response(200, json={"status": "downloaded", "progress": 100, "links": links})
+                links = [
+                    "https://real-debrid.com/d/CD1/01.mp3",
+                    "https://real-debrid.com/d/CD2/01.mp3",
+                ]
+                return httpx.Response(
+                    200, json={"status": "downloaded", "progress": 100, "links": links}
+                )
             if request.url.path.endswith("/unrestrict/link"):
                 link = request.content.decode()
                 disc = "CD1" if "CD1" in link else "CD2"
-                return httpx.Response(200, json={"filename": "01.mp3", "filesize": 10, "download": f"https://dl.example/{disc}/01.mp3"})
+                return httpx.Response(
+                    200,
+                    json={
+                        "filename": "01.mp3",
+                        "filesize": 10,
+                        "download": f"https://dl.example/{disc}/01.mp3",
+                    },
+                )
             return super().__call__(request)
 
     book = make_book()
@@ -403,10 +544,16 @@ async def test_real_debrid_files_with_the_same_name_both_survive(isolated_data):
 
 
 async def test_usenet_import_resumes_after_a_crash(isolated_data):
-    from tests.test_prowlarr import FakeServers, USENET, add_release
+    from tests.test_prowlarr import USENET, FakeServers, add_release
 
-    config.update({"prowlarr_url": "http://prowlarr:9696", "prowlarr_api_key": "PKEY", "sabnzbd_url": "http://sabnzbd:8080",
-                   "sabnzbd_api_key": "SKEY"})
+    config.update(
+        {
+            "prowlarr_url": "http://prowlarr:9696",
+            "prowlarr_api_key": "PKEY",
+            "sabnzbd_url": "http://sabnzbd:8080",
+            "sabnzbd_api_key": "SKEY",
+        }
+    )
     fake = FakeServers(isolated_data / "sab" / "complete")
     book = add_release(USENET, download_client="sabnzbd", client_job_id="SABnzbd_nzo_1")
     # An earlier run already moved the file out of SABnzbd's folder, then crashed before organizing.
@@ -430,7 +577,20 @@ async def test_stop_leaves_another_books_torrent_alone():
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/api/v2/torrents/info":
-            return httpx.Response(200, json=[{"hash": "h", "tags": "narratarr-1", "save_path": "/dl", "content_path": "/dl", "name": "Dune.m4b", "state": "uploading", "progress": 1}])
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "hash": "h",
+                        "tags": "narratarr-1",
+                        "save_path": "/dl",
+                        "content_path": "/dl",
+                        "name": "Dune.m4b",
+                        "state": "uploading",
+                        "progress": 1,
+                    }
+                ],
+            )
         calls.append(request.url.path)
         return httpx.Response(200)
 
@@ -440,21 +600,49 @@ async def test_stop_leaves_another_books_torrent_alone():
         await q.delete("h", files=True, tag="narratarr-1")
         assert calls == ["/api/v2/torrents/delete"]
         job = await q.job("h")
-        assert job.path == "/dl/Dune.m4b"  # a bare single-file torrent names the file, not the whole folder
+        assert (
+            job.path == "/dl/Dune.m4b"
+        )  # a bare single-file torrent names the file, not the whole folder
 
 
 def test_unfollow_purge_only_touches_that_author(isolated_data):
     f = db.add_follow("author", "A1", "Lee Child", "", [])
-    db.insert({"source": "audible", "source_url": "https://a/1", "title": "Killing Floor", "author": "Lee Child", "status": "wanted"})
-    db.insert({"source": "audible", "source_url": "https://a/2", "title": "Mockingbird", "author": "Harper Lee", "status": "wanted"})
-    db.insert({"source": "audible", "source_url": "https://a/3", "title": "Co-written", "author": "Lee Child, Andrew Child", "status": "wanted"})
+    db.insert(
+        {
+            "source": "audible",
+            "source_url": "https://a/1",
+            "title": "Killing Floor",
+            "author": "Lee Child",
+            "status": "wanted",
+        }
+    )
+    db.insert(
+        {
+            "source": "audible",
+            "source_url": "https://a/2",
+            "title": "Mockingbird",
+            "author": "Harper Lee",
+            "status": "wanted",
+        }
+    )
+    db.insert(
+        {
+            "source": "audible",
+            "source_url": "https://a/3",
+            "title": "Co-written",
+            "author": "Lee Child, Andrew Child",
+            "status": "wanted",
+        }
+    )
     from narratarr import wanted
+
     counts = wanted.follow_counts(f, db.list_books())
     assert counts["wanted"] == 2
 
 
 async def test_stop_waits_for_file_work_to_finish(isolated_data):
     import threading
+
     w = Worker()
     started, release = threading.Event(), threading.Event()
 

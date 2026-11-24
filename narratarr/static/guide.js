@@ -3,16 +3,21 @@
 
 import { $, $$, esc, I, api } from "./util.js";
 
-const INSTALLER = "curl -fsSL https://raw.githubusercontent.com/narratarr/narratarr/main/install.sh | bash";
+const INSTALLER =
+  "curl -fsSL https://raw.githubusercontent.com/narratarr/narratarr/main/install.sh | bash";
 const IN_ABS = "/narratarr"; // where Narratarr's folder appears inside Audiobookshelf's container
 const HOST_FILL = "/path/it/printed";
 
 const ICON = {
   same: '<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>',
-  other: '<svg viewBox="0 0 24 24"><rect x="2" y="5" width="9" height="7" rx="1.5"/><rect x="13" y="12" width="9" height="7" rx="1.5"/><path d="M6.5 12v3.5h6.5M17.5 12V8.5H11"/></svg>',
-  docker: '<svg viewBox="0 0 24 24"><path d="M3 12h15.5a3 3 0 0 0 2.5-1.5M3 12c0 4 3 7 8 7 5.5 0 8.5-3.5 9.5-8.5"/><path d="M5 9h3v3H5zM8.5 9h3v3h-3zM12 9h3v3h-3zM8.5 5.5h3v3h-3z"/></svg>',
-  direct: '<svg viewBox="0 0 24 24"><path d="M12 3v12"/><path d="m7.5 10.5 4.5 4.5 4.5-4.5"/><rect x="3" y="17" width="18" height="4" rx="1.5"/></svg>',
-  folder: '<svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>',
+  other:
+    '<svg viewBox="0 0 24 24"><rect x="2" y="5" width="9" height="7" rx="1.5"/><rect x="13" y="12" width="9" height="7" rx="1.5"/><path d="M6.5 12v3.5h6.5M17.5 12V8.5H11"/></svg>',
+  docker:
+    '<svg viewBox="0 0 24 24"><path d="M3 12h15.5a3 3 0 0 0 2.5-1.5M3 12c0 4 3 7 8 7 5.5 0 8.5-3.5 9.5-8.5"/><path d="M5 9h3v3H5zM8.5 9h3v3h-3zM12 9h3v3h-3zM8.5 5.5h3v3h-3z"/></svg>',
+  direct:
+    '<svg viewBox="0 0 24 24"><path d="M12 3v12"/><path d="m7.5 10.5 4.5 4.5 4.5-4.5"/><rect x="3" y="17" width="18" height="4" rx="1.5"/></svg>',
+  folder:
+    '<svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>',
   copy: '<svg viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>',
 };
 
@@ -29,7 +34,11 @@ async function copyText(text) {
     document.body.appendChild(ta);
     ta.select();
     let ok = false;
-    try { ok = document.execCommand("copy"); } catch { /* nothing more to try */ }
+    try {
+      ok = document.execCommand("copy");
+    } catch {
+      /* nothing more to try */
+    }
     ta.remove();
     return ok;
   }
@@ -46,7 +55,9 @@ const fill = (key, text) => `<span class="fill" data-fill="${key}">${esc(text)}<
 // One compose volume entry; quoted when the path has spaces or other characters YAML would trip on.
 const volume = (host) => {
   const entry = `${host}:${IN_ABS}`;
-  return /[\s#"'{}[\],&*!|>%@`]/.test(entry) ? `"${entry.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"` : entry;
+  return /[\s#"'{}[\],&*!|>%@`]/.test(entry)
+    ? `"${entry.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`
+    : entry;
 };
 
 function step(title, body, { done = false } = {}) {
@@ -62,29 +73,43 @@ function stepsFor(g, where, abs) {
 
   const steps = [];
   if (narratarrDocker) {
-    steps.push(step("Find Narratarr’s audiobook folder on this server",
-      `<p>Narratarr runs in Docker, where its books live at <code>/audiobooks</code>. Ask Docker which folder on the server that really is:</p>
+    steps.push(
+      step(
+        "Find Narratarr’s audiobook folder on this server",
+        `<p>Narratarr runs in Docker, where its books live at <code>/audiobooks</code>. Ask Docker which folder on the server that really is:</p>
        ${block(esc(`docker inspect narratarr --format '{{range .Mounts}}{{if eq .Destination "/audiobooks"}}{{.Source}}{{end}}{{end}}'`))}
        <label class="paste"><span>Paste what it printed</span>
          <input class="input mono" data-host placeholder="/home/you/audiobooks" autocomplete="off" spellcheck="false"></label>
-       <p class="aside">The steps below fill it in for you.</p>`));
+       <p class="aside">The steps below fill it in for you.</p>`,
+      ),
+    );
   }
   const hostLib = narratarrDocker ? fill("host", HOST_FILL) : esc(lib);
 
   if (abs === "docker") {
     const line = `      - ${volume(lib)}`;
-    steps.push(step("Hand that folder to Audiobookshelf’s container",
-      `<p>A container only sees the folders you give it. Open Audiobookshelf’s <code>docker-compose.yml</code> and add one line under <code>volumes:</code></p>
-       ${block(`<span class="ctx">services:\n  audiobookshelf:\n    volumes:\n      - ./audiobooks:/audiobooks</span>\n<span class="add">      - ${narratarrDocker ? `${hostLib}:${IN_ABS}` : esc(volume(lib))}</span>`,
-         { label: "docker-compose.yml", copy: narratarrDocker ? null : line })}
+    steps.push(
+      step(
+        "Hand that folder to Audiobookshelf’s container",
+        `<p>A container only sees the folders you give it. Open Audiobookshelf’s <code>docker-compose.yml</code> and add one line under <code>volumes:</code></p>
+       ${block(
+         `<span class="ctx">services:\n  audiobookshelf:\n    volumes:\n      - ./audiobooks:/audiobooks</span>\n<span class="add">      - ${narratarrDocker ? `${hostLib}:${IN_ABS}` : esc(volume(lib))}</span>`,
+         { label: "docker-compose.yml", copy: narratarrDocker ? null : line },
+       )}
        <p class="aside">Can’t find the file? This prints the folder it’s in:</p>
        ${block(esc(`docker inspect audiobookshelf --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}'`))}
-       <p class="aside">Started with <code>docker run</code> instead? Add <code>-v "${narratarrDocker ? hostLib : esc(lib)}:${IN_ABS}"</code> when you start it again.</p>`));
-    steps.push(step("Restart Audiobookshelf",
-      `<p>In the folder with that file, recreate the container. Your Audiobookshelf settings and listening progress stay as they are.</p>
+       <p class="aside">Started with <code>docker run</code> instead? Add <code>-v "${narratarrDocker ? hostLib : esc(lib)}:${IN_ABS}"</code> when you start it again.</p>`,
+      ),
+    );
+    steps.push(
+      step(
+        "Restart Audiobookshelf",
+        `<p>In the folder with that file, recreate the container. Your Audiobookshelf settings and listening progress stay as they are.</p>
        ${block("docker compose up -d")}
        <p class="aside">Check that it can see your books. This should list your authors:</p>
-       ${block(`docker exec audiobookshelf ls ${IN_ABS}`)}`));
+       ${block(`docker exec audiobookshelf ls ${IN_ABS}`)}`,
+      ),
+    );
   }
 
   const absPath = abs === "docker" ? esc(IN_ABS) : hostLib;
@@ -92,14 +117,21 @@ function stepsFor(g, where, abs) {
   const current = libs.find((l) => l.id === g.library_id);
   const want = abs === "docker" ? IN_ABS : narratarrDocker ? "" : lib.replace(/\/+$/, "");
   if (want && current?.folders?.some((f) => f.replace(/[\\/]+$/, "") === want)) {
-    steps.push(step("Add the folder to a library in Audiobookshelf",
-      `<p><b>${esc(current.name)}</b> already watches <code>${esc(want)}</code>. Nothing to do here.</p>`, { done: true }));
+    steps.push(
+      step(
+        "Add the folder to a library in Audiobookshelf",
+        `<p><b>${esc(current.name)}</b> already watches <code>${esc(want)}</code>. Nothing to do here.</p>`,
+        { done: true },
+      ),
+    );
     steps.push(connectStep(g, true));
     steps.push(checkStep(g));
     return steps;
   }
-  steps.push(step("Add the folder to a library in Audiobookshelf",
-    `<ol class="clicks">
+  steps.push(
+    step(
+      "Add the folder to a library in Audiobookshelf",
+      `<ol class="clicks">
        <li>In Audiobookshelf, open <b>Settings → Libraries</b>.</li>
        <li>${libs.length ? `Edit ${current ? `<b>${esc(current.name)}</b>` : "your book library"}` : "Press <b>Add your first library</b>, with Media Type <b>Books</b>"}.</li>
        <li>Under <b>Folders</b>, type this path and press Enter: ${block(absPath, abs === "docker" || !narratarrDocker ? { copy: abs === "docker" ? IN_ABS : lib } : {})}</li>
@@ -107,7 +139,9 @@ function stepsFor(g, where, abs) {
      </ol>
      ${current?.folders?.length ? `<p class="aside">${esc(current.name)} watches ${current.folders.map((f) => `<code>${esc(f)}</code>`).join(", ")} right now. Adding a folder keeps those.</p>` : ""}
      <p class="aside">Tip: set <b>Metadata Provider</b> to <b>Audible.com</b>. It knows narrators and series far better than Google Books.</p>
-     ${abs === "direct" && g.os === "linux" ? `<p class="aside warn">On Linux, Audiobookshelf runs as its own user and needs permission to read this folder${lib.startsWith("/root") && !narratarrDocker ? `, and it can’t look inside <code>/root</code> at all. Move your library somewhere shared first, like <code>/srv/audiobooks</code>, under <b>Settings → Library</b>` : ". If the library stays empty, that’s why"}.</p>` : ""}`));
+     ${abs === "direct" && g.os === "linux" ? `<p class="aside warn">On Linux, Audiobookshelf runs as its own user and needs permission to read this folder${lib.startsWith("/root") && !narratarrDocker ? `, and it can’t look inside <code>/root</code> at all. Move your library somewhere shared first, like <code>/srv/audiobooks</code>, under <b>Settings → Library</b>` : ". If the library stays empty, that’s why"}.</p>` : ""}`,
+    ),
+  );
 
   steps.push(connectStep(g, true));
   steps.push(checkStep(g));
@@ -116,39 +150,50 @@ function stepsFor(g, where, abs) {
 
 function otherMachine(g) {
   return [
-    step("Install Narratarr on the Audiobookshelf machine",
+    step(
+      "Install Narratarr on the Audiobookshelf machine",
       `<p>Audiobookshelf only scans its own disks, so the simplest fix is to have books land there. Run this on that machine (macOS or Linux). It can install with Docker too:</p>
        ${block(esc(INSTALLER))}
-       <p class="aside">Then open Narratarr there, open this guide again and choose <b>On this machine too</b>.</p>`),
-    step("Bring the books you already have",
-      `<p>Copy <code>${esc(g.library_dir)}</code> from this machine to the new one. In the new Narratarr, use <b>Import</b>, pick that folder and choose <b>Leave where they are</b>, so nothing is downloaded twice.</p>`),
+       <p class="aside">Then open Narratarr there, open this guide again and choose <b>On this machine too</b>.</p>`,
+    ),
+    step(
+      "Bring the books you already have",
+      `<p>Copy <code>${esc(g.library_dir)}</code> from this machine to the new one. In the new Narratarr, use <b>Import</b>, pick that folder and choose <b>Leave where they are</b>, so nothing is downloaded twice.</p>`,
+    ),
   ];
 }
 
 function connectStep(g, sameMachine) {
   if (!g.connected) {
-    return step("Connect Narratarr to Audiobookshelf",
+    return step(
+      "Connect Narratarr to Audiobookshelf",
       `<p>So Audiobookshelf rescans the moment a book finishes. Narratarr finds it and signs in once.</p>
-       <button class="btn primary" type="button" data-act="connect">${I.search} Connect now</button>`);
+       <button class="btn primary" type="button" data-act="connect">${I.search} Connect now</button>`,
+    );
   }
   const overInternet = sameMachine && g.where === "internet";
-  return step("Connect Narratarr to Audiobookshelf",
+  return step(
+    "Connect Narratarr to Audiobookshelf",
     `<p>Connected to <code>${esc(g.url)}</code>.</p>
      ${overInternet ? `<p class="aside warn">Both run on this machine, but Narratarr reaches Audiobookshelf over the internet${g.url.startsWith("http://") ? ", without https, so its key travels in the open" : ""}. Reconnect through this machine instead: in <b>Settings → Audiobookshelf</b>, press <b>Disconnect</b>, then <b>Find</b>.</p>` : ""}`,
-    { done: !overInternet });
+    { done: !overInternet },
+  );
 }
 
 function checkStep(g) {
-  return step("Check that Audiobookshelf sees your books",
+  return step(
+    "Check that Audiobookshelf sees your books",
     `<p>Narratarr asks Audiobookshelf to rescan, then looks for every book you’ve downloaded.</p>
      <button class="btn" type="button" data-act="check" ${g.connected && g.library_id ? "" : "disabled"}>${I.books} Check now</button>
      ${g.connected && !g.library_id ? `<p class="aside">Pick a library in <b>Settings → Audiobookshelf</b> first.</p>` : ""}
      ${g.connected ? "" : `<p class="aside">Connect first, in the step above.</p>`}
-     <div class="check-result" data-check></div>`);
+     <div class="check-result" data-check></div>`,
+  );
 }
 
 function checkHTML(r, abs) {
-  const n = r.books, k = r.seen;
+  const n = r.books,
+    k = r.seen;
   const folders = r.folders.map((f) => `<code>${esc(f)}</code>`).join(", ") || "no folders";
   if (!n) {
     return `<div class="verdict">${I.clock}<div><b>Nothing downloaded yet</b><p>Once Narratarr finishes a book, check again.</p></div></div>`;
@@ -157,7 +202,9 @@ function checkHTML(r, abs) {
     return `<div class="verdict ok">${I.check}<div><b>Audiobookshelf sees ${n === 1 ? "your book" : `all ${n} of your books`}</b>
       <p>In <b>${esc(r.library)}</b>${r.seen_at ? `, at <code>${esc(r.seen_at)}</code>` : ""}. New downloads will show up there by themselves.</p></div></div>`;
   }
-  const missing = r.missing.length ? `<ul>${r.missing.map((t) => `<li>${esc(t)}</li>`).join("")}${n - k > r.missing.length ? `<li>and ${n - k - r.missing.length} more</li>` : ""}</ul>` : "";
+  const missing = r.missing.length
+    ? `<ul>${r.missing.map((t) => `<li>${esc(t)}</li>`).join("")}${n - k > r.missing.length ? `<li>and ${n - k - r.missing.length} more</li>` : ""}</ul>`
+    : "";
   if (k) {
     return `<div class="verdict part">${I.alert}<div><b>Audiobookshelf sees ${k} of your ${n} books</b>
       <p>Still missing:</p>${missing}
@@ -181,10 +228,21 @@ export async function openAbsGuide({ onConnect } = {}) {
       <p class="guide-lede">Audiobookshelf can only show books from folders it can see. Answer two questions and you’ll get the exact steps for your setup.</p>
       <div class="guide-body"><div class="guide-loading"><span class="spinner"></span></div></div>
     </div>`;
-  const close = () => { scrim.hidden = true; scrim.innerHTML = ""; document.removeEventListener("keydown", onKey, true); };
-  const onKey = (e) => { if (e.key === "Escape") { e.stopPropagation(); close(); } };
+  const close = () => {
+    scrim.hidden = true;
+    scrim.innerHTML = "";
+    document.removeEventListener("keydown", onKey, true);
+  };
+  const onKey = (e) => {
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      close();
+    }
+  };
   document.addEventListener("keydown", onKey, true);
-  scrim.onclick = (e) => { if (e.target === scrim || e.target.closest('[data-act="close"]')) close(); };
+  scrim.onclick = (e) => {
+    if (e.target === scrim || e.target.closest('[data-act="close"]')) close();
+  };
 
   const body = $(".guide-body", scrim);
   let g;
@@ -196,12 +254,25 @@ export async function openAbsGuide({ onConnect } = {}) {
   }
 
   // Best guesses from what Narratarr can see; the person can always pick the other answer.
-  const sameGuess = g.where === "here" || g.where === "docker" || g.nearby ? "same"
-    : g.where === "network" || g.where === "internet" ? "other" : "";
+  const sameGuess =
+    g.where === "here" || g.where === "docker" || g.nearby
+      ? "same"
+      : g.where === "network" || g.where === "internet"
+        ? "other"
+        : "";
   const folders = (g.libraries || []).flatMap((l) => l.folders);
-  const absGuess = g.where === "docker" ? "docker"
-    : folders.some((f) => /^\/[^/]+\/?$/.test(f)) ? "docker" // a folder at the very top, like /audiobooks, is a container mount
-    : folders.some((f) => /^[A-Za-z]:\\/.test(f) || /^\/(home|srv|mnt|media|Users|Volumes|opt|data)\//.test(f)) ? "direct" : "";
+  const absGuess =
+    g.where === "docker"
+      ? "docker"
+      : folders.some((f) => /^\/[^/]+\/?$/.test(f))
+        ? "docker" // a folder at the very top, like /audiobooks, is a container mount
+        : folders.some(
+              (f) =>
+                /^[A-Za-z]:\\/.test(f) ||
+                /^\/(home|srv|mnt|media|Users|Volumes|opt|data)\//.test(f),
+            )
+          ? "direct"
+          : "";
   const pick = { where: sameGuess, abs: absGuess };
   let host = "";
 
@@ -221,16 +292,18 @@ export async function openAbsGuide({ onConnect } = {}) {
       </div>`;
     }
     const docker = g.install === "docker";
-    const left = docker ? (host || "your audiobook folder") : g.library_dir;
+    const left = docker ? host || "your audiobook folder" : g.library_dir;
     const right = pick.abs === "docker" ? IN_ABS : left;
     return `<div class="bridge">
       <div class="end"><span class="end-icon"><img src="/static/icon.svg" alt=""></span><small>Narratarr saves to</small><code data-bridge>${esc(left)}</code></div>
       <div class="link"><span class="line"></span><span class="mid">${ICON.folder}</span></div>
       <div class="end"><span class="end-icon abs">${I.headphones}</span><small>Audiobookshelf reads</small><code data-bridge-abs>${esc(right)}</code></div>
     </div>
-    <p class="bridge-note">${pick.abs === "docker"
-      ? `The same folder, under two names: Docker shows it to Audiobookshelf as <code>${IN_ABS}</code>.`
-      : "The same folder, at the same path. Audiobookshelf only needs to be told about it."}</p>`;
+    <p class="bridge-note">${
+      pick.abs === "docker"
+        ? `The same folder, under two names: Docker shows it to Audiobookshelf as <code>${IN_ABS}</code>.`
+        : "The same folder, at the same path. Audiobookshelf only needs to be told about it."
+    }</p>`;
   }
 
   function render() {
@@ -244,22 +317,34 @@ export async function openAbsGuide({ onConnect } = {}) {
           ${choice("where", "other", ICON.other, "On a different machine", "Another computer, a NAS or a server", sameGuess)}
         </div>
       </div>
-      ${pick.where === "same" ? `
+      ${
+        pick.where === "same"
+          ? `
       <div class="guide-q">
         <span class="q-label">How is Audiobookshelf installed?</span>
         <div class="choices">
           ${choice("abs", "docker", ICON.docker, "In Docker", "A container, from a compose file or docker run", absGuess)}
           ${choice("abs", "direct", ICON.direct, "Installed directly", "An app, a package or the Windows installer", absGuess)}
         </div>
-      </div>` : ""}
-      ${ready ? `${bridge()}
-      <ol class="g-steps">${steps.map((s, i) => `
+      </div>`
+          : ""
+      }
+      ${
+        ready
+          ? `${bridge()}
+      <ol class="g-steps">${steps
+        .map(
+          (s, i) => `
         <li class="g-step ${s.done ? "done" : ""}" style="--i:${i}">
           <span class="num">${s.done ? I.check : i + 1}</span>
           <div class="step-body"><h4>${s.title}</h4>${s.body}</div>
-        </li>`).join("")}
+        </li>`,
+        )
+        .join("")}
       </ol>
-      ${pick.where === "other" ? alternative() : ""}` : `<p class="guide-wait">Pick an answer to see your steps.</p>`}`;
+      ${pick.where === "other" ? alternative() : ""}`
+          : `<p class="guide-wait">Pick an answer to see your steps.</p>`
+      }`;
     applyHost();
   }
 
@@ -279,7 +364,10 @@ export async function openAbsGuide({ onConnect } = {}) {
   // Narratarr in Docker can't see the server's path for its folder; once pasted, it fills the steps.
   function applyHost() {
     const shown = host || HOST_FILL;
-    $$('[data-fill="host"]', body).forEach((el) => { el.textContent = shown; el.classList.toggle("filled", Boolean(host)); });
+    $$('[data-fill="host"]', body).forEach((el) => {
+      el.textContent = shown;
+      el.classList.toggle("filled", Boolean(host));
+    });
     const b = $("[data-bridge]", body);
     if (b && g.install === "docker") {
       b.textContent = host || "your audiobook folder";
@@ -306,12 +394,17 @@ export async function openAbsGuide({ onConnect } = {}) {
     const cp = e.target.closest(".cmd-copy");
     if (cp) {
       const code = $("code", cp.parentElement);
-      const added = $$(".add", code).map((n) => n.textContent).join("\n");
+      const added = $$(".add", code)
+        .map((n) => n.textContent)
+        .join("\n");
       const text = cp.dataset.copy ?? (added || code.textContent);
       const ok = await copyText(text);
       cp.classList.toggle("copied", ok);
       $("span", cp).textContent = ok ? "Copied" : "Select and copy";
-      setTimeout(() => { cp.classList.remove("copied"); $("span", cp).textContent = "Copy"; }, 1800);
+      setTimeout(() => {
+        cp.classList.remove("copied");
+        $("span", cp).textContent = "Copy";
+      }, 1800);
       return;
     }
     if (e.target.closest('[data-act="connect"]')) {
@@ -329,7 +422,10 @@ export async function openAbsGuide({ onConnect } = {}) {
         out.innerHTML = checkHTML(r, pick.abs);
         if (r.books && r.seen === r.books) {
           // It works, so every step before it did too.
-          $$(".g-step", body).forEach((li) => { li.classList.add("done"); $(".num", li).innerHTML = I.check; });
+          $$(".g-step", body).forEach((li) => {
+            li.classList.add("done");
+            $(".num", li).innerHTML = I.check;
+          });
         }
       } catch (err) {
         out.innerHTML = `<div class="verdict bad">${I.x}<div><b>Couldn’t check</b><p>${esc(err.message)}</p></div></div>`;

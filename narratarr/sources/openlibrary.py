@@ -66,7 +66,9 @@ def _description(raw) -> str:
 
 def to_details(doc: dict, description: str = "") -> Details:
     """A work from search, trending or a subject list. They spell some fields differently."""
-    authors = doc.get("author_name") or [a.get("name", "") for a in doc.get("authors") or [] if isinstance(a, dict)]
+    authors = doc.get("author_name") or [
+        a.get("name", "") for a in doc.get("authors") or [] if isinstance(a, dict)
+    ]
     year = doc.get("first_publish_year")
     pages = doc.get("number_of_pages_median")
     return Details(
@@ -85,7 +87,9 @@ async def _get(path: str, params: dict | None = None, client: httpx.AsyncClient 
     hit = _cache.get(key)
     if hit is not None:
         return hit
-    headers = {"User-Agent": f"Narratarr/{updates.current_version()} (+https://github.com/narratarr/narratarr)"}
+    headers = {
+        "User-Agent": f"Narratarr/{updates.current_version()} (+https://github.com/narratarr/narratarr)"
+    }
     if client:
         resp = await client.get(f"{BASE}{path}", params=params, headers=headers)
     else:
@@ -101,9 +105,15 @@ async def _get(path: str, params: dict | None = None, client: httpx.AsyncClient 
 
 def _keep(docs: list) -> list[dict]:
     """Real books only: something with a title and an author, and no summaries of other people's books."""
-    return [d for d in docs if isinstance(d, dict) and str(d.get("key", "")).startswith("/works/")
-            and d.get("title") and not _KNOCKOFF.search(d["title"])
-            and (d.get("author_name") or d.get("authors"))]
+    return [
+        d
+        for d in docs
+        if isinstance(d, dict)
+        and str(d.get("key", "")).startswith("/works/")
+        and d.get("title")
+        and not _KNOCKOFF.search(d["title"])
+        and (d.get("author_name") or d.get("authors"))
+    ]
 
 
 class OpenLibrary:
@@ -124,20 +134,34 @@ class OpenLibrary:
 
     async def latest(self, page: int = 1, category: str | None = None) -> Page:
         if category in dict(SUBJECTS):
-            data = await _get(f"/subjects/{category}.json", {"limit": PER_PAGE, "offset": (page - 1) * PER_PAGE},
-                              self._client)
+            data = await _get(
+                f"/subjects/{category}.json",
+                {"limit": PER_PAGE, "offset": (page - 1) * PER_PAGE},
+                self._client,
+            )
             total = -(-int(data.get("work_count") or 0) // PER_PAGE)
         else:
-            data = await _get("/trending/daily.json", {"limit": PER_PAGE, "page": page}, self._client)
+            data = await _get(
+                "/trending/daily.json", {"limit": PER_PAGE, "page": page}, self._client
+            )
             total = 5
         works = _keep(data.get("works") or [])
-        return Page(items=[to_details(w) for w in works], page=page, total_pages=max(1, min(total, 25)))
+        return Page(
+            items=[to_details(w) for w in works], page=page, total_pages=max(1, min(total, 25))
+        )
 
     async def search(self, query: str, page: int = 1) -> Page:
-        data = await _get("/search.json", {"q": query, "fields": FIELDS, "limit": PER_PAGE, "page": page}, self._client)
+        data = await _get(
+            "/search.json",
+            {"q": query, "fields": FIELDS, "limit": PER_PAGE, "page": page},
+            self._client,
+        )
         total = -(-int(data.get("numFound") or 0) // PER_PAGE)
-        return Page(items=[to_details(d) for d in _keep(data.get("docs") or [])], page=page,
-                    total_pages=max(1, min(total, 10)))
+        return Page(
+            items=[to_details(d) for d in _keep(data.get("docs") or [])],
+            page=page,
+            total_pages=max(1, min(total, 10)),
+        )
 
     async def details(self, url: str) -> Details:
         wid = work_id(url)
@@ -145,13 +169,19 @@ class OpenLibrary:
             raise ValueError("That isn't an Open Library book.")
         work, found = await asyncio.gather(
             _get(f"/works/{wid}.json", None, self._client),
-            _get("/search.json", {"q": f"key:/works/{wid}", "fields": FIELDS, "limit": 1}, self._client),
+            _get(
+                "/search.json",
+                {"q": f"key:/works/{wid}", "fields": FIELDS, "limit": 1},
+                self._client,
+            ),
         )
         docs = found.get("docs") or []
         doc = docs[0] if docs else {"key": f"/works/{wid}", "title": work.get("title") or ""}
         d = to_details(doc, _description(work.get("description")))
         if not d.cover_url and work.get("covers"):
-            d.cover_url = cover(next((c for c in work["covers"] if isinstance(c, int) and c > 0), 0))
+            d.cover_url = cover(
+                next((c for c in work["covers"] if isinstance(c, int) and c > 0), 0)
+            )
         subjects = [s for s in work.get("subjects") or [] if isinstance(s, str) and ":" not in s]
         d.categories = subjects[:4]
         return d

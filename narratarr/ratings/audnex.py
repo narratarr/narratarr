@@ -31,12 +31,22 @@ AUDNEX = "https://api.audnex.us"
 TIMEOUT = httpx.Timeout(20, connect=8)
 REQUEST_GAP = 1.0
 MAX_BACKOFF = 30.0
-RATING_TTL = 30 * 24 * 3600      # scores barely move
-ASIN_TTL = 0                     # a title-to-ASIN mapping, once found, does not change
-MISS_TTL = 7 * 24 * 3600         # how long a "no ASIN for this title" is remembered
+RATING_TTL = 30 * 24 * 3600  # scores barely move
+ASIN_TTL = 0  # a title-to-ASIN mapping, once found, does not change
+MISS_TTL = 7 * 24 * 3600  # how long a "no ASIN for this title" is remembered
 
-TLDS = {"us": "com", "uk": "co.uk", "ca": "ca", "au": "com.au", "in": "in",
-        "de": "de", "fr": "fr", "it": "it", "es": "es", "jp": "co.jp"}
+TLDS = {
+    "us": "com",
+    "uk": "co.uk",
+    "ca": "ca",
+    "au": "com.au",
+    "in": "in",
+    "de": "de",
+    "fr": "fr",
+    "it": "it",
+    "es": "es",
+    "jp": "co.jp",
+}
 
 _last_request = 0.0
 _lock: asyncio.Lock | None = None
@@ -86,7 +96,9 @@ class AudnexProvider:
     name = "audnex"
     label = "Audible"
 
-    def __init__(self, store, client: httpx.AsyncClient | None = None, regions: list[str] | None = None):
+    def __init__(
+        self, store, client: httpx.AsyncClient | None = None, regions: list[str] | None = None
+    ):
         self.store = store
         self._client = client
         self._regions = regions
@@ -141,7 +153,10 @@ class AudnexProvider:
 
     def _rating(self, score: float, asin: str) -> Rating | None:
         return make_rating(
-            score, None, audible_url(asin, self.region), self.name,
+            score,
+            None,
+            audible_url(asin, self.region),
+            self.name,
             label="Audible",
             tooltip=f"{float(score):.1f} average on Audible (ASIN {asin})",
         )
@@ -149,9 +164,6 @@ class AudnexProvider:
     # ---- background: the only place that fetches -------------------------------------------
 
     async def fetch_and_store(self, title: str, author: str, asin: str = "") -> Rating | None:
-        from .store import key_for
-
-        key = key_for(title, author)
         if not asin:
             asin = await self._resolve_asin(title, author)
             if not asin:
@@ -164,14 +176,20 @@ class AudnexProvider:
             self.store.put(asin, self.name, state="unrated")  # exists, but unrated
             return None
         rating = self._rating(score, asin)
-        self.store.put(asin, self.name, state="rated", score=score, url=rating.url if rating else "")
+        self.store.put(
+            asin, self.name, state="rated", score=score, url=rating.url if rating else ""
+        )
         return rating
 
     async def lookup(self, title: str, author: str, asin: str = "") -> Rating | None:
         asin = asin or await self._resolve_asin(title, author)
         if not asin:
             return None
-        return self._rating(score, asin) if (score := parse_score(await self._get_book(asin))) else None
+        return (
+            self._rating(score, asin)
+            if (score := parse_score(await self._get_book(asin)))
+            else None
+        )
 
     # ---- title -> ASIN, through our own Audible source ---------------------------------------
 
@@ -265,8 +283,12 @@ class AudnexProvider:
             return {"region": region, "ok": False, "reason": str(e)}
         score = parse_score(record)
         if score is None:
-            return {"region": region, "ok": True, "rating": None,
-                    "note": "the book is here but has no ratings yet"}
+            return {
+                "region": region,
+                "ok": True,
+                "rating": None,
+                "note": "the book is here but has no ratings yet",
+            }
         return {"region": region, "ok": True, "rating": f"{score:.1f}"}
 
     async def _get_book_in(self, asin: str, region: str) -> dict | None:

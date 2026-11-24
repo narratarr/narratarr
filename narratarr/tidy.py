@@ -35,9 +35,17 @@ from . import config, db, ebooks, importer, layout, media, wanted
 
 log = logging.getLogger("narratarr.tidy")
 
-PREFER = ("library", "tags")  # what a folder is named from: Narratarr's details, or the files' own tags
+PREFER = (
+    "library",
+    "tags",
+)  # what a folder is named from: Narratarr's details, or the files' own tags
 LONGEST_PATH = 250  # Windows can't open longer paths without special settings
-_LEFTOVERS = {".ds_store", "thumbs.db", "desktop.ini", "@eadir"}  # safe to remove from an emptied folder
+_LEFTOVERS = {
+    ".ds_store",
+    "thumbs.db",
+    "desktop.ini",
+    "@eadir",
+}  # safe to remove from an emptied folder
 MAX_COVER_BYTES = 20 << 20
 
 
@@ -53,9 +61,13 @@ class Move:
     new_path: Path  # the book's path once it has moved
     details: dict
     origin: str
-    state: str = "move"  # move · tidy (already in place) · look (details missing) · held (can't move yet)
+    state: str = (
+        "move"  # move · tidy (already in place) · look (details missing) · held (can't move yet)
+    )
     reason: str = ""
-    carries: list[dict] = field(default_factory=list)  # books inside src that move with it (its ebook)
+    carries: list[dict] = field(
+        default_factory=list
+    )  # books inside src that move with it (its ebook)
     joins: int | None = None  # an ebook going into this audiobook's folder
 
     def hold(self, reason: str, state: str = "held") -> None:
@@ -73,13 +85,18 @@ def file_tags(folder: Path) -> dict:
         return {}
     raw = importer._tags(files[0])
     tags = {k: importer._readable(v) for k, v in raw.items()}
-    author, narrator = importer.pick_people(tags.get("artist", ""), tags.get("albumartist", ""),
-                                            tags.get("narrator") or tags.get("composer") or "")
+    author, narrator = importer.pick_people(
+        tags.get("artist", ""),
+        tags.get("albumartist", ""),
+        tags.get("narrator") or tags.get("composer") or "",
+    )
     out = {
         "title": tags.get("album") or (tags.get("title") if len(files) == 1 else ""),
         "author": author,
         "narrators": [n.strip() for n in re.split(r"[,;&]", narrator) if n.strip()][:4],
-        "series": [{"asin": "", "title": raw["series"], "sequence": raw.get("series_part", "")}] if raw.get("series") else [],
+        "series": [{"asin": "", "title": raw["series"], "sequence": raw.get("series_part", "")}]
+        if raw.get("series")
+        else [],
         "released": (raw.get("date") or "")[:10],
     }
     return {k: v for k, v in out.items() if v}
@@ -88,7 +105,11 @@ def file_tags(folder: Path) -> dict:
 def details(book: dict, prefer: str = "library") -> tuple[dict, str]:
     """(the details a book's folder is named from, where they came from)."""
     d = {k: book.get(k) for k in ("title", "author", "narrators", "series", "released", "kind")}
-    origin = "audible" if book.get("asin") else ("import" if book.get("source") == "local" else "download")
+    origin = (
+        "audible"
+        if book.get("asin")
+        else ("import" if book.get("source") == "local" else "download")
+    )
     if prefer == "tags" and wanted.kind_of(book) == "audiobook" and book.get("path"):
         found = file_tags(Path(book["path"]))
         if found:
@@ -143,7 +164,9 @@ def _rel(p: Path, root: Path) -> str:
 
 
 def _key(p: Path) -> str:
-    return str(p).lower()  # compared without case, so "dune" and "Dune" count as one folder everywhere
+    return str(
+        p
+    ).lower()  # compared without case, so "dune" and "Dune" count as one folder everywhere
 
 
 class _Places:
@@ -177,8 +200,12 @@ def _own_folder(path: Path, root: Path, places: _Places, me: int) -> bool:
     return all(x == path or ebooks.sidecar(x) or ebooks.clutter(x) for x in folder.iterdir())
 
 
-def plan(settings: config.Settings, prefer: str = "library", books: list[dict] | None = None,
-         busy: set[int] | frozenset = frozenset()) -> list[Move]:
+def plan(
+    settings: config.Settings,
+    prefer: str = "library",
+    books: list[dict] | None = None,
+    busy: set[int] | frozenset = frozenset(),
+) -> list[Move]:
     """Where every finished book would go under the current folder layout, and which can't move yet."""
     root = Path(settings.library_dir).expanduser().resolve()
     books = [b for b in (db.list_books() if books is None else books) if b.get("path")]
@@ -202,18 +229,28 @@ def plan(settings: config.Settings, prefer: str = "library", books: list[dict] |
         held_ebook = ""
         if src.is_dir() and _inside(src, root):
             for e in books:
-                if e["id"] != b["id"] and wanted.kind_of(e) == "ebook" and _inside(where[e["id"]], src):
+                if (
+                    e["id"] != b["id"]
+                    and wanted.kind_of(e) == "ebook"
+                    and _inside(where[e["id"]], src)
+                ):
                     if apart:
-                        held_ebook = held_ebook or ("done" if e["status"] == "completed" else "busy")
+                        held_ebook = held_ebook or (
+                            "done" if e["status"] == "completed" else "busy"
+                        )
                         continue
                     m.carries.append(e)
                     carried.add(e["id"])
         if src == dst:
             m.state = "tidy"
         elif held_ebook == "done":
-            m.hold("Its ebook moves to its own folder first. Run Tidy again afterwards to move this one")
+            m.hold(
+                "Its ebook moves to its own folder first. Run Tidy again afterwards to move this one"
+            )
         elif held_ebook:
-            m.hold("An ebook in this folder isn't finished yet, so the folder stays put until it is")
+            m.hold(
+                "An ebook in this folder isn't finished yet, so the folder stays put until it is"
+            )
 
     for b in done:
         if wanted.kind_of(b) != "ebook" or b["id"] in carried:
@@ -225,7 +262,9 @@ def plan(settings: config.Settings, prefer: str = "library", books: list[dict] |
         if pm is not None:
             # The same book in both formats shares one folder, the way Audiobookshelf expects.
             folder = pm.dst if pm.state in ("move", "tidy") else pm.src
-            m = moves[b["id"]] = Move(b, path, folder / path.name, folder / path.name, d, origin, joins=partner["id"])
+            m = moves[b["id"]] = Move(
+                b, path, folder / path.name, folder / path.name, d, origin, joins=partner["id"]
+            )
             if pm.state not in ("move", "tidy"):
                 m.hold("Waiting on its audiobook: the two belong in one folder")
         else:
@@ -233,7 +272,9 @@ def plan(settings: config.Settings, prefer: str = "library", books: list[dict] |
             if path.parent.is_dir() and _own_folder(path, root, places, b["id"]):
                 m = moves[b["id"]] = Move(b, path.parent, folder, folder / path.name, d, origin)
             else:
-                m = moves[b["id"]] = Move(b, path, folder / path.name, folder / path.name, d, origin)
+                m = moves[b["id"]] = Move(
+                    b, path, folder / path.name, folder / path.name, d, origin
+                )
         if m.new_path == path:
             m.state = "tidy"
 
@@ -256,8 +297,14 @@ def plan(settings: config.Settings, prefer: str = "library", books: list[dict] |
             m.hold("Narratarr is working on it right now")
         elif wanted.kind_of(b) == "audiobook" and not cur.is_dir():
             m.hold("It's a single audio file rather than a folder")
-        elif not (m.details.get("author") or "").strip() or not (m.details.get("title") or "").strip():
-            m.hold("It has no author" if (m.details.get("title") or "").strip() else "It has no title", "look")
+        elif (
+            not (m.details.get("author") or "").strip()
+            or not (m.details.get("title") or "").strip()
+        ):
+            m.hold(
+                "It has no author" if (m.details.get("title") or "").strip() else "It has no title",
+                "look",
+            )
         if m.state != "move":
             continue
 
@@ -275,37 +322,56 @@ def plan(settings: config.Settings, prefer: str = "library", books: list[dict] |
         elif m.dst.exists() and not _same(m.src, m.dst) and not _empty_dir(m.dst):
             m.hold("Something is already there with that name")
         elif _device(m.src) != _device(m.dst.parent):
-            m.hold("That's on another disk: it would have to be copied, and Audiobookshelf would lose its place")
+            m.hold(
+                "That's on another disk: it would have to be copied, and Audiobookshelf would lose its place"
+            )
         elif len(str(m.dst)) + _longest_inside(m.src) > LONGEST_PATH:
             m.hold("The new path would be too long for Windows")
 
     order = {"move": 0, "look": 1, "held": 2, "tidy": 3}
-    return sorted(moves.values(), key=lambda m: (order[m.state], (m.book["author"] or "").lower(), (m.book["title"] or "").lower()))
+    return sorted(
+        moves.values(),
+        key=lambda m: (
+            order[m.state],
+            (m.book["author"] or "").lower(),
+            (m.book["title"] or "").lower(),
+        ),
+    )
 
 
-def preview(settings: config.Settings, prefer: str = "library", busy: set[int] | frozenset = frozenset()) -> dict:
+def preview(
+    settings: config.Settings, prefer: str = "library", busy: set[int] | frozenset = frozenset()
+) -> dict:
     root = Path(settings.library_dir).expanduser().resolve()
     moves = plan(settings, prefer, busy=busy)
     counts = {s: 0 for s in ("move", "tidy", "look", "held")}
     rows = []
     for m in moves:
         counts[m.state] += 1
-        rows.append({
-            "id": m.book["id"],
-            "kind": wanted.kind_of(m.book),
-            "title": m.book["title"],
-            "author": m.book["author"],
-            "state": m.state,
-            "reason": m.reason,
-            "origin": m.origin,
-            "from": _rel(Path(m.book["path"]).resolve(), root),
-            "to": _rel(m.new_path, root),
-            "carries": [c["title"] for c in m.carries],
-            "joins": m.joins,
-        })
+        rows.append(
+            {
+                "id": m.book["id"],
+                "kind": wanted.kind_of(m.book),
+                "title": m.book["title"],
+                "author": m.book["author"],
+                "state": m.state,
+                "reason": m.reason,
+                "origin": m.origin,
+                "from": _rel(Path(m.book["path"]).resolve(), root),
+                "to": _rel(m.new_path, root),
+                "carries": [c["title"] for c in m.carries],
+                "joins": m.joins,
+            }
+        )
     batch, done = db.last_tidy_batch()
-    return {"root": str(root), "template": settings.folder_template, "prefer": prefer, "counts": counts,
-            "books": rows, "undo": len(done)}
+    return {
+        "root": str(root),
+        "template": settings.folder_template,
+        "prefer": prefer,
+        "counts": counts,
+        "books": rows,
+        "undo": len(done),
+    }
 
 
 # ---- moving ---------------------------------------------------------------------------------------
@@ -385,8 +451,15 @@ class Job:
 JOB = Job()
 
 
-def apply(settings: config.Settings, ids: list[int], prefer: str = "library", busy=frozenset(),
-          tags: bool = False, sidecars: bool = False, job: Job | None = None) -> Job:
+def apply(
+    settings: config.Settings,
+    ids: list[int],
+    prefer: str = "library",
+    busy=frozenset(),
+    tags: bool = False,
+    sidecars: bool = False,
+    job: Job | None = None,
+) -> Job:
     """Move the picked books. The plan is worked out again here: what the browser sent is only which books."""
     job = job or Job()
     root = Path(settings.library_dir).expanduser().resolve()
@@ -407,14 +480,19 @@ def apply(settings: config.Settings, ids: list[int], prefer: str = "library", bu
         job.current = b["title"]
         try:
             if m.joins is not None and m.joins not in moved_ok and not (m.dst.parent.is_dir()):
-                raise TidyError("Its audiobook didn't move, so it stayed where it was"
-                                if m.joins in planned else "Pick its audiobook too: the two move together")
+                raise TidyError(
+                    "Its audiobook didn't move, so it stayed where it was"
+                    if m.joins in planned
+                    else "Pick its audiobook too: the two move together"
+                )
             fresh = db.get(b["id"])
             if not fresh or fresh["status"] != "completed" or fresh["path"] != b["path"]:
                 raise TidyError("It changed while tidying, so it was left alone")
             paths = [[b["id"], b["path"], str(m.new_path)]]
             for c in m.carries:
-                paths.append([c["id"], c["path"], str(m.dst / Path(c["path"]).resolve().relative_to(m.src))])
+                paths.append(
+                    [c["id"], c["path"], str(m.dst / Path(c["path"]).resolve().relative_to(m.src))]
+                )
             move_id = db.add_tidy_move(batch, str(m.src), str(m.dst), paths)
             try:
                 rename(m.src, m.dst, root)
@@ -436,7 +514,9 @@ def apply(settings: config.Settings, ids: list[int], prefer: str = "library", bu
                 if tags:
                     try:
                         write_tags(m.dst, m.details)
-                    except Exception as e:  # a file mutagen can't save: the move itself still stands
+                    except (
+                        Exception
+                    ) as e:  # a file mutagen can't save: the move itself still stands
                         job.notes.append(f"{b['title']}: couldn't update the tags ({e})")
         job.done += 1
     job.current = ""
@@ -480,7 +560,9 @@ def side_files(folder: Path, book: dict) -> list[str]:
             (folder / "desc.txt").write_text(book["description"])
         if book.get("narrators") and not (folder / "reader.txt").exists():
             (folder / "reader.txt").write_text(", ".join(book["narrators"]))
-        if not importer.extract_cover(folder) and str(book.get("cover_url") or "").startswith(("http://", "https://")):
+        if not importer.extract_cover(folder) and str(book.get("cover_url") or "").startswith(
+            ("http://", "https://")
+        ):
             _download_cover(book["cover_url"], folder)
     except (OSError, httpx.HTTPError) as e:
         notes.append(f"{book['title']}: couldn't add its cover or description ({e})")
@@ -488,7 +570,10 @@ def side_files(folder: Path, book: dict) -> list[str]:
 
 
 def _download_cover(url: str, folder: Path) -> None:
-    with httpx.Client(follow_redirects=True, timeout=20) as client, client.stream("GET", url) as resp:
+    with (
+        httpx.Client(follow_redirects=True, timeout=20) as client,
+        client.stream("GET", url) as resp,
+    ):
         kind = resp.headers.get("content-type", "").split(";")[0]
         if not resp.is_success or not kind.startswith("image/"):
             return
@@ -545,9 +630,14 @@ def _set_tags(audio, want: dict[str, str]) -> bool:
     return False
 
 
-_MP4 = {"album": ["©alb"], "author": ["©ART", "aART"], "narrator": ["©wrt", "----:com.apple.iTunes:NARRATOR"],
-        "series": ["----:com.apple.iTunes:SERIES"], "part": ["----:com.apple.iTunes:SERIES-PART"],
-        "year": ["©day"]}
+_MP4 = {
+    "album": ["©alb"],
+    "author": ["©ART", "aART"],
+    "narrator": ["©wrt", "----:com.apple.iTunes:NARRATOR"],
+    "series": ["----:com.apple.iTunes:SERIES"],
+    "part": ["----:com.apple.iTunes:SERIES-PART"],
+    "year": ["©day"],
+}
 
 
 def _set_mp4(tags, want: dict[str, str]) -> bool:
@@ -555,7 +645,11 @@ def _set_mp4(tags, want: dict[str, str]) -> bool:
     for name, value in want.items():
         for key in _MP4[name]:
             old = tags.get(key)
-            text = (bytes(old[0]).decode("utf-8", "ignore") if key.startswith("----") else str(old[0])) if old else ""
+            text = (
+                (bytes(old[0]).decode("utf-8", "ignore") if key.startswith("----") else str(old[0]))
+                if old
+                else ""
+            )
             if (name == "year" and text) or text == value:
                 continue
             tags[key] = [MP4FreeForm(value.encode())] if key.startswith("----") else [value]
@@ -563,8 +657,14 @@ def _set_mp4(tags, want: dict[str, str]) -> bool:
     return changed
 
 
-_ID3 = {"album": [("TALB", TALB)], "author": [("TPE1", TPE1), ("TPE2", TPE2)], "narrator": [("TCOM", TCOM), ("TXXX:NARRATOR", "NARRATOR")],
-        "series": [("TXXX:SERIES", "SERIES")], "part": [("TXXX:SERIES-PART", "SERIES-PART")], "year": [("TDRC", TDRC)]}
+_ID3 = {
+    "album": [("TALB", TALB)],
+    "author": [("TPE1", TPE1), ("TPE2", TPE2)],
+    "narrator": [("TCOM", TCOM), ("TXXX:NARRATOR", "NARRATOR")],
+    "series": [("TXXX:SERIES", "SERIES")],
+    "part": [("TXXX:SERIES-PART", "SERIES-PART")],
+    "year": [("TDRC", TDRC)],
+}
 
 
 def _set_id3(tags, want: dict[str, str]) -> bool:
@@ -575,13 +675,26 @@ def _set_id3(tags, want: dict[str, str]) -> bool:
             text = str(old.text[0]) if old is not None and old.text else ""
             if (name == "year" and text) or text == value:
                 continue
-            tags.setall(key, [TXXX(encoding=3, desc=frame, text=[value]) if isinstance(frame, str) else frame(encoding=3, text=[value])])
+            tags.setall(
+                key,
+                [
+                    TXXX(encoding=3, desc=frame, text=[value])
+                    if isinstance(frame, str)
+                    else frame(encoding=3, text=[value])
+                ],
+            )
             changed = True
     return changed
 
 
-_VORBIS = {"album": ["ALBUM"], "author": ["ARTIST", "ALBUMARTIST"], "narrator": ["COMPOSER", "NARRATOR"],
-           "series": ["SERIES"], "part": ["SERIES-PART"], "year": ["DATE"]}
+_VORBIS = {
+    "album": ["ALBUM"],
+    "author": ["ARTIST", "ALBUMARTIST"],
+    "narrator": ["COMPOSER", "NARRATOR"],
+    "series": ["SERIES"],
+    "part": ["SERIES-PART"],
+    "year": ["DATE"],
+}
 
 
 def _set_vorbis(tags, want: dict[str, str]) -> bool:

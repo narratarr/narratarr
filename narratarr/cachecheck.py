@@ -23,6 +23,7 @@ FOUR ANSWERS, NOT TWO
     that gets no answer gets `unknown` with the reason attached. Pending would only be
     honest if the answer arrived later, and nothing here waits for that.
 """
+
 from __future__ import annotations
 
 import re

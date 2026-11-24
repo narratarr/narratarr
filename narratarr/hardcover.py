@@ -27,6 +27,7 @@ LIMITS (docs.hardcover.app, "Getting Started with the API")
     and honours Retry-After once. Queries time out at 30 seconds, and a user-agent naming the tool is
     recommended.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -56,7 +57,11 @@ AUDIO, BOTH = 2, 3  # editions.reading_format_id
 PAGE = 100
 MAX_BOOKS = 2000  # never read past this far down the shelf in one check
 PAGE_PAUSE = 1.0  # seconds between shelf pages: the per-minute limit refills one a second
-EXPIRED_TOKEN_CODES = {"invalid-jwt", "invalid_token", "invalid-token"}  # a 200 that means "renew me"
+EXPIRED_TOKEN_CODES = {
+    "invalid-jwt",
+    "invalid_token",
+    "invalid-token",
+}  # a 200 that means "renew me"
 
 
 class HardcoverError(Exception):
@@ -95,11 +100,16 @@ async def record(check):
 
             known = isinstance(e, (HardcoverError, audible.AudibleError, httpx.HTTPError))
             last_sync.clear()
-            last_sync.update(at=time.time(), error=str(e) if known else "Couldn't finish checking the shelf. Try again later.")
+            last_sync.update(
+                at=time.time(),
+                error=str(e) if known else "Couldn't finish checking the shelf. Try again later.",
+            )
         raise
     if generation == _generation:
         last_sync.clear()
-        last_sync.update(at=time.time(), error="", **{k: result[k] for k in ("added", "not_found", "more")})
+        last_sync.update(
+            at=time.time(), error="", **{k: result[k] for k in ("added", "not_found", "more")}
+        )
     return result
 
 
@@ -119,8 +129,12 @@ def _user_agent() -> str:
 
 
 def _client(transport: httpx.AsyncBaseTransport | None = None) -> httpx.AsyncClient:
-    return httpx.AsyncClient(timeout=30, transport=transport, headers={"User-Agent": _user_agent()},
-                             follow_redirects=False)
+    return httpx.AsyncClient(
+        timeout=30,
+        transport=transport,
+        headers={"User-Agent": _user_agent()},
+        follow_redirects=False,
+    )
 
 
 def _json(resp: httpx.Response) -> dict:
@@ -154,22 +168,36 @@ async def start(transport: httpx.AsyncBaseTransport | None = None) -> dict:
         try:
             resp = await c.post(DEVICE, data={"client_id": client_id(), "scope": SCOPE})
         except httpx.HTTPError as e:
-            raise HardcoverError("Couldn't reach Hardcover. Check this machine's internet connection.") from e
+            raise HardcoverError(
+                "Couldn't reach Hardcover. Check this machine's internet connection."
+            ) from e
     body = _json(resp)
     if resp.status_code >= 400 or not body.get("device_code") or not body.get("user_code"):
-        raise HardcoverError(f"Hardcover didn't start the sign-in ({body.get('error') or resp.status_code}).")
+        raise HardcoverError(
+            f"Hardcover didn't start the sign-in ({body.get('error') or resp.status_code})."
+        )
     link = str(body.get("verification_uri") or "")
     full = str(body.get("verification_uri_complete") or "")
     if not link.startswith(LINK_HOST):
-        raise HardcoverError("Hardcover's answer pointed somewhere other than hardcover.app, so it was ignored.")
+        raise HardcoverError(
+            "Hardcover's answer pointed somewhere other than hardcover.app, so it was ignored."
+        )
     expires_in = _int(body.get("expires_in"), 600, 60, 1800)
     interval = _int(body.get("interval"), 5, 2, 60)
     _pending.clear()
-    _pending.update(device_code=str(body["device_code"]), interval=interval, next_poll=0.0,
-                    expires_at=time.time() + expires_in)
-    return {"user_code": str(body["user_code"])[:32], "verification_uri": link,
-            "verification_uri_complete": full if full.startswith(LINK_HOST) else link,
-            "expires_in": expires_in, "interval": interval}
+    _pending.update(
+        device_code=str(body["device_code"]),
+        interval=interval,
+        next_poll=0.0,
+        expires_at=time.time() + expires_in,
+    )
+    return {
+        "user_code": str(body["user_code"])[:32],
+        "verification_uri": link,
+        "verification_uri_complete": full if full.startswith(LINK_HOST) else link,
+        "expires_in": expires_in,
+        "interval": interval,
+    }
 
 
 async def poll(transport: httpx.AsyncBaseTransport | None = None) -> dict:
@@ -181,13 +209,21 @@ async def poll(transport: httpx.AsyncBaseTransport | None = None) -> dict:
         _pending.clear()
         return {"state": "expired"}
     if now < _pending["next_poll"]:
-        return {"state": "pending"}  # Hardcover asks for no faster than `interval`; the page can ask as often as it likes
+        return {
+            "state": "pending"
+        }  # Hardcover asks for no faster than `interval`; the page can ask as often as it likes
     _pending["next_poll"] = now + _pending["interval"]
     code = _pending["device_code"]
     async with _client(transport) as c:
         try:
-            resp = await c.post(TOKEN, data={"grant_type": "urn:ietf:params:oauth:grant-type:device_code",
-                                             "device_code": code, "client_id": client_id()})
+            resp = await c.post(
+                TOKEN,
+                data={
+                    "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+                    "device_code": code,
+                    "client_id": client_id(),
+                },
+            )
         except httpx.HTTPError:
             return {"state": "pending"}  # a blip; the next poll tries again
     body = _json(resp)
@@ -222,16 +258,26 @@ async def poll(transport: httpx.AsyncBaseTransport | None = None) -> dict:
 def _save_tokens(body: dict) -> None:
     access, refresh = str(body.get("access_token") or ""), str(body.get("refresh_token") or "")
     expires_in = _int(body.get("expires_in"), 3600, 60, 366 * 86400)
-    config.update({"hardcover_access_token": access,
-                   "hardcover_refresh_token": refresh or config.load().hardcover_refresh_token,
-                   "hardcover_token_expires": time.time() + expires_in})
+    config.update(
+        {
+            "hardcover_access_token": access,
+            "hardcover_refresh_token": refresh or config.load().hardcover_refresh_token,
+            "hardcover_token_expires": time.time() + expires_in,
+        }
+    )
 
 
 def _forget_tokens() -> None:
     global _generation
     _generation += 1
-    config.update({"hardcover_access_token": "", "hardcover_refresh_token": "", "hardcover_token_expires": 0.0,
-                   "hardcover_user": ""})
+    config.update(
+        {
+            "hardcover_access_token": "",
+            "hardcover_refresh_token": "",
+            "hardcover_token_expires": 0.0,
+            "hardcover_user": "",
+        }
+    )
 
 
 async def disconnect(transport: httpx.AsyncBaseTransport | None = None) -> None:
@@ -245,7 +291,9 @@ async def disconnect(transport: httpx.AsyncBaseTransport | None = None) -> None:
         await _revoke(token, transport, hint)
 
 
-async def _revoke(token: str, transport=None, hint: str = "refresh_token", client: httpx.AsyncClient | None = None) -> None:
+async def _revoke(
+    token: str, transport=None, hint: str = "refresh_token", client: httpx.AsyncClient | None = None
+) -> None:
     """Best effort: tell Hardcover a token is no longer wanted (revoking either half revokes the pair)."""
     if not (token and available()):
         return
@@ -281,23 +329,37 @@ async def _access_token(c: httpx.AsyncClient, stale: str = "") -> str:
         if not sent:
             if s.hardcover_access_token and s.hardcover_access_token != stale:
                 return s.hardcover_access_token
-            raise HardcoverError("Hardcover isn't connected. Connect it under Settings → Search & sources.")
+            raise HardcoverError(
+                "Hardcover isn't connected. Connect it under Settings → Search & sources."
+            )
         try:
-            resp = await c.post(TOKEN, data={"grant_type": "refresh_token", "refresh_token": sent,
-                                             "client_id": client_id()})
+            resp = await c.post(
+                TOKEN,
+                data={
+                    "grant_type": "refresh_token",
+                    "refresh_token": sent,
+                    "client_id": client_id(),
+                },
+            )
         except httpx.HTTPError as e:
             raise HardcoverError("Couldn't reach Hardcover.") from e
         body = _json(resp)
         if generation != _generation:
-            if body.get("access_token"):  # Disconnect won: store nothing, and don't leave this new pair signed in
+            if body.get(
+                "access_token"
+            ):  # Disconnect won: store nothing, and don't leave this new pair signed in
                 await _revoke(str(body.get("refresh_token") or body["access_token"]), client=c)
             raise HardcoverError("Hardcover was disconnected.")
         if not body.get("access_token"):
             refused = body.get("error") in ("invalid_grant", "invalid_token", "unauthorized_client")
             if refused and config.load().hardcover_refresh_token == sent:
                 _forget_tokens()  # revoked or expired at Hardcover: say so, rather than retry forever
-                raise HardcoverError("Hardcover signed Narratarr out. Connect it again under Settings → Search & sources.")
-            raise HardcoverError(f"Hardcover didn't renew Narratarr's sign-in ({body.get('error') or resp.status_code}).")
+                raise HardcoverError(
+                    "Hardcover signed Narratarr out. Connect it again under Settings → Search & sources."
+                )
+            raise HardcoverError(
+                f"Hardcover didn't renew Narratarr's sign-in ({body.get('error') or resp.status_code})."
+            )
         _save_tokens(body)
         return str(body["access_token"])
 
@@ -310,19 +372,26 @@ def _expired_token_error(body: dict) -> bool:
     return False
 
 
-async def query(text: str, variables: dict | None = None, transport: httpx.AsyncBaseTransport | None = None) -> dict:
+async def query(
+    text: str, variables: dict | None = None, transport: httpx.AsyncBaseTransport | None = None
+) -> dict:
     """One GraphQL request (always with variables, never with values pasted into the query)."""
     async with _client(transport) as c:
         stale, waited = "", False
         for _attempt in range(3):
             token = await _access_token(c, stale)
             try:
-                resp = await c.post(GRAPHQL, json={"query": text, "variables": variables or {}},
-                                    headers={"Authorization": f"Bearer {token}"})
+                resp = await c.post(
+                    GRAPHQL,
+                    json={"query": text, "variables": variables or {}},
+                    headers={"Authorization": f"Bearer {token}"},
+                )
             except httpx.HTTPError as e:
                 raise HardcoverError("Couldn't reach Hardcover.") from e
             body = _json(resp)
-            if (resp.status_code == 401 or (resp.status_code == 200 and _expired_token_error(body))) and not stale:
+            if (
+                resp.status_code == 401 or (resp.status_code == 200 and _expired_token_error(body))
+            ) and not stale:
                 stale = token  # it ran out early: renew it once
                 continue
             wait = resp.headers.get("retry-after", "")
@@ -332,13 +401,17 @@ async def query(text: str, variables: dict | None = None, transport: httpx.Async
                 continue
             break
     if resp.status_code == 429:
-        raise HardcoverError(f"Hardcover is busy (rate limit). Try again{f' in {wait} seconds' if wait.isdigit() else ' later'}.")
+        raise HardcoverError(
+            f"Hardcover is busy (rate limit). Try again{f' in {wait} seconds' if wait.isdigit() else ' later'}."
+        )
     if resp.status_code == 401 or _expired_token_error(body):
         raise HardcoverError("Hardcover didn't accept Narratarr's sign-in. Connect it again.")
     if resp.status_code == 403:
         missing = _clean(body.get("scope"), 120)
-        raise HardcoverError(f"Hardcover refused that ({body.get('error') or 'forbidden'}"
-                             f"{f', needs {missing}' if missing else ''}). Connect it again to grant access.")
+        raise HardcoverError(
+            f"Hardcover refused that ({body.get('error') or 'forbidden'}"
+            f"{f', needs {missing}' if missing else ''}). Connect it again to grant access."
+        )
     if resp.status_code >= 400:
         raise HardcoverError(f"Hardcover answered with an error ({resp.status_code}).")
     if body.get("errors"):
@@ -354,7 +427,9 @@ async def query(text: str, variables: dict | None = None, transport: httpx.Async
 async def _me(transport=None) -> dict:
     data = await query("query Me { me { id username } }", transport=transport)
     me = data.get("me")
-    me = me[0] if isinstance(me, list) and me else me  # `me` is a function returning users, so it may be a list
+    me = (
+        me[0] if isinstance(me, list) and me else me
+    )  # `me` is a function returning users, so it may be a list
     if not isinstance(me, dict) or not isinstance(me.get("id"), int):
         raise HardcoverError("Hardcover didn't say which account this is.")
     return {"id": me["id"], "username": str(me.get("username") or "")[:80]}
@@ -380,19 +455,32 @@ def _row(row) -> dict | None:
     if not isinstance(row, dict) or not isinstance(row.get("id"), int):
         return None
     book = row.get("book") if isinstance(row.get("book"), dict) else {}
-    people = [c for c in book.get("contributions") or [] if isinstance(c, dict) and isinstance(c.get("author"), dict)]
+    people = [
+        c
+        for c in book.get("contributions") or []
+        if isinstance(c, dict) and isinstance(c.get("author"), dict)
+    ]
     # The writers, not the translator, illustrator or narrator (`contribution` is the role; empty means author).
-    writers = [c for c in people if str(c.get("contribution") or "author").strip().lower() == "author"] or people
+    writers = [
+        c for c in people if str(c.get("contribution") or "author").strip().lower() == "author"
+    ] or people
     authors = [_clean(c["author"].get("name"), 120) for c in writers]
     edition = row.get("edition") if isinstance(row.get("edition"), dict) else {}
     asin = _clean(edition.get("asin"), 20).upper()
     audio = edition.get("reading_format_id") in (AUDIO, BOTH)
-    return {"id": row["id"], "title": _clean(book.get("title")), "author": ", ".join(a for a in authors if a)[:300],
-            "asin": asin if audio and len(asin) == 10 and asin.isalnum() else ""}
+    return {
+        "id": row["id"],
+        "title": _clean(book.get("title")),
+        "author": ", ".join(a for a in authors if a)[:300],
+        "asin": asin if audio and len(asin) == 10 and asin.isalnum() else "",
+    }
 
 
-async def want_to_read(transport: httpx.AsyncBaseTransport | None = None, skip: set | frozenset = frozenset(),
-                       enough: int | None = None) -> tuple[list[dict], bool]:
+async def want_to_read(
+    transport: httpx.AsyncBaseTransport | None = None,
+    skip: set | frozenset = frozenset(),
+    enough: int | None = None,
+) -> tuple[list[dict], bool]:
     """Books on the connected account's Want to Read shelf, newest first, leaving out the ids in `skip`:
     ([{"id": user_book id, "title", "author", "asin": an audio edition's ASIN or ""}], whether there are more).
     With `enough`, reading stops once that many are found, so a big shelf costs a page or two, not twenty."""
@@ -404,7 +492,11 @@ async def want_to_read(transport: httpx.AsyncBaseTransport | None = None, skip: 
     while offset < MAX_BOOKS:
         if offset:
             await asyncio.sleep(PAGE_PAUSE)
-        data = await query(SHELF, {"user": me["id"], "status": WANT_TO_READ, "limit": PAGE, "offset": offset}, transport)
+        data = await query(
+            SHELF,
+            {"user": me["id"], "status": WANT_TO_READ, "limit": PAGE, "offset": offset},
+            transport,
+        )
         rows = data.get("user_books") or []
         found += [r for r in (_row(x) for x in rows) if r and r["id"] not in skip]
         if enough is not None and len(found) > enough:

@@ -48,6 +48,7 @@ HOME = ("192.168.1.20", 50000)
 def accounts(monkeypatch):
     """A real admin and a real listener, signed in through the actual middleware."""
     from fastapi.testclient import TestClient
+
     from narratarr import api, auth, users
 
     auth._failures.clear()
@@ -55,10 +56,13 @@ def accounts(monkeypatch):
     c = TestClient(api.app, client=HOME)
     c.__enter__()
     c.app.state.worker.poke = lambda: None
-    assert c.post("/api/auth/setup", json={"username": "admin", "password": "admin-pass"}).status_code == 200
-    made = c.post("/api/users", json={"username": "listener", "password": "listen-pass", "role": "listener"})
+    assert (
+        c.post("/api/auth/setup", json={"username": "admin", "password": "admin-pass"}).status_code
+        == 200
+    )
+    made = c.post(
+        "/api/users", json={"username": "listener", "password": "listen-pass", "role": "listener"}
+    )
     assert made.status_code == 200, made.text
     yield c
     c.__exit__(None, None, None)
-
-

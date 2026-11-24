@@ -22,7 +22,11 @@ _UNREACHABLE = {101, 113, 51, 65}  # ENETUNREACH / EHOSTUNREACH, on Linux and on
 
 def in_docker() -> bool:
     """Whether Narratarr is running in a container (Docker or Podman)."""
-    return Path("/.dockerenv").exists() or Path("/run/.containerenv").exists() or bool(os.environ.get("NARRATARR_DOCKER"))
+    return (
+        Path("/.dockerenv").exists()
+        or Path("/run/.containerenv").exists()
+        or bool(os.environ.get("NARRATARR_DOCKER"))
+    )
 
 
 def _host_port(url: str) -> tuple[str, int | None]:
@@ -50,8 +54,10 @@ def localhost_hint(url: str, label: str, example: str) -> str:
     """The sentence for "localhost" typed into Narratarr running in Docker, or "" when it doesn't apply."""
     if not (is_loopback(url) and in_docker()):
         return ""
-    return (f"Narratarr runs in Docker, so “localhost” here means Narratarr’s own container, not the machine "
-            f"{label} runs on. Use that machine’s IP address instead, like {example}.")
+    return (
+        f"Narratarr runs in Docker, so “localhost” here means Narratarr’s own container, not the machine "
+        f"{label} runs on. Use that machine’s IP address instead, like {example}."
+    )
 
 
 def _causes(exc: BaseException) -> list[BaseException]:
@@ -84,7 +90,9 @@ def reason(exc: BaseException) -> str:
     return ""
 
 
-def explain(exc: BaseException, url: str, label: str, example: str = "http://192.168.1.10:8080") -> str:
+def explain(
+    exc: BaseException, url: str, label: str, example: str = "http://192.168.1.10:8080"
+) -> str:
     """A full sentence or two: what failed, and what to do about it."""
     host, port = _host_port(url)
     where = f"{host}:{port}" if port else host
@@ -95,19 +103,27 @@ def explain(exc: BaseException, url: str, label: str, example: str = "http://192
     if why == "name":
         text = f"Couldn't reach {label}: no machine called “{host}” could be found."
         if "." not in host and in_docker():
-            text += (" A container name only works when both containers are on the same Docker network."
-                     " Otherwise use the IP address of the machine it runs on.")
+            text += (
+                " A container name only works when both containers are on the same Docker network."
+                " Otherwise use the IP address of the machine it runs on."
+            )
         else:
             text += " Check the spelling, or use its IP address."
         return text
     if why == "refused":
-        return (f"Couldn't reach {label}: nothing is answering on port {port} at {host}. "
-                f"Check the port, and that {label} is running.")
+        return (
+            f"Couldn't reach {label}: nothing is answering on port {port} at {host}. "
+            f"Check the port, and that {label} is running."
+        )
     if why == "tls":
         return f"Couldn't reach {label} at {where} over https. If it doesn't use https, start the address with http:// instead."
     if why == "unreachable":
-        return f"Couldn't reach {label}: there's no route to {host} from here. Check the IP address."
+        return (
+            f"Couldn't reach {label}: there's no route to {host} from here. Check the IP address."
+        )
     if why == "timeout":
-        return (f"Couldn't reach {label}: {where} didn't answer. Check the address, and that no firewall "
-                "is in the way.")
+        return (
+            f"Couldn't reach {label}: {where} didn't answer. Check the address, and that no firewall "
+            "is in the way."
+        )
     return f"Couldn't reach {label} at {where}. Check the address in Settings."

@@ -131,31 +131,49 @@ class FakeIndexerAndClient:
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         path, params = request.url.path, request.url.params
-        if "/dl/" in path:                                    # the indexer's download link
+        if "/dl/" in path:  # the indexer's download link
             self.fetched.append(str(request.url))
             if not (params.get("jackett_apikey") or params.get("apikey")):
-                return httpx.Response(401)                    # Jackett wants its own parameter name
+                return httpx.Response(401)  # Jackett wants its own parameter name
             return httpx.Response(200, content=self.TORRENT)
-        if "/torznab/api" in path:                            # the indexer's search/caps endpoint
+        if "/torznab/api" in path:  # the indexer's search/caps endpoint
             return httpx.Response(200, content=CAPS if params.get("t") == "caps" else SEARCH)
-        if path == "/api/v2/auth/login":                      # qBittorrent
+        if path == "/api/v2/auth/login":  # qBittorrent
             return httpx.Response(204, headers={"set-cookie": "SID=abc; path=/"})
         if path == "/api/v2/torrents/add":
             self.added = request.content
             return httpx.Response(200, text="Ok.")
         if path == "/api/v2/torrents/info":
-            return httpx.Response(200, json=[{"hash": "a" * 40, "state": "uploading", "progress": 1,
-                                              "dlspeed": 0, "num_seeds": 1,
-                                              "content_path": str(self.content_path)}])
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "hash": "a" * 40,
+                        "state": "uploading",
+                        "progress": 1,
+                        "dlspeed": 0,
+                        "num_seeds": 1,
+                        "content_path": str(self.content_path),
+                    }
+                ],
+            )
         return httpx.Response(404)
 
 
 async def test_pipeline_fetches_the_torrent_through_the_right_source(isolated_data, monkeypatch):
     """A .torrent release has no info hash, so the worker fetches it — from the indexer that listed
     it, with that indexer's address and key. Getting this wrong is invisible until a live run."""
-    config.update({"torznab_url": BASE, "torznab_api_key": KEY, "torznab_categories": "3030",
-                   "torrent_client": "qbittorrent", "qbittorrent_url": "http://qbit:8080",
-                   "qbittorrent_username": "admin", "qbittorrent_password": "pw"})
+    config.update(
+        {
+            "torznab_url": BASE,
+            "torznab_api_key": KEY,
+            "torznab_categories": "3030",
+            "torrent_client": "qbittorrent",
+            "qbittorrent_url": "http://qbit:8080",
+            "qbittorrent_username": "admin",
+            "qbittorrent_password": "pw",
+        }
+    )
 
     folder = isolated_data / "downloads" / "Dune"
     folder.mkdir(parents=True)
@@ -171,12 +189,21 @@ async def test_pipeline_fetches_the_torrent_through_the_right_source(isolated_da
     async with httpx.AsyncClient(transport=mock) as client:
         src = torznab.Torznab(BASE, KEY, client=client)
         page = await src.search("Project Hail Mary")
-        release = next(i for i in page.items if i.download_url and not i.info_hash)   # a /dl/ link, no published hash
+        release = next(
+            i for i in page.items if i.download_url and not i.info_hash
+        )  # a /dl/ link, no published hash
         d = await src.details(release.url)
-        book = db.insert({
-            "source": "torznab", "source_url": d.url, "title": d.title, "author": "Andy Weir",
-            "protocol": "torrent", "download_url": d.download_url, "status": "queued",
-        })
+        book = db.insert(
+            {
+                "source": "torznab",
+                "source_url": d.url,
+                "title": d.title,
+                "author": "Andy Weir",
+                "protocol": "torrent",
+                "download_url": d.download_url,
+                "status": "queued",
+            }
+        )
 
     await Worker(transport=mock).process(book["id"])
 
@@ -188,8 +215,14 @@ async def test_pipeline_fetches_the_torrent_through_the_right_source(isolated_da
 
 # ---- the accounts model -------------------------------------------------------------------
 
+
 def as_role(client, username, password):
-    assert client.post("/api/auth/login", json={"username": username, "password": password}).status_code == 200
+    assert (
+        client.post(
+            "/api/auth/login", json={"username": username, "password": password}
+        ).status_code
+        == 200
+    )
     return client
 
 
