@@ -18,6 +18,7 @@ const STATUS = {
   downloading: "Downloading",
   organizing: "Organizing",
   completed: "In library",
+  missing: "Missing",
   failed: "Failed",
 };
 const PHASES = [
@@ -105,6 +106,7 @@ function stBadge(b, onShelf = false) {
     else return "";
   } else if (s === "requested") [cls, text, icon] = ["req", "Awaiting approval", I.bell];
   else if (s === "wanted") [cls, text, icon] = ["want", "Wanted", I.bookmark];
+  else if (s === "missing") [cls, text] = ["bad", "Missing"];
   else if (s === "failed") [cls, text] = ["bad", "Failed"];
   else if (s === "queued") text = "Queued";
   else if (s === "caching") text = `On ${cloudName()} ${Math.round(b.progress || 0)}%`;
@@ -246,6 +248,9 @@ async function bookAction(id, action) {
   } else if (action === "approve") {
     const book = await api(`/api/library/${id}/approve`, { method: "POST" });
     toast(book.status === "queued" ? `Approved. ${book.title} is downloading` : `Approved. Looking for ${book.title} now`, { kind: "ok", cover: book.cover_url });
+  } else if (action === "mark-wanted" || action === "mark-missing") {
+    const book = await api(`/api/library/${id}/${action}`, { method: "POST" });
+    toast(action === "mark-wanted" ? `${book.title} is back on your Wanted list.` : `${book.title} is marked missing.`, { kind: "ok", cover: book.cover_url });
   } else {
     const book = state.library.find((b) => b.id === id);
     const missing = action === "download" && book && missingClient(book.source, book.protocol);
@@ -1044,6 +1049,7 @@ function Library(root) {
     ["active", "In progress", (b) => ACTIVE.includes(b.status)],
     ["requested", "Awaiting approval", (b) => b.status === "requested"],
     ["wanted", "Wanted", (b) => b.status === "wanted"],
+    ["missing", "Missing", (b) => b.status === "missing"],
     ["failed", "Failed", (b) => b.status === "failed"],
   ];
   state.libSort ||= "added";
@@ -1055,7 +1061,10 @@ function Library(root) {
         <h1 class="page-title">The <em>Library</em></h1>
         <p class="lede" id="lib-summary"></p>
       </div>
-      <button class="btn" id="import-btn">${I.down} Import books</button>
+      <div class="cta-row">
+        ${isAdmin() ? `<button class="btn" id="missing-btn">${I.search} Check for missing</button>` : ""}
+        <button class="btn" id="import-btn">${I.down} Import books</button>
+      </div>
     </header>
     <div id="req-tray"></div>
     <div id="shelf"></div>
@@ -1131,6 +1140,7 @@ function Library(root) {
   };
   root.onclick = async (e) => {
     if (e.target.closest("a.quick, a.rating-pill")) return; // an ebook download or a rating's page: let the link do it
+    if (e.target.closest("#missing-btn")) return openMissing();
     if (e.target.closest("#import-btn, [data-import]")) return openImport();
     const row = e.target.closest(".req-row");
     const act = e.target.closest("[data-act]");
@@ -1431,6 +1441,98 @@ function openImport(folder = "") {
     }
   };
   if (folder) scan(folder); else $("#imp-folder", scrim).focus();
+}
+
+// ---------------------------------------------------------------------------
+// Missing books: find the library entries whose files are gone from disk
+
+function openMissing() {
+  const scrim = $("#modal");
+  scrim.hidden = false;
+  scrim.innerHTML = `
+    <div class="modal wide import" role="dialog" aria-modal="true" aria-labelledby="mis-title">
+      <h3 id="mis-title">Check for missing books</h3>
+      <p>Narratarr looks at where every book's files should be and lists the ones that aren't there
+      any more — moved or deleted outside of it. A missing book can go back to Wanted so it's looked
+      for again, or be removed from your library entirely.</p>
+      <div id="mis-results"><div class="imp-empty"><span class="spinner"></span><p>Checking every book's folder…</p></div></div>
+      <div class="actions">
+        <button class="btn ghost" data-act="cancel">Done</button>
+      </div>
+    </div>`;
+
+  const close = () => {
+    scrim.hidden = true;
+    scrim.innerHTML = "";
+    document.removeEventListener("keydown", onKey, true);
+  };
+  const onKey = (e) => { if (e.key === "Escape") { e.stopPropagation(); close(); } };
+  document.addEventListener("keydown", onKey, true);
+
+  const results = $("#mis-results", scrim);
+
+  function render(books) {
+    if (!books.length) {
+      results.innerHTML = `<div class="imp-empty">${I.check}<p>Everything in your library is where Narratarr left it — nothing's missing.</p></div>`;
+      return;
+    }
+    results.innerHTML = `
+      <div class="imp-head"><b>${books.length} book${books.length === 1 ? "" : "s"} missing</b>
+        <span class="muted">their folders are gone from disk</span></div>
+      <div class="imp-list">${books.map((b) => `
+        <div class="imp-row mis" data-missing="${b.id}">
+          <span class="imp-meta">
+            <span class="imp-title">${esc(b.title)}</span>
+            <span class="imp-author muted">${esc(b.author || "Unknown author")}</span>
+            <small>was at <code>${esc(b.path)}</code></small>
+          </span>
+          <span class="mis-acts">
+            <button class="btn sm" data-mact="mark-wanted" data-id="${b.id}" title="Put it back on Wanted so Narratarr looks for it again">${I.bookmark} Want again</button>
+            <button class="btn sm ghost" data-mact="mark-missing" data-id="${b.id}" title="Keep the entry, flagged as missing">${I.bell} Mark missing</button>
+            <button class="btn sm ghost danger" data-mact="remove" data-id="${b.id}" title="Remove the entry from your library">${I.trash} Remove</button>
+          </span>
+        </div>`).join("")}
+      </div>`;
+  }
+
+  async function load() {
+    try {
+      const res = await api("/api/library/missing");
+      render(res.books || []);
+    } catch (e) {
+      results.innerHTML = `<div class="state failed" style="margin-top:16px">${esc(e.message)}</div>`;
+    }
+  }
+
+  scrim.onclick = async (e) => {
+    if (e.target === scrim || e.target.closest('[data-act="cancel"]')) return close();
+    const btn = e.target.closest("[data-mact]");
+    if (!btn) return;
+    const id = Number(btn.dataset.id);
+    const act = btn.dataset.mact;
+    spinBtn(btn, true);
+    try {
+      if (act === "remove") {
+        const ok = await bookAction(id, "remove");
+        if (!ok) { spinBtn(btn, false); return; }
+      } else {
+        await api(`/api/library/${id}/${act}`, { method: "POST" });
+        toast(act === "mark-wanted" ? "Back on your Wanted list — Narratarr will look for it again."
+          : "Marked missing. It's still listed under Missing in your library.", { kind: "ok" });
+        await refreshLibrary();
+      }
+      const row = scrim.querySelector(`[data-missing="${id}"]`);
+      if (row) row.remove();
+      const head = $(".imp-head b", results);
+      const left = results.querySelectorAll("[data-missing]").length;
+      if (head) head.textContent = left ? `${left} book${left === 1 ? "" : "s"} missing` : "";
+      if (!left) render([]);
+    } catch (err) {
+      toast(err.message, { kind: "err" });
+      spinBtn(btn, false);
+    }
+  };
+  load();
 }
 
 // ---------------------------------------------------------------------------
@@ -4262,6 +4364,13 @@ function libraryLiveHTML(lib) {
       </div>
       <div class="cta"><button class="btn" data-act="stop">${I.stop} Stop</button>
         ${!isAdmin() && mine(lib) ? `<button class="btn ghost danger" data-act="remove" data-mine>${I.trash} Take back request</button>` : ""}</div>`;
+  }
+  if (lib.status === "missing") {
+    return `<div class="state failed">Its files are gone — ${lib.path ? `<code>${esc(lib.path)}</code> isn't there any more.` : "Narratarr can't find them on disk."}</div>
+      <div class="cta">
+        <button class="btn primary" data-act="mark-wanted">${I.bookmark} Want it again</button>
+        <button class="btn ghost danger" data-act="remove">${I.trash} Remove</button>
+      </div>`;
   }
   if (lib.status === "completed" && isEbook(lib)) {
     const local = lib.source === "local";

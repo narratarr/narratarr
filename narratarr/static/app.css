@@ -1018,6 +1018,10 @@ body.has-player .save-float { bottom: 104px; }
 .imp-title { font: 500 16px/1.3 var(--serif); }
 .imp-author { font-size: 13.5px; color: var(--text-2) !important; }
 .imp-meta small { color: var(--text-3); font-size: 12px; }
+.imp-row.mis { grid-template-columns: minmax(0, 1fr) auto; align-items: center; cursor: default; }
+.imp-row.mis .imp-meta { min-width: 0; }
+.imp-row.mis .imp-meta .imp-title, .imp-row.mis .imp-meta .imp-author { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mis-acts { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
 .imp-mode-row { display: grid; gap: 8px; margin-top: 18px; }
 .imp-mode-row .segmented { justify-self: start; }
 .imp-mode-row .hint { font-size: 12.5px; color: var(--text-3); }

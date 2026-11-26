@@ -422,6 +422,8 @@ def in_library(asin: str, title: str, author: str, books: list[dict] | None = No
                kind: str = "audiobook") -> dict | None:
     """The library's copy of a book in one format (any edition, from any source), if it has one."""
     for b in books if books is not None else db.list_books():
+        if b.get("status") == "missing":
+            continue  # its files are gone: it doesn't count as owned any more
         if kind_of(b) == kind and ((asin and b.get("asin") == asin)
                                    or _titles_match(title, author, b["title"], b["author"])):
             return b
