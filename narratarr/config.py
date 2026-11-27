@@ -95,6 +95,12 @@ class Settings:
     # Look up a finished download's missing series, narrators and year on Audible before its folder is
     # named, so a layout that uses them gets them. Off by default: it's a request to Audible per book.
     fill_details_before_filing: bool = False
+    # A download that arrives as MP3 tracks becomes one tagged M4B before it is filed, so the
+    # library gets a single chaptered file and the tracks stay in the download folder seeding.
+    # Off by default: it is minutes of CPU per book, and it needs ffmpeg installed.
+    convert_mp3_to_m4b: bool = False
+    convert_bitrate_kbps: int = 128  # AAC, 48-320
+    convert_channels: int = 2  # 1 = mono (smaller), 2 = stereo
     # When a download fails because of the release itself (a dead torrent, a failed repair, no audio in
     # it), look for another release of the book and take that instead, like Sonarr and Radarr do.
     retry_failed_downloads: bool = True
@@ -284,6 +290,16 @@ def update(changes: dict) -> Settings:
                 v = max(1, min(int(v), 8))
             elif k == "auto_search_hours":
                 v = max(1, min(int(v), 168))
+            elif k == "convert_bitrate_kbps":
+                # A silent clamp here would file a book at a bitrate nobody asked for; say no
+                # instead, the way the bad-URL and bad-layout checks do.
+                v = int(v)
+                if not 48 <= v <= 320:
+                    raise ValueError("The AAC bitrate has to be between 48 and 320 kbps.")
+            elif k == "convert_channels":
+                v = int(v)
+                if v not in (1, 2):
+                    raise ValueError("Converting to M4B is either mono (1) or stereo (2) channels.")
             elif k in CHOICES:
                 v = v if v in CHOICES[k] else known[k].default
             elif k.endswith("_url") and isinstance(v, str):

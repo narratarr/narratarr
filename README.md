@@ -576,6 +576,11 @@ uv run narratarr --port 8484      # the UI reloads its files on refresh; no buil
 uv run pytest                     # ffmpeg enables the chapter tests
 ```
 
+ffmpeg is optional and only needed for two things: the chapter tests above, and **Settings → Filing
+→ Convert MP3 downloads to a single M4B**. The Docker image includes it. A source or native install
+should have it on the `PATH` (`apt install ffmpeg`, `brew install ffmpeg`, or the equivalent); without
+it the conversion switch is inert and the Settings page says so, and everything else works as before.
+
 ```
 narratarr/
   api.py            FastAPI routes; serves the UI

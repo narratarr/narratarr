@@ -26,7 +26,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from . import (apiv1, audible, audiobookshelf, auth, brave, config, db, downloaders, ebooks, importer, media, ratings,
+from . import (apiv1, audible, audiobookshelf, auth, brave, config, convert, db, downloaders, ebooks, importer, media, ratings,
                routing, search, tokens, updates, users, wanted)
 from .audiobookshelf import Audiobookshelf, AudiobookshelfError
 from .downloaders import ClientError
@@ -1330,6 +1330,9 @@ LISTENER_SETTINGS = (
 @app.get("/api/settings")
 async def get_settings(request: Request):
     public = config.load().public()
+    # The Settings UI needs to know whether the MP3 to M4B switch can do anything here. Computed
+    # per request, not stored: ffmpeg is a property of the machine, not a preference.
+    public["ffmpeg_available"] = convert.available()
     if request.state.user["role"] == "admin":
         return public
     return {k: v for k, v in public.items() if k in LISTENER_SETTINGS}
@@ -1339,9 +1342,12 @@ async def get_settings(request: Request):
 async def put_settings(changes: dict):
     changes = {k: v for k, v in changes.items() if k not in config.SERVER_ONLY}  # see hardcover.py
     try:
-        return config.update(changes).public()
+        saved = config.update(changes).public()
     except ValueError as e:
         raise HTTPException(400, str(e))
+    # The UI re-renders from this response, so it needs the same machine fact GET sends.
+    saved["ffmpeg_available"] = convert.available()
+    return saved
 
 
 # ---- Hardcover: the Want to Read shelf comes to Wanted (see hardcover.py) ----

@@ -32,7 +32,7 @@ from pathlib import Path
 
 import httpx
 
-from . import audible, audiobookshelf, cachecheck, config, hardcover, db, downloaders, ebooks, importer, layout, media, notify, routing, wanted
+from . import audible, audiobookshelf, cachecheck, config, convert, hardcover, db, downloaders, ebooks, importer, layout, media, notify, routing, wanted
 from .downloaders import ClientError, bad_release, is_bad_release
 from .alldebrid import AllDebridError
 from .premiumize import PremiumizeError
@@ -482,6 +482,12 @@ class Worker:
 
     async def _finish(self, book: dict, tmp: Path, settings: config.Settings, **extra) -> None:
         book = await self._fill_before_filing(book, settings)
+        # Between fill and move/rename: whatever is in tmp is what gets filed, so a converted M4B
+        # is filed instead of the tracks, and a failed conversion leaves the tracks in place.
+        try:
+            await self._convert_before_filing(book, tmp, settings)
+        except Exception as e:  # noqa: BLE001 - the download is finished; filing must still happen
+            log.warning("Book %s: converting before filing failed: %s", book["id"], e)
         db.update(book["id"], status="organizing", progress=100, speed=0, detail="Organizing files…")
         dest = await self._organize(book, tmp, settings)
         db.update(
@@ -491,6 +497,27 @@ class Worker:
         if book["source"] != "local":
             notify.emit("completed", db.get(book["id"]))
         await self._notify_audiobookshelf(settings, wanted.kind_of(book))
+
+    async def _convert_before_filing(self, book: dict, tmp: Path, settings: config.Settings) -> None:
+        """Turn a folder of MP3s into one M4B, when the setting is on and ffmpeg is here.
+
+        Between "fill" and "move/rename", so the library receives the M4B and never the tracks. A
+        failure is a note on the book, not a failed download: the MP3s then follow the normal path.
+        """
+        if not settings.convert_mp3_to_m4b or wanted.kind_of(book) == "ebook":
+            return
+        if not convert.available():
+            # Built from an image without ffmpeg, or installed without it. Say so once, file the
+            # MP3s, and don't pretend the setting did something.
+            log.info("Book %s: MP3 to M4B conversion is on, but ffmpeg isn't installed", book["id"])
+            db.update(book["id"], detail="ffmpeg isn't installed, so the MP3s are filed as they are.")
+            return
+        db.update(book["id"], detail="Converting MP3s to M4B…")
+        result = await convert.to_m4b(
+            book, tmp, settings, report=lambda text: db.update(book["id"], detail=text)
+        )
+        if result is None:
+            db.update(book["id"], detail="Couldn't convert to M4B, filing the MP3s instead.")
 
     async def _fill_before_filing(self, book: dict, settings: config.Settings) -> dict:
         """With the setting on, a download's missing series, narrators and year come from Audible before

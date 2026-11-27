@@ -2253,6 +2253,19 @@ function Settings(root, page) {
             <label class="switch"><input type="checkbox" name="fill_details_before_filing" ${s.fill_details_before_filing ? "checked" : ""}><i></i><span><b>Fill in missing details before filing a download</b><small>When a download finishes without a series, narrator or year, Narratarr looks it up on Audible before naming its folder, so the layout above can use them. Only empty details are filled, and only from a book whose title and author match.</small></span></label>
           </div>
           <div class="set-row">
+            <label class="switch"><input type="checkbox" name="convert_mp3_to_m4b" ${s.convert_mp3_to_m4b ? "checked" : ""} ${s.ffmpeg_available === false ? "disabled" : ""}><i></i><span><b>Convert MP3 downloads to a single M4B</b><small>${s.ffmpeg_available === false
+              ? "ffmpeg isn't installed here, so this can't run. The Docker image includes it; a manual install needs ffmpeg on the PATH."
+              : "When a download arrives as separate MP3 tracks, they become one M4B with the book's tags, a cover and a chapter per track, and that is what goes into the library. The MP3s stay in your download folder, so anything seeding keeps seeding. Off by default: it is minutes of CPU per book."}</small></span></label>
+          </div>
+          ${s.convert_mp3_to_m4b && s.ffmpeg_available !== false ? `<div class="set-row">
+            <label for="convert_bitrate_kbps"><b>M4B bitrate</b><small>AAC. Higher keeps more detail and takes more space; 64 kbps mono suits most audiobooks.</small></label>
+            <select class="select" name="convert_bitrate_kbps" id="convert_bitrate_kbps">${[48, 64, 96, 128, 192, 256, 320].map((k) => `<option value="${k}" ${Number(s.convert_bitrate_kbps) === k ? "selected" : ""}>${k} kbps</option>`).join("")}</select>
+          </div>
+          <div class="set-row">
+            <label for="convert_channels"><b>M4B channels</b><small>Mono halves the size and is enough for a spoken book; stereo keeps the original sound.</small></label>
+            <select class="select" name="convert_channels" id="convert_channels">${[[1, "Mono (1 channel)"], [2, "Stereo (2 channels)"]].map(([v, label]) => `<option value="${v}" ${Number(s.convert_channels) === v ? "selected" : ""}>${label}</option>`).join("")}</select>
+          </div>` : ""}
+          <div class="set-row">
             <label for="max_concurrent"><b>Downloads at once</b><small>More finish sooner, but share your bandwidth.</small></label>
             <div class="stepper">
               <button type="button" data-step="-1" aria-label="Fewer">−</button>
