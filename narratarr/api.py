@@ -26,8 +26,8 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from . import (apiv1, audible, audiobookshelf, auth, brave, config, db, downloaders, ebooks, importer, media, ratings,
-               routing, search, tokens, updates, users, wanted)
+from . import (apiv1, audible, audiobookshelf, auth, brave, config, db, downloaders, ebooks, imageproxy,
+               importer, media, ratings, routing, search, tokens, updates, users, wanted)
 from .audiobookshelf import Audiobookshelf, AudiobookshelfError
 from .downloaders import ClientError
 from . import alldebrid, hardcover, languages, notify, tidy
@@ -316,6 +316,11 @@ async def _discover_finish(data: dict, src, kind: str, sort: str) -> dict:
             languages.detect(item.get("title") or "") if src.name in ("prowlarr", "torznab", "audiobookbay") else "")
         item["lang_ok"] = languages.allowed(item["language"], want)
         item["library"] = {"id": (b or e)["id"], "status": (b or e)["status"]} if b or e else None
+        # Cover art through Narratarr when the host is one we are configured to use, so the
+        # reader's browser never contacts the indexer (issue #24). Other hosts are left alone.
+        item["cover_url"] = imageproxy.proxied(
+            item.get("cover_url") or "", settings, from_indexer=src.name in imageproxy.INDEXER_SOURCES
+        )
         item["client"] = None
         if src.delivery != "direct":  # a direct source needs no client, so the row has no chip
             # A source that does not report an indexer per row (AudiobookBay) is routed by its own
@@ -789,6 +794,27 @@ async def stream(book_id: int, index: int):
     return FileResponse(path, media_type=media.AUDIO_TYPES[path.suffix.lower()])
 
 
+@app.get("/api/image")
+async def image_proxy(url: str = ""):
+    """Cover art, fetched by Narratarr instead of the reader's browser (issue #24).
+
+    Only hosts an admin has already configured are fetchable, so this cannot be used to reach
+    arbitrary addresses. The content type is passed through and the response is cacheable, because
+    the same covers are requested on every page.
+    """
+    try:
+        body, content_type = await imageproxy.fetch(url, config.load())
+    except imageproxy.NotAllowed as e:
+        raise HTTPException(403, str(e))
+    except imageproxy.Failed as e:
+        raise HTTPException(502, str(e))
+    return Response(
+        body,
+        media_type=content_type,
+        headers={"Cache-Control": "public, max-age=86400", "X-Content-Type-Options": "nosniff"},
+    )
+
+
 @app.get("/api/library/{book_id}/cover")
 async def cover(book_id: int):
     book = _get_or_404(book_id)
@@ -808,7 +834,12 @@ async def cover(book_id: int):
         if art and art[1] in COVER_TYPES.values():
             return Response(art[0], media_type=art[1], **cached)
     if book["cover_url"].startswith(("http://", "https://")):
-        return RedirectResponse(book["cover_url"])
+        # Through the proxy, never straight at the indexer: the reader's address is not the
+        # indexer's business (issue #24).
+        return RedirectResponse(imageproxy.proxied(
+            book["cover_url"], config.load(),
+            from_indexer=book.get("source") in imageproxy.INDEXER_SOURCES,
+        ))
     raise HTTPException(404, "No cover")
 
 

@@ -34,7 +34,18 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from . import audible, auth, db, notify, tokens, updates, users, wanted
+from . import (
+    audible,
+    auth,
+    config,
+    db,
+    imageproxy,
+    notify,
+    tokens,
+    updates,
+    users,
+    wanted,
+)
 
 log = logging.getLogger("narratarr.api.v1")
 
@@ -163,6 +174,19 @@ def _http_url(url: str) -> str | None:
     return url if isinstance(url, str) and url.startswith(("https://", "http://")) else None
 
 
+def _cover_url(url: str, source: str = "") -> str | None:
+    """Cover art through the proxy when it came from an indexer, or the host is one we use.
+
+    The reader's browser must not contact the indexer directly (issue #24), and an indexer's art
+    sits on its own image host, so `source` is what tells us this URL is indexer-supplied.
+    Anything else keeps its own URL.
+    """
+    http = _http_url(url)
+    if not http:
+        return None
+    return imageproxy.proxied(http, config.load(), from_indexer=source in imageproxy.INDEXER_SOURCES)
+
+
 def _names(author: str) -> list[str]:
     return [a.strip() for a in (author or "").split(",") if a.strip()]
 
@@ -192,7 +216,7 @@ def request_out(b: dict, names: dict[int, str]) -> dict:
         "authors": _names(b["author"]),
         "narrators": list(b.get("narrators") or []),
         "series": _series(b.get("series") or []),
-        "cover_url": _http_url(b.get("cover_url") or ""),
+        "cover_url": _cover_url(b.get("cover_url") or "", b.get("source") or ""),
         "status": status,
         "stage": STAGES.get(b["status"]) if status == "downloading" else None,
         "progress": round(float(b.get("progress") or 0), 1) if status == "downloading" else None,
@@ -215,7 +239,7 @@ def book_out(b: dict, have: dict | None, names: dict[int, str], ebook: dict | No
         "authors": _names(b["author"]),
         "narrators": list(b.get("narrators") or []),
         "series": _series(b.get("series") or []),
-        "cover_url": _http_url(b.get("cover_url") or ""),
+        "cover_url": _cover_url(b.get("cover_url") or "", b.get("source") or ""),
         "description": b.get("description") or None,
         "runtime_minutes": b.get("minutes") or None,
         "release_date": b.get("released") or None,
