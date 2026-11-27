@@ -11,6 +11,11 @@ COPY narratarr ./narratarr
 RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev --no-editable
 
 FROM python:3.13-slim
+# ffmpeg turns a download's MP3 tracks into one M4B before it is filed (Settings → Filing).
+# Only the runtime stage needs it; the build stage never shells out to it.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ffmpeg \
+ && rm -rf /var/lib/apt/lists/*
 LABEL org.opencontainers.image.title="Narratarr" \
       org.opencontainers.image.description="An *arr-style audiobook manager with a built-in player." \
       org.opencontainers.image.source="https://github.com/narratarr/narratarr" \
