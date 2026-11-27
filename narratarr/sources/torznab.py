@@ -178,13 +178,21 @@ class Torznab:
     delivery = "indexer"
 
     def __init__(self, url: str, api_key: str, categories: str = "3030",
-                 client: httpx.AsyncClient | None = None):
+                 client: httpx.AsyncClient | None = None, name: str = "Torznab", source_id: str = "torznab"):
         self.base = url.rstrip("/")
         self.api_key = api_key
         self.cats = [c for c in re.split(r"[,\s]+", categories or "") if c.isdigit()] or ["3030"]
         self._client = client
+        # The user's name for this endpoint, so several Torznab indexers are told apart in Discover,
+        # in routing rules and in the messages each one raises.
+        self.label = name or "Torznab"
+        self.id = source_id
 
     # ---- Source interface ----------------------------------------------------
+
+    def for_ebooks(self, categories: str) -> "Torznab":
+        """This same indexer again, searching the categories ebooks live in."""
+        return Torznab(self.base, self.api_key, categories or "7020", name=self.label, source_id=self.id)
 
     def owns(self, url: str) -> bool:
         return url in _releases

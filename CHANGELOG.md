@@ -10,6 +10,13 @@ All notable changes to Narratarr. The app shows this under **Settings → Update
   failure is about the client being up, not about the release, so the book now waits (a minute, then five,
   fifteen and thirty) and tries the same release again. A client that stays down past those four attempts still
   fails the book, with the client's own message, rather than holding a download slot for ever.
+- **More than one Torznab indexer, each with a name.** Settings → Search & sources had a single Torznab address,
+  so Jackett and, say, a private indexer's own Torznab endpoint could not both be used, and both would have been
+  called "Torznab" in Discover and in routing rules. Add as many as you like and name each one: every indexer
+  gets its own Discover tab under that name, is searched for Wanted books, and can be named in a routing rule.
+  An existing address and key are carried over as one indexer called **Torznab**, and the old settings fields
+  keep working for anything that sets them through the API.
+
 ## 0.9.7 — 2026-11-17
 
 - **Your Hardcover shelf comes to Wanted.** Connect Hardcover under Settings → Search & sources, and books you mark **Want to Read** on hardcover.app are matched on Audible and added to Wanted, as an audiobook, an ebook or both. Narratarr checks every six hours, or when you press **Check now**. Connecting uses a short code you approve on Hardcover, so you never paste a password or key into Narratarr. It can only read your profile and shelves, and **Disconnect** signs it out on Hardcover too. Each shelf book is handled once, so one you take off Wanted stays off, and the panel shows what happened to each, including books Audible doesn't have. Those get another look each month, or straight away with **Look again**. Hardcover's API is still in beta. Asked for on the Discord by NOAH.

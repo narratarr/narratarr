@@ -36,7 +36,7 @@ from . import torbox
 from .premiumize import Premiumize, PremiumizeError
 from .torbox import TorBox, TorBoxError
 from .realdebrid import RealDebrid, RealDebridError
-from .sources import CATALOGS, ORDER, Prowlarr, ProwlarrError, Torznab, TorznabError, all_sources, ebook_indexers, get_source, source_for_url
+from .sources import CATALOGS, Prowlarr, ProwlarrError, Torznab, TorznabError, all_sources, ebook_indexers, get_source, order, source_for_url
 from .worker import Worker, has_files, readable_error, safe_name, tmp_dir
 
 log = logging.getLogger("narratarr.api")
@@ -217,11 +217,13 @@ async def sources():
     settings = config.load().public()
     # Indexer sources appear once they have an address and a key. The catalogs need one of them,
     # since their books are found on your indexers.
-    visible = set(ORDER) - {"prowlarr", "torznab", *CATALOGS}
+    names = order()
+    torznab = {n for n in names if n.startswith("torznab")}
+    visible = set(names) - {"prowlarr", *CATALOGS, *torznab}
     if settings["prowlarr_configured"]:
         visible.add("prowlarr")
     if settings["torznab_configured"]:
-        visible.add("torznab")
+        visible |= torznab  # every configured indexer gets its own tab, under its own name
     if settings["indexer_configured"]:
         visible |= set(CATALOGS)
     return [
@@ -233,8 +235,8 @@ async def sources():
             "default_label": found[name].default_label,
             "categories": [{"slug": c.slug, "name": c.name} for c in found[name].categories()],
         }
-        for name in ORDER
-        if name in visible
+        for name in names
+        if name in visible and name in found
     ]
 
 
@@ -247,6 +249,11 @@ async def discover(q: str = "", category: str = "", page: int = 1, source: str =
         raise HTTPException(400, "Unknown source.")
     if src.name == "prowlarr" and kind == "ebook":
         src = ebook_indexers()  # the same indexers, searched in their ebook categories
+    if isinstance(src, Torznab) and kind == "ebook":
+        # The same indexer, searched in the ebook categories it was given, so its Discover tab finds
+        # ebooks the way its audiobooks already work.
+        entry = next((e for e in config.torznab_entries(config.load()) if e["id"] == src.id), None)
+        src = src.for_ebooks((entry.get("ebook_categories") if entry else "") or "7020")
     # The Audible catalog can be searched in another store an admin turned on, for this search only.
     stores = audible.regions() if src.name == "audible" else []
     region = region.strip().lower()
@@ -1304,6 +1311,10 @@ class Update(BaseModel):
     version: str
 
 
+class TestTorznab(BaseModel):
+    id: str = ""
+
+
 @app.post("/api/updates/apply")
 async def apply_update(body: Update):
     if not re.fullmatch(r"\d+\.\d+\.\d+", body.version):
@@ -1446,10 +1457,15 @@ async def test_audnex_region(body: RegionProbe):
 
 
 @app.post("/api/settings/test-torznab")
-async def test_torznab():
-    s = config.load()
+async def test_torznab(body: TestTorznab | None = None):
+    """Test one indexer, the one the card's Test button belongs to. With no id, the first one."""
+    entries = config.torznab_entries(config.load())
+    wanted_id = (body.id if body else "") or ""
+    entry = next((e for e in entries if e["id"] == wanted_id), entries[0] if entries else None)
+    if entry is None:
+        raise HTTPException(400, "Add a Torznab indexer in Settings first.")
     try:
-        return await Torznab(s.torznab_url, s.torznab_api_key, s.torznab_categories).status()
+        return await Torznab(entry["url"], entry["api_key"], entry.get("categories") or "3030").status()
     except TorznabError as e:
         raise HTTPException(400, str(e))
 
@@ -1548,17 +1564,19 @@ async def indexers():
             names += await Prowlarr(s.prowlarr_url, s.prowlarr_api_key).offering() or []
         except ProwlarrError as e:
             notes.append(f"Prowlarr: {e}")
-    if s.torznab_url and s.torznab_api_key:
+    # One entry per Torznab indexer: a rule matches the name the user gave it, which is what the
+    # source labels its results with.
+    for entry in config.torznab_entries(s):
+        label = entry.get("name") or "Torznab"
         try:
-            names.append((await Torznab(s.torznab_url, s.torznab_api_key, s.torznab_categories).status())["title"])
+            await Torznab(entry["url"], entry["api_key"], entry.get("categories") or "3030").status()
+            names.append(label)
         except TorznabError as e:
-            notes.append(f"Torznab: {e}")
+            notes.append(f"{label}: {e}")
     # A source that names no indexer on its releases is routed by its own name instead. That is
     # AudiobookBay always, and a Torznab feed whose items carry no indexer of their own. Prowlarr
     # always names the indexer, so "Prowlarr" itself could never match and isn't offered.
     names.append(get_source("audiobookbay").label)
-    if s.torznab_url and s.torznab_api_key:
-        names.append(get_source("torznab").label)
     return {"indexers": sorted({n for n in names if n}, key=str.lower), "notes": notes}
 
 

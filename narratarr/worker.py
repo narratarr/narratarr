@@ -38,7 +38,7 @@ from .alldebrid import AllDebridError
 from .premiumize import PremiumizeError
 from .torbox import TorBoxError
 from .realdebrid import RealDebrid, RealDebridError
-from .sources import Details, ProwlarrError, get_source
+from .sources import Details, ProwlarrError, Torznab, get_source
 from .sources.prowlarr import fetch
 from .sources.torznab import fetch as torznab_fetch
 
@@ -672,10 +672,18 @@ class Worker:
             # leaves the client hunting for peers over DHT ("Downloading metadata" for hours), and
             # never works on a private tracker. Torznab needs its own address, key and key param.
             try:
-                if book.get("source") == "torznab":
-                    db.update(book_id, detail="Fetching the torrent from your indexer…")
+                if (book.get("source") or "").startswith("torznab"):
+                    # Which of several indexers this came from: the book's own source names it. If
+                    # that indexer has since been removed, say so instead of failing obscurely.
+                    try:
+                        indexer = get_source(book["source"])
+                    except ValueError:
+                        raise ProwlarrError("That Torznab indexer is no longer set up. Search for this book again.")
+                    if not isinstance(indexer, Torznab):
+                        raise ProwlarrError("That source isn't a Torznab indexer any more. Search for this book again.")
+                    db.update(book_id, detail=f"Fetching the torrent from {indexer.label}…")
                     kind, payload = await torznab_fetch(
-                        book["download_url"], settings.torznab_url, settings.torznab_api_key, self._transport
+                        book["download_url"], indexer.base, indexer.api_key, self._transport
                     )
                 else:
                     db.update(book_id, detail="Fetching the torrent from Prowlarr…")

@@ -60,6 +60,11 @@ class Settings:
     torznab_api_key: str = ""
     torznab_categories: str = "3030"  # Newznab/Torznab "Audio/Audiobook"
     torznab_ebook_categories: str = "7020"  # "Books/EBook"
+    # Torznab indexers, as a list: one entry per endpoint, each with a name, so several can be used
+    # at once and told apart in Discover and in routing. Empty means "not migrated yet": `load()`
+    # builds it from the flat settings above the first time, exactly like the clients list, so an
+    # existing install keeps working untouched.
+    torznab_indexers: list = field(default_factory=list)
     sabnzbd_url: str = ""
     sabnzbd_api_key: str = ""
     sabnzbd_category: str = ""
@@ -151,7 +156,15 @@ class Settings:
         d["pm_configured"] = bool(self.pm_api_key)
         d["brave_configured"] = bool(self.brave_api_key)
         d["prowlarr_configured"] = bool(self.prowlarr_url and self.prowlarr_api_key)
-        d["torznab_configured"] = bool(self.torznab_url and self.torznab_api_key)
+        # The list is what "configured" means now; the flat settings remain the answer for an
+        # install that has not been migrated or was set up through the older API.
+        d["torznab_indexers"] = [
+            {**e, "api_key": _mask(str(e.get("api_key") or ""), "x_api_key"),
+             "configured": bool(e.get("url") and e.get("api_key"))}
+            for e in (asdict(self).get("torznab_indexers") or []) if isinstance(e, dict)
+        ]
+        d["torznab_configured"] = any(e["configured"] for e in d["torznab_indexers"]) \
+            or bool(self.torznab_url and self.torznab_api_key)
         d["indexer_configured"] = d["prowlarr_configured"] or d["torznab_configured"]
         d["sabnzbd_configured"] = bool(self.sabnzbd_url and self.sabnzbd_api_key)
         d["nzbget_configured"] = bool(self.nzbget_url)
@@ -229,6 +242,7 @@ def load() -> Settings:
                     if k in known:
                         setattr(_settings, k, as_bool(v) if isinstance(known[k].default, bool) else v)
             migrate_clients(_settings)
+            migrate_torznab(_settings)
         return _settings
 
 
@@ -243,8 +257,11 @@ def update(changes: dict) -> Settings:
     """Apply changes and persist. Masked secrets sent back unchanged are ignored."""
     s = load()
     list_given = "clients" in changes
+    indexers_given = "torznab_indexers" in changes
     prev_default = s.default_client
     touched_flat = any(k in _FLAT_PROTOCOL_FIELDS[p] for k in changes for p in _FLAT_PROTOCOL_FIELDS)
+    touched_torznab_flat = any(k in ("torznab_url", "torznab_api_key", "torznab_categories",
+                                     "torznab_ebook_categories") for k in changes)
     with _lock:
         known = {f.name: f for f in fields(Settings)}
         fresh = {k for k, v in changes.items() if k in SECRETS and isinstance(v, str) and v and not v.startswith("•")}
@@ -269,6 +286,8 @@ def update(changes: dict) -> Settings:
                 v = parse_audible_stores(v)
             elif k == "clients":
                 v = _merge_client_secrets(validate_clients(v), s.clients)
+            elif k == "torznab_indexers":
+                v = _merge_torznab_secrets(validate_torznab_indexers(v), s.torznab_indexers)
             elif k == "client_routes":
                 from . import routing
 
@@ -302,6 +321,8 @@ def update(changes: dict) -> Settings:
             setattr(s, k, v)
         if touched_flat and not list_given:
             refresh_clients(s)  # a caller still using the flat fields
+        if touched_torznab_flat and not indexers_given:
+            refresh_torznab(s)  # likewise for the old Torznab fields
         # A removed client must not leave the default pointing at nothing.
         ids = [c["id"] for c in s.clients]
         if s.default_client not in ids:
@@ -445,6 +466,135 @@ def migrate_clients(s: Settings) -> None:
     if made:
         torrent = next((e["id"] for e in made if e["id"] not in ("sabnzbd", "nzbget")), "")
         s.default_client = torrent or made[0]["id"]
+
+
+# ---- Torznab indexers: one flat configuration migrated into a list ---------------------------
+
+TORZNAB_DEFAULTS = {"categories": "3030", "ebook_categories": "7020"}
+
+
+def migrate_torznab(s: Settings) -> None:
+    """Build the indexer list from the flat settings, once, when there is no list yet.
+
+    The upgrade promise is the same as for download clients: an address and key that worked keep
+    working, under the name the old screen used, so nothing has to be re-entered after updating.
+    """
+    if s.torznab_indexers or not (s.torznab_url and s.torznab_api_key):
+        return
+    s.torznab_indexers = [{
+        "id": "torznab",
+        "name": "Torznab",
+        "url": s.torznab_url,
+        "api_key": s.torznab_api_key,
+        "categories": s.torznab_categories or TORZNAB_DEFAULTS["categories"],
+        "ebook_categories": s.torznab_ebook_categories or TORZNAB_DEFAULTS["ebook_categories"],
+    }]
+
+
+def torznab_entries(s: Settings) -> list[dict]:
+    """The configured Torznab indexers, in the user's order.
+
+    Falls back to the flat settings for an install whose list has not been written yet, so every
+    caller has one answer and no caller has to know about the old shape.
+    """
+    if s.torznab_indexers:
+        return [e for e in s.torznab_indexers if isinstance(e, dict) and e.get("url") and e.get("api_key")]
+    if s.torznab_url and s.torznab_api_key:
+        return [{
+            "id": "torznab", "name": "Torznab", "url": s.torznab_url, "api_key": s.torznab_api_key,
+            "categories": s.torznab_categories or TORZNAB_DEFAULTS["categories"],
+            "ebook_categories": s.torznab_ebook_categories or TORZNAB_DEFAULTS["ebook_categories"],
+        }]
+    return []
+
+
+def _torznab_id(name: str, taken: set[str]) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", name.strip().lower()).strip("-") or "torznab"
+    cid, n = slug, 2
+    while cid in taken:
+        cid, n = f"{slug}-{n}", n + 1
+    return cid
+
+
+def validate_torznab_indexers(value) -> list:
+    """A list of indexer records. A card left blank is dropped rather than saved as an empty indexer."""
+    if isinstance(value, str):  # the settings form posts hidden inputs as text
+        try:
+            value = json.loads(value or "[]")
+        except ValueError:
+            raise ValueError("torznab_indexers has to be a list of indexers")
+    if not isinstance(value, list):
+        raise ValueError("torznab_indexers has to be a list of indexers")
+    out, taken = [], set()
+    for raw in value:
+        if not isinstance(raw, dict):
+            raise ValueError("each Torznab indexer has to be an object")
+        url = str(raw.get("url") or "").strip().rstrip("/")
+        api_key = str(raw.get("api_key") or "").strip()
+        if not url and not api_key:
+            continue
+        if url and not url.startswith(("http://", "https://")):
+            raise ValueError("A Torznab address must start with http:// or https://")
+        # Name it after its host when the user hasn't: two indexers are only useful if the picker
+        # can tell them apart, and "Torznab" twice tells nobody anything.
+        name = str(raw.get("name") or "").strip() or (_host(url) or "Torznab")
+        cid = str(raw.get("id") or "").strip().lower()
+        if not cid or cid in taken:
+            cid = _torznab_id(name, taken)
+        taken.add(cid)
+        entry = {
+            "id": cid,
+            "name": name[:60],
+            "url": url,
+            "api_key": api_key,
+            "categories": str(raw.get("categories") or TORZNAB_DEFAULTS["categories"]).strip(),
+            "ebook_categories": str(raw.get("ebook_categories") or TORZNAB_DEFAULTS["ebook_categories"]).strip(),
+        }
+        out.append(entry)
+    return out
+
+
+def _merge_torznab_secrets(new: list, old: list) -> list:
+    """A masked key posted back unchanged means "leave it alone", exactly as the flat secret does.
+
+    And a saved key only stays with the address it was entered for: changing an indexer's host
+    drops the masked key rather than sending it to a different machine.
+    """
+    by_id = {e.get("id"): e for e in old if isinstance(e, dict)}
+    for entry in new:
+        prev = by_id.get(entry["id"]) or {}
+        same_place = _host(prev.get("url", "")) == _host(entry.get("url", ""))
+        if str(entry.get("api_key") or "").startswith("•"):
+            entry["api_key"] = prev.get("api_key", "") if same_place else ""
+    return new
+
+
+def refresh_torznab(s: Settings) -> None:
+    """Mirror the flat Torznab fields into the list entry they describe.
+
+    The flat fields are still part of the public API (`PUT /api/settings {"torznab_url": …}`), so a
+    caller that only sets them has to keep working. Clearing both removes that entry again; an
+    indexer added under the new screen keeps its own id and is never touched here.
+    """
+    entries = [e for e in (s.torznab_indexers or []) if isinstance(e, dict)]
+    has = any(e.get("id") == "torznab" for e in entries)
+    if not (s.torznab_url and s.torznab_api_key):
+        if has:  # the flat indexer was switched off, so its entry goes too
+            s.torznab_indexers = [e for e in entries if e.get("id") != "torznab"]
+        return
+    entry = {
+        "id": "torznab", "name": "Torznab", "url": s.torznab_url, "api_key": s.torznab_api_key,
+        "categories": s.torznab_categories or TORZNAB_DEFAULTS["categories"],
+        "ebook_categories": s.torznab_ebook_categories or TORZNAB_DEFAULTS["ebook_categories"],
+    }
+    if has:
+        # Keep the name it already has: a plain flat-field change is not a rename.
+        s.torznab_indexers = [
+            {**e, **{k: v for k, v in entry.items() if k != "name"}} if e.get("id") == "torznab" else e
+            for e in entries
+        ]
+    else:
+        s.torznab_indexers = entries + [entry]
 
 
 # ---- the compatibility path, and when it can go ----------------------------------------------
