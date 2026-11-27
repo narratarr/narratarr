@@ -395,6 +395,29 @@ async def library():
     return books
 
 
+@app.get("/api/library/missing")
+async def library_missing(request: Request):
+    """Books whose files are gone from disk — moved or deleted behind Narratarr's back."""
+    if request.state.user["role"] != "admin":
+        raise HTTPException(403, "Only admins can check the library for missing books.")
+    books = await asyncio.to_thread(db.list_books)
+    missing = [b for b in books if b.get("path") and b["status"] != "missing" and _media_missing(b)]
+    return {"books": missing}
+
+
+def _media_missing(book: dict) -> bool:
+    """A book's media is gone when the path it remembers no longer holds any audio or
+    ebook files — the whole folder, or every file in it, was moved or deleted."""
+    p = Path(book["path"]) if book.get("path") else None
+    if not p:
+        return False
+    if not p.exists():
+        return True
+    exts = set(media.AUDIO_TYPES) | set(ebooks.EBOOK_TYPES)
+    files = [p] if p.is_file() else (f for f in p.rglob("*") if f.is_file())
+    return not any(f.suffix.lower() in exts and not f.name.startswith("._") for f in files)
+
+
 @app.get("/api/library/ratings")
 async def library_ratings():
     """The rating pill for each library book that has one, from the cache only (PR #14, curator8888).
@@ -604,6 +627,32 @@ async def stop(book_id: int):
     await _worker().cancel_and_wait(book_id)
     await _drop_from_client(book)
     db.update(book_id, status="wanted", speed=0, progress=0, detail="")
+    return db.get(book_id)
+
+
+@app.post("/api/library/{book_id}/mark-missing")
+async def mark_missing(book_id: int, request: Request):
+    """Flag a book whose files are gone. The entry stays as a reminder of what the library
+    had, until the book is wanted again or removed — and it no longer counts as owned."""
+    if request.state.user["role"] != "admin":
+        raise HTTPException(403, "Only admins can mark books missing.")
+    _get_or_404(book_id)
+    db.update(book_id, status="missing", speed=0, detail="", error="")
+    return db.get(book_id)
+
+
+@app.post("/api/library/{book_id}/mark-wanted")
+async def mark_wanted(book_id: int, request: Request):
+    """Put a book back on the Wanted list — for a book that went missing, so automatic
+    search (or a manual pick) finds a release for it again."""
+    if request.state.user["role"] != "admin":
+        raise HTTPException(403, "Only admins can mark books wanted.")
+    _get_or_404(book_id)
+    db.update(
+        book_id, status="wanted", path="", files=[], progress=0, speed=0, detail="", error="",
+        release_url="", download_url="", info_hash="", client_job_id="", completed_at=None,
+        found_by_search=0, search_note="",
+    )
     return db.get(book_id)
 
 
@@ -1035,7 +1084,14 @@ async def import_books(body: ImportBooks):
         f = {**f, "title": item.title.strip() or f["title"], "author": item.author.strip() or f["author"]}
         # The player needs an audiobook in a folder of its own; an ebook is a single file anyway.
         mode = "copy" if body.mode == "inplace" and f["single_file"] and f["kind"] == "audiobook" else body.mode
-        if db.get_by_url(importer.url_for(Path(f["path"]))) or db.get_by_path(f["path"]):
+        existing = db.get_by_url(importer.url_for(Path(f["path"]))) or db.get_by_path(f["path"])
+        if existing and existing["status"] == "missing":
+            # The same files are back where the entry remembered them: bring the book back.
+            db.update(existing["id"], status="completed", progress=100, completed_at=time.time(),
+                      detail="", error="")
+            added.append(db.get(existing["id"]))
+            continue
+        if existing:
             continue
         added.append(db.insert(importer.as_book(f, mode, "completed" if mode == "inplace" else "queued")))
     if any(b["status"] == "queued" for b in added):
