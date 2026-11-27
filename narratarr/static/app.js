@@ -1062,7 +1062,7 @@ function Library(root) {
         <p class="lede" id="lib-summary"></p>
       </div>
       <div class="cta-row">
-        ${isAdmin() ? `<button class="btn" id="missing-btn">${I.search} Check for missing</button>` : ""}
+        ${isAdmin() ? `<button class="btn" id="missing-btn">${I.search} Check for changes</button>` : ""}
         <button class="btn" id="import-btn">${I.down} Import books</button>
       </div>
     </header>
@@ -1451,7 +1451,7 @@ function openMissing() {
   scrim.hidden = false;
   scrim.innerHTML = `
     <div class="modal wide import" role="dialog" aria-modal="true" aria-labelledby="mis-title">
-      <h3 id="mis-title">Check for missing books</h3>
+      <h3 id="mis-title">Check for changes</h3>
       <p>Narratarr looks at where every book's files should be and lists the ones that aren't there
       any more — moved or deleted outside of it. A missing book can go back to Wanted so it's looked
       for again, or be removed from your library entirely.</p>
