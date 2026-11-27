@@ -20,13 +20,13 @@ from xml.etree.ElementTree import ParseError
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request, Response
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from typing import Literal
 
 from pydantic import BaseModel
 
-from . import (apiv1, audible, audiobookshelf, auth, brave, config, db, downloaders, ebooks, importer, media, ratings,
+from . import (apiv1, audible, audiobookshelf, auth, brave, config, db, downloaders, ebooks, events, importer, media, ratings,
                routing, search, tokens, updates, users, wanted)
 from .audiobookshelf import Audiobookshelf, AudiobookshelfError
 from .downloaders import ClientError
@@ -384,14 +384,38 @@ class AddBook(BaseModel):
     format: Literal["audiobook", "ebook", "both"] = "audiobook"  # catalog books; or "ebook" for an ebook release
 
 
+@app.get("/api/events")
+async def events_stream():
+    """A stream of server-sent events. Right now one type: the library changed.
+
+    Deliberately not a library endpoint: this is the place for "something happened, come and look",
+    and the next thing that needs it (download progress, a finished tidy) can join it without the
+    client growing a second connection.
+    """
+    return StreamingResponse(events.stream(), media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        # nginx buffers proxied responses by default, which turns a stream into one big delivery at
+        # the end. Nginx Proxy Manager fronts a lot of Narratarr installs, so say no buffering here.
+        "X-Accel-Buffering": "no",
+    })
+
+
 @app.get("/api/library")
-async def library():
+async def library(request: Request, response: Response):
+    tag = events.library_etag()
+    if request.headers.get("if-none-match") == tag:
+        # Nothing has changed since this client last looked, so the reconnect refetch costs headers
+        # instead of the whole shelf.
+        return Response(status_code=304, headers={"ETag": tag, "Cache-Control": "no-cache"})
     books = db.list_books()
     pairs = wanted.companions(books)
     names = {u["id"]: u["username"] for u in users.all_users()}
     for b in books:
         b["companion_id"] = pairs[b["id"]]["id"] if b["id"] in pairs else None  # the same book in its other format
         b["requested_by_name"] = names.get(b.get("requested_by"), "")
+    response.headers["ETag"] = tag
+    response.headers["Cache-Control"] = "no-cache"
     return books
 
 

@@ -274,6 +274,59 @@ function updateBadges() {
   req.textContent = waiting;
 }
 
+// The shelf used to be polled every two seconds, from every open tab: about 43,000 requests a day
+// against a library that changes a handful of times. The server now says when it changed, and the
+// quiet case costs nothing. EventSource reconnects on its own, and the version on every message is
+// what makes a reconnect safe: a client that was away sees a number it never rendered and refetches.
+const LIBRARY_DEBOUNCE = 1000;   // a download in flight bumps the version constantly; one refetch a second is plenty
+const LIBRARY_SLOW_POLL = 30000; // no stream (old browser, proxy eating the connection): fall back, slow
+const LIBRARY_RETRY = 30000;     // how often to try the stream again while falling back
+
+let libraryEvents = null;
+let libraryPoll = null;
+let libraryRetry = null;
+let libraryRefetch = null;
+
+function refetchLibrarySoon() {
+  clearTimeout(libraryRefetch);
+  libraryRefetch = setTimeout(refreshLibrary, LIBRARY_DEBOUNCE);
+}
+
+function slowLibraryPoll(on) {
+  if (on && !libraryPoll) libraryPoll = setInterval(refreshLibrary, LIBRARY_SLOW_POLL);
+  if (!on && libraryPoll) { clearInterval(libraryPoll); libraryPoll = null; }
+}
+
+function connectLibraryEvents() {
+  if (typeof EventSource !== "function") return slowLibraryPoll(true);
+  libraryEvents?.close();
+  const stream = new EventSource("/api/events");
+  libraryEvents = stream;
+  stream.onmessage = (e) => {
+    let message;
+    try { message = JSON.parse(e.data); } catch { return; }
+    if (message.type !== "library_changed") return;
+    slowLibraryPoll(false);  // the stream is healthy, so the fallback poll has no job
+    if (!state.eventsVersion) {
+      // First message after connecting, or after a drop: we don't know what we missed, so look once.
+      state.eventsVersion = message.version;
+      refreshLibrary();
+      return;
+    }
+    if (message.version === state.eventsVersion) return;
+    state.eventsVersion = message.version;
+    refetchLibrarySoon();
+  };
+  stream.onerror = () => {
+    stream.close();
+    libraryEvents = null;
+    state.eventsVersion = 0;          // whatever we rendered, we can't trust it after a gap
+    slowLibraryPoll(true);
+    clearTimeout(libraryRetry);
+    libraryRetry = setTimeout(connectLibraryEvents, LIBRARY_RETRY);
+  };
+}
+
 async function refreshLibrary() {
   try {
     state.library = await api("/api/library");
@@ -4946,7 +4999,7 @@ async function boot() {
   player.onChange = () => updateDrawerLive();
   reader.onChange = () => { if (!reader.book) refreshLibrary(); }; // the shelf and cards show how far you got
   player.restore(state.library);
-  setInterval(refreshLibrary, 2000);
+  connectLibraryEvents();
   checkUpdates();
   setInterval(checkUpdates, 6 * 60 * 60 * 1000);
 }

@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
 
-from . import config
+from . import config, events
 
 # Lifecycle of a book:
 #   wanted -> queued -> resolving -> caching -> downloading -> organizing -> completed
@@ -272,6 +272,7 @@ def save_progress(user_id: int, book_id: int, position: float | None = None, dur
                 sets.append(f"{col}=?")
                 args.append(int(v) if col == "finished" else v)
         conn.execute(f"UPDATE progress SET {', '.join(sets)} WHERE user_id=? AND book_id=?", (*args, user_id, book_id))
+    events.bump()
 
 
 def insert(book: dict) -> dict:
@@ -285,6 +286,7 @@ def insert(book: dict) -> dict:
     with connect() as conn:
         cur = conn.execute(f"INSERT INTO books ({cols}) VALUES ({marks})", tuple(data.values()))
         book_id = cur.lastrowid
+    events.bump()
     return get(book_id)
 
 
@@ -296,12 +298,14 @@ def update(book_id: int, **changes) -> None:
     sets = ", ".join(f"{k}=?" for k in changes)
     with connect() as conn:
         conn.execute(f"UPDATE books SET {sets} WHERE id=?", (*changes.values(), book_id))
+    events.bump()
 
 
 def delete(book_id: int) -> None:
     with connect() as conn:
         conn.execute("DELETE FROM books WHERE id=?", (book_id,))
         conn.execute("DELETE FROM progress WHERE book_id=?", (book_id,))
+    events.bump()
 
 
 def next_queued(exclude: set[int]) -> dict | None:
