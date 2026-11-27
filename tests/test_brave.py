@@ -1,3 +1,5 @@
+import json
+
 import httpx
 import pytest
 from fastapi.testclient import TestClient
@@ -111,3 +113,66 @@ def test_discover_uses_brave_when_selected(monkeypatch):
         assert c.get("/api/discover", params={"q": "dune", "source": "audiobookbay"}).status_code == 200
         assert c.get("/api/settings").json()["brave_api_key"].startswith("•")
     assert used == {"query": "dune", "key": "KEY"}
+
+
+def test_discover_uses_monid_with_only_a_monid_key(monkeypatch):
+    monkeypatch.setenv("MONID_API_KEY", "MONID-KEY")
+    config.update({"search_provider": "brave", "smart_search": False})
+    assert config.load().brave_api_key == ""
+    seen = []
+    result = {
+        "title": RESULTS[0]["title"],
+        "link": RESULTS[0]["url"],
+        "published_date": RESULTS[0]["page_age"],
+    }
+    client = fake_brave({"output": {"results": [result]}}, seen=seen)
+    monkeypatch.setattr(brave.httpx, "AsyncClient", lambda **kwargs: client)
+
+    response = TestClient(api.app).get(
+        "/api/discover", params={"q": "duné", "source": "audiobookbay", "page": 2}
+    )
+    assert response.status_code == 200
+    req, = seen
+    assert req.method == "POST"
+    assert str(req.url) == "https://api.monid.ai/v1/run"
+    assert req.headers["authorization"] == "Bearer MONID-KEY"
+    assert req.headers["content-type"] == "application/json; charset=utf-8"
+    assert "duné".encode() in req.content
+    assert json.loads(req.content) == {
+        "provider": "search1api",
+        "endpoint": "/search",
+        "input": {"body": {
+            "query": "duné site:audiobookbay.lu", "max_results": 20, "search_service": "bing", "page": 2,
+        }},
+    }
+    item, = response.json()["items"]
+    assert (item["title"], item["author"], item["format"]) == ("Dune", "Frank Herbert", "M4B")
+    assert item["url"] == RESULTS[0]["url"]
+    assert item["posted"] == "2025-12-24"
+    assert response.json()["total_pages"] == 2
+
+
+@pytest.mark.parametrize("status,message", [(404, "Brave Search error 404"), (429, "rate limit")])
+async def test_monid_provider_errors_match_brave(monkeypatch, status, message):
+    monkeypatch.setenv("MONID_API_KEY", "MONID-KEY")
+    payload = {"status": "COMPLETED", "providerResponse": {"httpStatus": status, "error": {"message": "error"}}}
+    async with fake_brave(payload) as client:
+        with pytest.raises(brave.BraveError, match=message):
+            await brave.search("dune", "", BASE, client=client)
+
+
+async def test_monid_polls_async_runs(monkeypatch):
+    monkeypatch.setenv("MONID_API_KEY", "MONID-KEY")
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append((request.method, request.url.path))
+        assert request.headers["authorization"] == "Bearer MONID-KEY"
+        if request.method == "POST":
+            return httpx.Response(202, json={"runId": "search-1"})
+        return httpx.Response(200, json={"status": "COMPLETED", "output": {"results": []}})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        res = await brave.search("dune", "", BASE, client=client)
+    assert calls == [("POST", "/v1/run"), ("GET", "/v1/runs/search-1")]
+    assert res == {"items": [], "more": False, "altered": ""}

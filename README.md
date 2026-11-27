@@ -394,6 +394,14 @@ A few things are set with environment variables instead:
 | `NARRATARR_TRUSTED_PROXIES` | *(none)* | Your reverse proxy's address or range (`172.18.0.0/16`), comma-separated. Narratarr then takes the visitor's address from the proxy's `X-Forwarded-For`, so sign-in limits apply per visitor rather than to everyone at once. That header is ignored from anyone else |
 | `PUID` / `PGID` | `1000` | Docker only: the user and group files are written as |
 
+### Using Monid (optional)
+
+To search AudiobookBay through Monid, set `MONID_API_KEY` in Narratarr's environment and choose **Brave Search** under **Settings → Search & sources**.
+A Monid key is enough for Discover searches with this option.
+The **Test** button in Settings checks your Brave Search key.
+Monid uses Search1API, so result coverage and available fields differ from Brave Search.
+See the [Monid docs](https://docs.monid.ai).
+
 ### Folder layout
 
 **Settings → General → Folder layout** decides where each book goes inside your library. Put `/` between folders and use any of these:
