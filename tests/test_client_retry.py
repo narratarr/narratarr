@@ -10,10 +10,11 @@ again; only a client that stays down past every attempt ends up failed.
 import time
 
 import httpx
+import pytest
 
-from narratarr import db
+from narratarr import config, db
 from narratarr.downloaders import ClientError, is_client_unreachable
-from narratarr.worker import CLIENT_RETRY_DELAYS, Worker
+from narratarr.worker import Worker
 
 HASH1 = "a" * 40
 
@@ -51,7 +52,7 @@ async def test_an_unreachable_client_requeues_the_book_instead_of_failing_it(mon
     assert got["status"] == "queued"          # not failed
     assert got["error"] == ""
     assert got["client_retries"] == 1
-    assert got["retry_at"] >= before + CLIENT_RETRY_DELAYS[0] - 1
+    assert got["retry_at"] >= before + config.retry_delays()[0] - 1
     assert "isn't answering" in got["detail"]
 
 
@@ -66,7 +67,7 @@ async def test_the_book_waits_its_turn_then_comes_back(monkeypatch):
 
 
 async def test_attempts_run_out_and_the_book_then_fails(monkeypatch):
-    book = downloading(client_retries=len(CLIENT_RETRY_DELAYS))
+    book = downloading(client_retries=len(config.retry_delays()))
     failing_with(monkeypatch, unreachable())
     await Worker()._run(book["id"])
 
@@ -117,3 +118,39 @@ async def test_a_client_outage_does_not_mark_the_release_as_bad(monkeypatch):
     got = db.get(book["id"])
     assert got["failed_releases"] == []
     assert got["release_url"] == "https://n.example/1"
+
+
+# ---- the waits are a setting -----------------------------------------------------------------
+
+
+def test_the_waits_are_read_as_minutes_and_stored_normalised():
+    assert config.parse_retry_minutes("2, 10") == "2, 10"
+    assert config.parse_retry_minutes(["1", "5"]) == "1, 5"
+    assert config.parse_retry_minutes("1,5 , 15") == "1, 5, 15"
+    assert config.parse_retry_minutes("") == ""     # off, not an error
+    for bad in ("0", "-2", "abc", "1441"):
+        with pytest.raises(ValueError):
+            config.parse_retry_minutes(bad)
+
+
+async def test_a_custom_schedule_is_used(monkeypatch):
+    config.update({"client_retry_minutes": "2, 10"})
+    book = downloading()
+    failing_with(monkeypatch, unreachable())
+    before = time.time()
+    await Worker()._run(book["id"])
+
+    got = db.get(book["id"])
+    assert got["status"] == "queued"
+    assert before + 119 <= got["retry_at"] <= time.time() + 121
+
+
+async def test_retries_can_be_switched_off(monkeypatch):
+    config.update({"client_retry_minutes": ""})
+    book = downloading()
+    failing_with(monkeypatch, unreachable())
+    await Worker()._run(book["id"])
+
+    got = db.get(book["id"])
+    assert got["status"] == "failed" and got["client_retries"] == 0
+    assert "Couldn't reach Deluge" in got["error"]

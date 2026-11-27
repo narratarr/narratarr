@@ -2434,6 +2434,19 @@ function Settings(root, page) {
         </div>
       </section>
 
+      <section class="panel" data-page="downloads">
+        <div class="ph"><h3>When a client can’t be reached</h3><p class="desc">A download client that is down for a minute shouldn’t cost you the book: the download is usually still running in it. Narratarr waits these long between attempts, then gives up and says why.</p></div>
+        <div class="body">
+          <div class="set-grid">
+            <div class="field">
+              <label for="client_retry_minutes">Wait between attempts (minutes)</label>
+              <input class="input mono" id="client_retry_minutes" name="client_retry_minutes" value="${esc(s.client_retry_minutes)}" placeholder="1, 5, 15, 30" />
+              <span class="hint">Comma-separated, one wait per attempt. Empty means don’t retry at all.</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section class="panel" data-page="search">
         <div class="ph"><h3>Languages</h3><p class="desc">The languages your books should be in. Leave them all off for any language.</p></div>
         <div class="body">

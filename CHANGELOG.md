@@ -8,7 +8,8 @@ All notable changes to Narratarr. The app shows this under **Settings → Update
   moment its download client refused a connection, which left a finished torrent sitting in the client with
   nobody to import it: restarting Deluge for a minute stranded two audiobooks, and nothing retried them. That
   failure is about the client being up, not about the release, so the book now waits (a minute, then five,
-  fifteen and thirty) and tries the same release again. A client that stays down past those four attempts still
+  fifteen and thirty, and the waits are a setting under Settings → Downloads) and tries the same release
+  again. A client that stays down past those four attempts still
   fails the book, with the client's own message, rather than holding a download slot for ever.
 - **More than one Torznab indexer, each with a name.** Settings → Search & sources had a single Torznab address,
   so Jackett and, say, a private indexer's own Torznab endpoint could not both be used, and both would have been

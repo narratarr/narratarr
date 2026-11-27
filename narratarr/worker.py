@@ -50,10 +50,6 @@ HARDCOVER_SECONDS = 6 * 60 * 60  # how often to look at the Hardcover shelf (a s
 AUTO_SEARCH_SECONDS = 10 * 60  # how often to look for a few Wanted books
 RD_TIMEOUT_SECONDS = 6 * 60 * 60
 CLIENT_TIMEOUT_SECONDS = 7 * 24 * 60 * 60  # a torrent with no seeds shouldn't hold a download slot forever
-# How long a book waits before trying again when the download client was unreachable. The list is
-# the whole policy: four tries over about three quarters of an hour, then the book fails with the
-# reason, so a client that is simply misconfigured doesn't hold a slot forever.
-CLIENT_RETRY_DELAYS = (60, 300, 900, 1800)
 MAX_COVER_BYTES = 20 << 20
 _UNSAFE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
@@ -195,18 +191,21 @@ def _wait_for_client(book_id: int, error: BaseException) -> bool:
     """
     if not is_client_unreachable(error):
         return False
+    delays = config.retry_delays()
+    if not delays:
+        return False  # the user turned retries off: fail as Narratarr used to
     book = db.get(book_id) or {}
     tries = int(book.get("client_retries") or 0)
-    if tries >= len(CLIENT_RETRY_DELAYS):
+    if tries >= len(delays):
         return False
-    delay = CLIENT_RETRY_DELAYS[tries]
+    delay = delays[tries]
     db.update(
         book_id, status="queued", progress=0, speed=0, error="",
         client_retries=tries + 1, retry_at=time.time() + delay,
         detail=f"Your download client isn't answering. Trying again in {_delay_words(delay)}.",
     )
     log.warning("Book %s: download client unreachable, retrying in %ss (attempt %s of %s)",
-                book_id, delay, tries + 1, len(CLIENT_RETRY_DELAYS))
+                book_id, delay, tries + 1, len(delays))
     return True
 
 

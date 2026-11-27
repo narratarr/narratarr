@@ -65,6 +65,11 @@ class Settings:
     # builds it from the flat settings above the first time, exactly like the clients list, so an
     # existing install keeps working untouched.
     torznab_indexers: list = field(default_factory=list)
+    # How long to wait before trying a book again when its download client was unreachable, in
+    # minutes, oldest first. One entry per attempt; empty means a little outage fails the book, as
+    # it did before. Four tries over about three quarters of an hour is the default because that
+    # covers a container restart or a VPN reconnect without holding a download slot for ever.
+    client_retry_minutes: str = "1, 5, 15, 30"
     sabnzbd_url: str = ""
     sabnzbd_api_key: str = ""
     sabnzbd_category: str = ""
@@ -311,6 +316,8 @@ def update(changes: dict) -> Settings:
                 v = v.strip()
             if k == "languages":
                 v = ", ".join(languages.parse(str(v)))
+            if k == "client_retry_minutes":
+                v = parse_retry_minutes(v)
             if k == "folder_template":
                 v = v.strip("/") or "{author}/{title}"
                 if bad := layout.unknown(v):
@@ -362,6 +369,39 @@ def update(changes: dict) -> Settings:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         _write_private(SETTINGS_FILE, json.dumps(asdict(s), indent=2))
     return s
+
+
+def parse_retry_minutes(value) -> str:
+    """The waits between attempts after an unreachable client, as the user typed them.
+
+    Stored normalised ("1, 5, 15, 30") so the setting reads the same however it was entered. An
+    empty string is a real choice: no retry at all, which is what Narratarr did before.
+    """
+    if isinstance(value, (list, tuple)):
+        raw = [str(x).strip() for x in value if str(x).strip()]
+    else:
+        raw = [x for x in re.split(r"[,\s]+", str(value or "").strip()) if x]
+    out: list[int] = []
+    for item in raw:
+        try:
+            minutes = int(float(item))
+        except ValueError:
+            raise ValueError(f"'{item}' isn't a number of minutes.") from None
+        if minutes < 1:
+            raise ValueError("Wait at least a minute before trying again.")
+        if minutes > 1440:
+            raise ValueError("Wait no more than a day (1440 minutes) between attempts.")
+        out.append(minutes)
+    if len(out) > 10:
+        raise ValueError("Ten attempts is the most a book can be given.")
+    return ", ".join(str(m) for m in out)
+
+
+def retry_delays(s: Settings | None = None) -> list[int]:
+    """The waits, in seconds, before each retry after an unreachable download client."""
+    s = s or load()
+    minutes = re.split(r"[,\s]+", (s.client_retry_minutes or "").strip())
+    return [int(m) * 60 for m in minutes if m.isdigit()]
 
 
 def parse_audible_stores(value) -> list[str]:
