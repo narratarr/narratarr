@@ -39,6 +39,31 @@ def is_bad_release(e: BaseException) -> bool:
     return bool(getattr(e, "release_failed", False))
 
 
+# A failure to talk to the download client itself, as opposed to a verdict about the release. The
+# client modules build their message with reach.explain() and raise `from` the connection error, so
+# the cause is the original transport failure. Retrying the same book once the client is back costs
+# nothing; replacing the release would only fail the same way.
+_TRANSPORT_ERRORS = (httpx.TransportError, ConnectionError, TimeoutError, OSError)
+
+
+def is_client_unreachable(e: BaseException) -> bool:
+    """Whether this error is the download client being unreachable right now."""
+    if getattr(e, "release_failed", False):
+        return False  # the client answered: it has an opinion about the release
+    # An indexer being down is not the client being down, even though it wraps the same transport
+    # error: retrying the book in a minute would only ask the same unreachable indexer again.
+    from .sources import ProwlarrError  # local import: this runs once per failure, and keeps the
+    #                                     heavy sources package out of this module's import time
+
+    if isinstance(e, ProwlarrError):
+        return False
+    for candidate in (e, e.__cause__, e.__context__):
+        if isinstance(candidate, _TRANSPORT_ERRORS):
+            return True
+    return False
+
+
+
 USENET_CLIENTS = {"sabnzbd": "SABnzbd", "nzbget": "NZBGet"}
 DEBRID = ("realdebrid", "alldebrid", "torbox", "premiumize")  # cloud services: they fetch the torrent, we download the files
 TORRENT_CLIENTS = {

@@ -33,7 +33,7 @@ from pathlib import Path
 import httpx
 
 from . import audible, audiobookshelf, cachecheck, config, hardcover, db, downloaders, ebooks, importer, layout, media, notify, routing, wanted
-from .downloaders import ClientError, bad_release, is_bad_release
+from .downloaders import ClientError, bad_release, is_bad_release, is_client_unreachable
 from .alldebrid import AllDebridError
 from .premiumize import PremiumizeError
 from .torbox import TorBoxError
@@ -50,6 +50,10 @@ HARDCOVER_SECONDS = 6 * 60 * 60  # how often to look at the Hardcover shelf (a s
 AUTO_SEARCH_SECONDS = 10 * 60  # how often to look for a few Wanted books
 RD_TIMEOUT_SECONDS = 6 * 60 * 60
 CLIENT_TIMEOUT_SECONDS = 7 * 24 * 60 * 60  # a torrent with no seeds shouldn't hold a download slot forever
+# How long a book waits before trying again when the download client was unreachable. The list is
+# the whole policy: four tries over about three quarters of an hour, then the book fails with the
+# reason, so a client that is simply misconfigured doesn't hold a slot forever.
+CLIENT_RETRY_DELAYS = (60, 300, 900, 1800)
 MAX_COVER_BYTES = 20 << 20
 _UNSAFE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
@@ -173,6 +177,37 @@ def unique_destination(book: dict, settings: config.Settings) -> Path:
         dest = base.with_name(f"{base.name} ({n})")
         n += 1
     return dest
+
+
+def _delay_words(seconds: int) -> str:
+    if seconds % 60:
+        return f"{seconds} seconds"
+    minutes = seconds // 60
+    return "a minute" if minutes == 1 else f"{minutes} minutes"
+
+
+def _wait_for_client(book_id: int, error: BaseException) -> bool:
+    """Queue the book again after a pause when the download client was unreachable.
+
+    A client that is down for a minute shouldn't cost the book: the download is usually still
+    running in it, and failing here is what leaves a finished torrent in the client with nobody to
+    import it. Returns False once the book has used its attempts, so the caller fails it as usual.
+    """
+    if not is_client_unreachable(error):
+        return False
+    book = db.get(book_id) or {}
+    tries = int(book.get("client_retries") or 0)
+    if tries >= len(CLIENT_RETRY_DELAYS):
+        return False
+    delay = CLIENT_RETRY_DELAYS[tries]
+    db.update(
+        book_id, status="queued", progress=0, speed=0, error="",
+        client_retries=tries + 1, retry_at=time.time() + delay,
+        detail=f"Your download client isn't answering. Trying again in {_delay_words(delay)}.",
+    )
+    log.warning("Book %s: download client unreachable, retrying in %ss (attempt %s of %s)",
+                book_id, delay, tries + 1, len(CLIENT_RETRY_DELAYS))
+    return True
 
 
 def readable_error(e: Exception) -> str:
@@ -347,7 +382,7 @@ class Worker:
 
     def _spawn(self, book: dict) -> None:
         book_id = book["id"]
-        db.update(book_id, status="resolving", error="", detail="Starting…", progress=0)
+        db.update(book_id, status="resolving", error="", detail="Starting…", progress=0, retry_at=None)
         self.stops[book_id] = threading.Event()
         task = asyncio.create_task(self._run(book_id))
         self.running[book_id] = task
@@ -366,6 +401,8 @@ class Worker:
         except (
             RealDebridError, AllDebridError, TorBoxError, PremiumizeError, ClientError, ProwlarrError, httpx.HTTPError, ValueError, OSError, zipfile.BadZipFile
         ) as e:
+            if _wait_for_client(book_id, e):
+                return
             log.warning("Book %s failed: %s", book_id, readable_error(e))
             db.update(book_id, status="failed", error=readable_error(e), speed=0, detail="")
             if is_bad_release(e) and announce and await self._try_another_release(book_id):
@@ -486,7 +523,7 @@ class Worker:
         dest = await self._organize(book, tmp, settings)
         db.update(
             book["id"], status="completed", path=str(dest), progress=100, speed=0, detail="",
-            completed_at=time.time(), **extra,
+            completed_at=time.time(), client_retries=0, retry_at=None, **extra,
         )
         if book["source"] != "local":
             notify.emit("completed", db.get(book["id"]))
