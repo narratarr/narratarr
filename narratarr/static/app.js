@@ -580,10 +580,16 @@ function Discover(root) {
     const sorts = [["", natural], ["rating", "Rating"], ["newest", "Newest first"], ["largest", "Largest"], ["smallest", "Smallest"], ["title", "Title A–Z"]]
       .filter(([v]) => !(v === "newest" && listedNewest));
     const shown = visibleItems().length;
+    // Discover shows results in the source's own order; it does not rank by format. Automatic
+    // picking and "Other releases" do prefer M4B, and that difference looked like a bug to
+    // someone searching here, so say it next to the Format control.
+    const m4bHint = d.kind === "audiobook" && ["prowlarr", "torznab", "audiobookbay"].includes(src.name)
+      ? `<span class="muted fmt-hint">Automatic picking and Other releases prefer M4B.</span>` : "";
     $("#refine", root).innerHTML = !d.items.length ? storePicker() : `
       <span class="muted">${shown}${shown !== d.items.length ? ` of ${d.items.length}` : ""} books</span>
       <select class="select" data-r="lang" aria-label="Language">${opts(d.items.map((i) => i.language), d.lang, "All languages")}</select>
       <select class="select" data-r="fmt" aria-label="Format">${opts(d.items.map((i) => i.format.toUpperCase()), d.fmt, "All formats")}</select>
+      ${m4bHint}
       <select class="select" data-r="sort" aria-label="Sort">${sorts.map(([v, l]) => `<option value="${v}" ${v === d.sort ? "selected" : ""}>${l}</option>`).join("")}</select>`
       + storePicker();
   }
