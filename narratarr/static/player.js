@@ -22,6 +22,11 @@ class Player {
     this.book = null;
     this.media = null;
     this.fileIdx = -1;
+    // A place we've asked the browser to go to that it hasn't reached yet (seconds from the start of
+    // the book). Until it gets there, that place is where the listener is. Otherwise the 0:00 of a
+    // file that's still loading gets shown, and saved over their real place.
+    this.target = null;
+    this.tries = 0;
     this.speed = load().speed || 1;
     this.sleep = { mode: 0, until: 0 };
     this.lastSave = 0;
@@ -37,7 +42,8 @@ class Player {
     const d = this.media?.duration || 0;
     return d || (this.media?.files.length === 1 ? this.audio.duration || 0 : 0);
   }
-  get time() { return this.file ? this.file.offset + (this.audio.currentTime || 0) : 0; }
+  get time() { return this.target ?? this.heard; }
+  get heard() { return this.file ? this.file.offset + (this.audio.currentTime || 0) : 0; }
   get playing() { return !this.audio.paused && !this.audio.ended; }
 
   chapterIndex(t = this.time) {
@@ -75,11 +81,25 @@ class Player {
     if (!this.media) return;
     const dur = this.duration;
     t = Math.max(0, dur ? Math.min(t, dur - 0.25) : t);
+    this.target = t;
+    this.tries = 0;
     const i = this.fileAt(t);
     if (i !== this.fileIdx) await this.loadFile(i);
+    if (this.target !== t) return; // another seek took over while the file loaded
     this.audio.currentTime = Math.max(0, t - this.file.offset);
     if (play) await this.play();
     this.render();
+  }
+
+  // Browsers (Safari on iPhone above all) can drop a jump made before the audio has really
+  // loaded, then play from 0:00. Keep asking until the audio is where it was sent.
+  settle() {
+    const t = this.target;
+    const a = this.audio;
+    if (t === null || !this.file || a.readyState < 1 || a.seeking || this.fileAt(t) !== this.fileIdx) return;
+    if (Math.abs(this.heard - t) < 3) { this.target = null; return; }
+    if (++this.tries > 8) { this.target = null; return; } // it can't seek this file; don't freeze the clock
+    a.currentTime = Math.max(0, t - this.file.offset);
   }
 
   // ---- controls -----------------------------------------------------------
@@ -102,6 +122,7 @@ class Player {
     this.book = book;
     this.media = media;
     this.fileIdx = -1;
+    this.target = null;
     store({ bookId: book.id });
     this.mount();
     const resume = book.finished ? 0 : Math.max(0, (book.listen_position || 0) - 2);
@@ -160,6 +181,7 @@ class Player {
     this.book = null;
     this.media = null;
     this.fileIdx = -1;
+    this.target = null;
     store({ bookId: null });
     document.body.classList.remove("has-player");
     $("#player")?.remove();
@@ -193,7 +215,8 @@ class Player {
 
   wire() {
     const a = this.audio;
-    a.addEventListener("timeupdate", () => this.tick());
+    a.addEventListener("timeupdate", () => { this.settle(); this.tick(); });
+    for (const ev of ["loadedmetadata", "canplay", "seeked", "playing"]) a.addEventListener(ev, () => this.settle());
     a.addEventListener("play", () => { this.render(); this.onChange(); });
     a.addEventListener("pause", () => { this.save(); this.render(); this.onChange(); });
     a.addEventListener("waiting", () => $("#player")?.classList.add("buffering"));
