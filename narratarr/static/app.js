@@ -1062,7 +1062,6 @@ function Library(root) {
         <p class="lede" id="lib-summary"></p>
       </div>
       <div class="cta-row">
-        ${isAdmin() ? `<button class="btn" id="missing-btn">${I.search} Check for changes</button>` : ""}
         <button class="btn" id="import-btn">${I.down} Import books</button>
       </div>
     </header>
@@ -1140,7 +1139,6 @@ function Library(root) {
   };
   root.onclick = async (e) => {
     if (e.target.closest("a.quick, a.rating-pill")) return; // an ebook download or a rating's page: let the link do it
-    if (e.target.closest("#missing-btn")) return openMissing();
     if (e.target.closest("#import-btn, [data-import]")) return openImport();
     const row = e.target.closest(".req-row");
     const act = e.target.closest("[data-act]");
@@ -2379,6 +2377,11 @@ function Settings(root, page) {
       </section>
 
       <section class="panel" data-page="general">
+        <div class="ph"><h3>Check for changes</h3><p class="desc">See which books’ files are no longer where Narratarr left them — moved or deleted outside of it. Each one can go back to Wanted, be marked missing, or leave the library. Nothing is changed until you say so.</p></div>
+        <div class="body"><div><button class="btn" type="button" id="missing-scan">${I.search} Check for changes</button></div></div>
+      </section>
+
+      <section class="panel" data-page="general">
         <div class="ph"><h3>Import folder</h3><p class="desc">Drop books here and they move into your library on their own, once they’ve finished copying. Audiobooks and ebooks both.</p></div>
         <div class="body">
           <div class="field">
@@ -3397,6 +3400,7 @@ function Settings(root, page) {
   };
   drawRegions();
   $("#open-import", root).onclick = async () => { await save(true); openImport(form.import_folder.value); };
+  $("#missing-scan", root).onclick = () => openMissing();
   $("#whats-new", root).onclick = () => openWhatsNew();
   $("#check-updates", root).onclick = async (e) => {
     spinBtn(e.currentTarget, true);
