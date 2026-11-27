@@ -22,7 +22,7 @@ from rapidfuzz import fuzz
 
 from . import audible, config, db, downloaders, ebooks, languages, notify
 from .search import clean_title, normalize
-from .sources import CATALOGS, ProwlarrError, TorznabError, ebook_indexers, ebook_torznab, get_source
+from .sources import CATALOGS, ProwlarrError, TorznabError, ebook_indexers, ebook_torznab_sources, get_source, torznab_sources
 
 log = logging.getLogger("narratarr.wanted")
 
@@ -100,8 +100,10 @@ async def find_releases(book: dict) -> list[dict]:
         jobs["librivox"] = get_source("librivox").find(title, author)
     if s.prowlarr_url and s.prowlarr_api_key:
         jobs["prowlarr"] = (ebook_indexers() if kind == "ebook" else get_source("prowlarr")).search(query)
-    if s.torznab_url and s.torznab_api_key:
-        jobs["torznab"] = (ebook_torznab() if kind == "ebook" else get_source("torznab")).search(query)
+    # Every configured Torznab indexer is its own source, so the result says which one it came from
+    # and a routing rule can name it.
+    for name, indexer in (ebook_torznab_sources() if kind == "ebook" else torznab_sources()).items():
+        jobs[name] = indexer.search(query)
     if not jobs:
         return []
     results = await asyncio.gather(*jobs.values(), return_exceptions=True)
@@ -129,6 +131,16 @@ async def find_releases(book: dict) -> list[dict]:
 
 
 MAX_FAILED_RETRIES = 2  # releases tried in place of failed ones, per book, before it's left to a person
+
+
+def has_indexer(s: config.Settings | None = None) -> bool:
+    """Whether automatic search has anywhere to look: Prowlarr, or any configured Torznab indexer.
+
+    The Torznab list is what counts — an install set up under the new screen has no flat fields at
+    all — with the flat pair still read for one that has not been migrated.
+    """
+    s = s or config.load()
+    return bool((s.prowlarr_url and s.prowlarr_api_key) or config.torznab_entries(s))
 
 
 def info_hash_of(item: dict) -> str:
@@ -252,7 +264,7 @@ def due_for_search() -> list[dict]:
 async def auto_search() -> int:
     """One round of automatic searching. Returns how many books were grabbed (or held for approval)."""
     s = config.load()
-    if not (s.auto_search and ((s.prowlarr_url and s.prowlarr_api_key) or (s.torznab_url and s.torznab_api_key))):
+    if not (s.auto_search and has_indexer(s)):
         return 0
     grabbed = 0
     for b in due_for_search():

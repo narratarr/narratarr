@@ -33,12 +33,12 @@ from pathlib import Path
 import httpx
 
 from . import audible, audiobookshelf, cachecheck, config, hardcover, db, downloaders, ebooks, importer, layout, media, notify, routing, wanted
-from .downloaders import ClientError, bad_release, is_bad_release
+from .downloaders import ClientError, bad_release, is_bad_release, is_client_unreachable
 from .alldebrid import AllDebridError
 from .premiumize import PremiumizeError
 from .torbox import TorBoxError
 from .realdebrid import RealDebrid, RealDebridError
-from .sources import Details, ProwlarrError, get_source
+from .sources import Details, ProwlarrError, Torznab, get_source
 from .sources.prowlarr import fetch
 from .sources.torznab import fetch as torznab_fetch
 
@@ -173,6 +173,40 @@ def unique_destination(book: dict, settings: config.Settings) -> Path:
         dest = base.with_name(f"{base.name} ({n})")
         n += 1
     return dest
+
+
+def _delay_words(seconds: int) -> str:
+    if seconds % 60:
+        return f"{seconds} seconds"
+    minutes = seconds // 60
+    return "a minute" if minutes == 1 else f"{minutes} minutes"
+
+
+def _wait_for_client(book_id: int, error: BaseException) -> bool:
+    """Queue the book again after a pause when the download client was unreachable.
+
+    A client that is down for a minute shouldn't cost the book: the download is usually still
+    running in it, and failing here is what leaves a finished torrent in the client with nobody to
+    import it. Returns False once the book has used its attempts, so the caller fails it as usual.
+    """
+    if not is_client_unreachable(error):
+        return False
+    delays = config.retry_delays()
+    if not delays:
+        return False  # the user turned retries off: fail as Narratarr used to
+    book = db.get(book_id) or {}
+    tries = int(book.get("client_retries") or 0)
+    if tries >= len(delays):
+        return False
+    delay = delays[tries]
+    db.update(
+        book_id, status="queued", progress=0, speed=0, error="",
+        client_retries=tries + 1, retry_at=time.time() + delay,
+        detail=f"Your download client isn't answering. Trying again in {_delay_words(delay)}.",
+    )
+    log.warning("Book %s: download client unreachable, retrying in %ss (attempt %s of %s)",
+                book_id, delay, tries + 1, len(delays))
+    return True
 
 
 def readable_error(e: Exception) -> str:
@@ -347,7 +381,7 @@ class Worker:
 
     def _spawn(self, book: dict) -> None:
         book_id = book["id"]
-        db.update(book_id, status="resolving", error="", detail="Starting…", progress=0)
+        db.update(book_id, status="resolving", error="", detail="Starting…", progress=0, retry_at=None)
         self.stops[book_id] = threading.Event()
         task = asyncio.create_task(self._run(book_id))
         self.running[book_id] = task
@@ -366,6 +400,8 @@ class Worker:
         except (
             RealDebridError, AllDebridError, TorBoxError, PremiumizeError, ClientError, ProwlarrError, httpx.HTTPError, ValueError, OSError, zipfile.BadZipFile
         ) as e:
+            if _wait_for_client(book_id, e):
+                return
             log.warning("Book %s failed: %s", book_id, readable_error(e))
             db.update(book_id, status="failed", error=readable_error(e), speed=0, detail="")
             if is_bad_release(e) and announce and await self._try_another_release(book_id):
@@ -486,7 +522,7 @@ class Worker:
         dest = await self._organize(book, tmp, settings)
         db.update(
             book["id"], status="completed", path=str(dest), progress=100, speed=0, detail="",
-            completed_at=time.time(), **extra,
+            completed_at=time.time(), client_retries=0, retry_at=None, **extra,
         )
         if book["source"] != "local":
             notify.emit("completed", db.get(book["id"]))
@@ -635,10 +671,18 @@ class Worker:
             # leaves the client hunting for peers over DHT ("Downloading metadata" for hours), and
             # never works on a private tracker. Torznab needs its own address, key and key param.
             try:
-                if book.get("source") == "torznab":
-                    db.update(book_id, detail="Fetching the torrent from your indexer…")
+                if (book.get("source") or "").startswith("torznab"):
+                    # Which of several indexers this came from: the book's own source names it. If
+                    # that indexer has since been removed, say so instead of failing obscurely.
+                    try:
+                        indexer = get_source(book["source"])
+                    except ValueError:
+                        raise ProwlarrError("That Torznab indexer is no longer set up. Search for this book again.")
+                    if not isinstance(indexer, Torznab):
+                        raise ProwlarrError("That source isn't a Torznab indexer any more. Search for this book again.")
+                    db.update(book_id, detail=f"Fetching the torrent from {indexer.label}…")
                     kind, payload = await torznab_fetch(
-                        book["download_url"], settings.torznab_url, settings.torznab_api_key, self._transport
+                        book["download_url"], indexer.base, indexer.api_key, self._transport
                     )
                 else:
                     db.update(book_id, detail="Fetching the torrent from Prowlarr…")

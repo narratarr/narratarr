@@ -253,7 +253,7 @@ flowchart LR
 | **Old-Time Radio** | ~9,000 classic radio dramas and comedies, 1930s–60s | Free, direct from the Internet Archive. Some full series are several GB, and the size is shown before you download |
 | **AudiobookBay** *(optional)* | Torrent listings | Via Real-Debrid, AllDebrid, TorBox or Premiumize (an account with one required) |
 | **Prowlarr** *(optional)* | Whatever indexers you've added to your own [Prowlarr](https://prowlarr.com) | Usenet via SABnzbd or NZBGet; torrents via Real-Debrid, AllDebrid, TorBox, Premiumize, qBittorrent, Transmission or Deluge |
-| **Torznab** *(optional)* | Any indexer that speaks Torznab: [Jackett](https://github.com/Jackett/Jackett), Prowlarr's Torznab endpoint, or a standalone indexer. Give it the address ending `/torznab/api` and the key | Same as Prowlarr |
+| **Torznab** *(optional)* | Any indexer that speaks Torznab: [Jackett](https://github.com/Jackett/Jackett), Prowlarr's Torznab endpoint, or a standalone indexer. Add as many as you like, each with the address ending `/torznab/api`, its key and a name of your choosing | Same as Prowlarr |
 | **Audible catalog** *(with Prowlarr)* | Every audiobook in Audible's store, with covers, series and release dates | Nothing downloads from Audible: books go to **Wanted** and Narratarr finds them on your indexers (or free on LibriVox) |
 | **Open Library** *(with Prowlarr)* | Millions of books, including ones that were never made into audiobooks: trending, by subject, or by search | Like the Audible catalog: books go to **Wanted**, as ebooks unless you pick otherwise |
 

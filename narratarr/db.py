@@ -62,6 +62,11 @@ MIGRATIONS = {
     "release": "TEXT NOT NULL DEFAULT ''",
     "download_client": "TEXT NOT NULL DEFAULT ''",  # which client holds the job: sabnzbd, nzbget, qbittorrent…
     "client_job_id": "TEXT NOT NULL DEFAULT ''",  # that client's id for it (an nzo_id, NZBID or info hash)
+    # A book waits from `retry_at` when the download client was unreachable, rather than failing.
+    # `client_retries` counts the attempts, so an outage that outlasts them still ends in a failure
+    # a person can see instead of a queue that never drains.
+    "retry_at": "REAL",
+    "client_retries": "INTEGER NOT NULL DEFAULT 0",
     "release_url": "TEXT NOT NULL DEFAULT ''",  # the search result a Wanted book was grabbed from
     "import_mode": "TEXT NOT NULL DEFAULT ''",  # local imports: "copy" or "move"
     "asin": "TEXT NOT NULL DEFAULT ''",
@@ -205,7 +210,7 @@ def init() -> None:
         )
         # Anything mid-flight when the app last stopped goes back in the queue.
         conn.execute(
-            f"UPDATE books SET status='queued', speed=0 WHERE status IN ({','.join('?' * len(ACTIVE))})",
+            f"UPDATE books SET status='queued', speed=0, retry_at=NULL WHERE status IN ({','.join('?' * len(ACTIVE))})",
             ACTIVE,
         )
 
@@ -305,8 +310,14 @@ def delete(book_id: int) -> None:
 
 
 def next_queued(exclude: set[int]) -> dict | None:
+    """The next book to start. A book waiting out a download-client outage stays out of the queue
+    until its retry time, so an unreachable client doesn't spin through the whole queue."""
     with connect() as conn:
-        rows = conn.execute("SELECT * FROM books WHERE status='queued' ORDER BY updated_at ASC").fetchall()
+        rows = conn.execute(
+            "SELECT * FROM books WHERE status='queued' AND (retry_at IS NULL OR retry_at <= ?) "
+            "ORDER BY updated_at ASC",
+            (time.time(),),
+        ).fetchall()
     for r in rows:
         if r["id"] not in exclude:
             return _row(r)

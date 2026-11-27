@@ -2394,36 +2394,13 @@ function Settings(root, page) {
 
       <section class="panel" data-page="search">
         <div class="ph ph-row">
-          <div><h3>Torznab</h3><p class="desc">Optional. Any indexer that speaks Torznab: <b>Jackett</b>, Prowlarr’s own Torznab endpoint, or a standalone indexer. Searched alongside Prowlarr, for Discover and for your Wanted list.</p></div>
+          <div><h3>Torznab</h3><p class="desc">Optional. Any indexer that speaks Torznab: <b>Jackett</b>, Prowlarr’s own Torznab endpoint, or a standalone indexer. Add as many as you like and name each one, so Discover and your routing rules can tell them apart. Searched alongside Prowlarr, for Discover and for your Wanted list.</p></div>
           <span class="state-chip ok" id="torznab-chip" ${s.torznab_configured ? "" : "hidden"}><i class="dot ok"></i>Connected</span>
         </div>
         <div class="body">
-          <div class="set-grid">
-            <div class="field"><label for="torznab_url">Address</label><input class="input mono" id="torznab_url" name="torznab_url" placeholder="http://localhost:9117/api/v2.0/indexers/all/results/torznab/api" value="${esc(s.torznab_url)}" /><span class="hint">The full address ending in <code>/torznab/api</code>, not the Jackett dashboard.</span></div>
-            <div class="field">
-              <label for="torznab_api_key">API key</label>
-              <div class="input-row">
-                <input class="input mono" id="torznab_api_key" name="torznab_api_key" type="password" placeholder="Jackett → the key at the top of its dashboard" value="${esc(s.torznab_api_key)}" />
-                <button class="btn" type="button" id="test-torznab">Test</button>
-              </div>
-            </div>
-          </div>
+          <div id="torznab-list"></div>
+          <button class="btn" type="button" id="torznab-add">Add an indexer</button>
           <div id="torznab-result"></div>
-          <details class="set-more">
-            <summary>Categories</summary>
-            <div class="set-grid">
-              <div class="field">
-                <label for="torznab_categories">Audiobooks</label>
-                <input class="input mono" id="torznab_categories" name="torznab_categories" value="${esc(s.torznab_categories)}" />
-                <span class="hint"><code>3030</code> is Audio › Audiobook. Separate several with commas.</span>
-              </div>
-              <div class="field">
-                <label for="torznab_ebook_categories">Ebooks</label>
-                <input class="input mono" id="torznab_ebook_categories" name="torznab_ebook_categories" value="${esc(s.torznab_ebook_categories)}" />
-                <span class="hint"><code>7020</code> is Books › EBook.</span>
-              </div>
-            </div>
-          </details>
         </div>
       </section>
 
@@ -2453,6 +2430,19 @@ function Settings(root, page) {
             <div class="field"><label for="path_remote">Your client saves to</label><input class="input mono" id="path_remote" name="path_remote" placeholder="e.g. /downloads" value="${esc(s.path_remote)}" /></div>
             <span class="arrow" aria-hidden="true">${I.chevron}</span>
             <div class="field"><label for="path_local">Narratarr sees it at</label><input class="input mono" id="path_local" name="path_local" placeholder="e.g. /data/downloads" value="${esc(s.path_local)}" /></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" data-page="downloads">
+        <div class="ph"><h3>When a client can’t be reached</h3><p class="desc">A download client that is down for a minute shouldn’t cost you the book: the download is usually still running in it. Narratarr waits these long between attempts, then gives up and says why.</p></div>
+        <div class="body">
+          <div class="set-grid">
+            <div class="field">
+              <label for="client_retry_minutes">Wait between attempts (minutes)</label>
+              <input class="input mono" id="client_retry_minutes" name="client_retry_minutes" value="${esc(s.client_retry_minutes)}" placeholder="1, 5, 15, 30" />
+              <span class="hint">Comma-separated, one wait per attempt. Empty means don’t retry at all.</span>
+            </div>
           </div>
         </div>
       </section>
@@ -3307,6 +3297,101 @@ function Settings(root, page) {
     spinBtn(e.currentTarget, false);
   };
 
+  // ---- Torznab indexers, as a list ----------------------------------------------------------
+  // Several endpoints can be configured, each carrying the name the user gives it: "Torznab" twice
+  // would tell nobody which indexer a Discover tab, a result or a routing rule refers to. The list
+  // is rendered and posted as JSON in a hidden input, like the download clients above.
+  const torznabBox = $("#torznab-list", root);
+  const adoptTorznab = (list) => {
+    torznabIndexers = (list || [])
+      .filter((e) => e && (e.configured || e.url || e.api_key))
+      .map((e) => ({ id: e.id || "", name: e.name || "", url: e.url || "", api_key: e.api_key || "",
+                     categories: e.categories || "3030", ebook_categories: e.ebook_categories || "7020" }));
+  };
+  let torznabIndexers = [];
+  adoptTorznab(s.torznab_indexers);
+
+  const torznabField = (i, k, label, value, opts = "") => `
+    <div class="field"><label>${label}</label>
+      <input class="input ${opts.includes("mono") ? "mono" : ""}" data-i="${i}" data-k="${k}" value="${esc(value)}" /></div>`;
+
+  function drawTorznab() {
+    if (!torznabBox) return;
+    torznabBox.innerHTML = torznabIndexers.length ? torznabIndexers.map((indexer, i) => `
+      <div class="client-card" data-card="${i}">
+        <div class="client-head">
+          <b>${esc(indexer.name || "New indexer")}</b>
+          <button class="btn sm ghost" type="button" data-act="remove">Remove</button>
+        </div>
+        <div class="set-grid">
+          ${torznabField(i, "name", "Name", indexer.name, "mono")}
+          ${torznabField(i, "url", "Address", indexer.url, "mono")}
+          <div class="field">
+            <label>API key</label>
+            <div class="input-row">
+              <input class="input mono" type="password" data-i="${i}" data-k="api_key" value="${esc(indexer.api_key)}" />
+              <button class="btn" type="button" data-act="test">Test</button>
+            </div>
+          </div>
+        </div>
+        <span class="hint">The address ends in <code>/torznab/api</code>, not the Jackett dashboard.</span>
+        <details class="set-more">
+          <summary>Categories</summary>
+          <div class="set-grid">
+            ${grid(i, "categories", "Audiobooks", indexer.categories, "mono")}
+            ${grid(i, "ebook_categories", "Ebooks", indexer.ebook_categories, "mono")}
+          </div>
+          <span class="hint"><code>3030</code> is Audio › Audiobook and <code>7020</code> is Books › EBook.</span>
+        </details>
+        <div data-note="${i}"></div>
+      </div>`).join("")
+      : `<p class="desc">No Torznab indexers yet. Add one for Jackett, Prowlarr’s Torznab endpoint, or a standalone indexer.</p>`;
+  }
+
+  const syncTorznab = () => { hidden("torznab_indexers", JSON.stringify(torznabIndexers)); dirty(); };
+
+  if (torznabBox) {
+    torznabBox.addEventListener("input", (e) => {
+      const i = e.target.dataset.i;
+      const k = e.target.dataset.k;
+      if (i === undefined || !k) return;
+      torznabIndexers[Number(i)][k] = e.target.value;
+      syncTorznab();
+    });
+    torznabBox.addEventListener("click", async (e) => {
+      const btn = e.target.closest("[data-act]");
+      if (!btn) return;
+      const card = btn.closest("[data-card]");
+      if (!card) return;
+      const i = Number(card.dataset.card);
+      if (btn.dataset.act === "remove") {
+        torznabIndexers.splice(i, 1);
+        drawTorznab(); syncTorznab();
+        return;
+      }
+      if (btn.dataset.act === "test") {
+        spinBtn(btn, true);
+        try {
+          // The endpoint tests what is saved, so a typed address or key is saved first. That save
+          // also gives a new card its id, which is what the test names.
+          await save(true);
+          const note = torznabBox.querySelector(`[data-note="${i}"]`);
+          const got = await api("/api/settings/test-torznab", { method: "POST", body: { id: torznabIndexers[i]?.id || "" } });
+          if (note) note.innerHTML = okLine(`Connected to ${esc(got.title)} · book search ${got.book_search ? "<b>available</b>" : "not offered"} · <b>${got.categories}</b> categories`);
+        } catch (err) {
+          const note = torznabBox.querySelector(`[data-note="${i}"]`);
+          if (note) note.innerHTML = `<div class="rd-result bad">${esc(err.message)}</div>`;
+        }
+        spinBtn(btn, false);
+      }
+    });
+    $("#torznab-add", root).onclick = () => {
+      torznabIndexers.push({ id: "", name: "", url: "", api_key: "", categories: "3030", ebook_categories: "7020" });
+      drawTorznab(); syncTorznab();
+    };
+    drawTorznab();
+  }
+
   const collect = () => {
     const data = Object.fromEntries(new FormData(form));
     // A form leaves an unticked box out and sends a ticked one as "on", so a switch could be turned on
@@ -3328,10 +3413,12 @@ function Settings(root, page) {
     }
     // The list comes back with its secrets masked, so a typed password doesn't stay in the page.
     adoptClients(state.settings.clients);
+    adoptTorznab(state.settings.torznab_indexers);
     defaultClient = state.settings.default_client || "";
     fallbackClient = state.settings.debrid_fallback_client || "";
     try { defaults = { torrent: "", usenet: "", ...((await api("/api/download-clients")).defaults || {}) }; } catch { fillDefaults(); }
     drawClients(); drawRoutes(); sync();
+    drawTorznab(); syncTorznab();
     state.sources = await api("/api/sources"); // the Prowlarr tab appears once it's set up
     updateRdPill();
     if (absConnected() === $("#abs-connected", root).hidden) absShow(); // a pasted API key just connected it
@@ -3461,7 +3548,6 @@ function Settings(root, page) {
       : `<br><small class="warn">None of them offer ebooks (category ${esc(cats)}). Add an indexer that does in Prowlarr to find ebooks.</small>`;
     return `Connected to Prowlarr ${esc(r.version)} · <b>${r.indexers}</b> indexer${r.indexers === 1 ? "" : "s"} enabled${ebooks}`;
   });
-  tester("torznab", (r) => `Connected to ${esc(r.title)} · book search ${r.book_search ? "<b>available</b>" : "not offered"} · <b>${r.categories}</b> categories`);
   // Notifications: each destination saves on its own, like people on the Users page, not with the save bar.
   // The editor's fields have no names, so the Settings form (and its save bar) never sees them.
   const notifyList = $("#notify-list", root);
